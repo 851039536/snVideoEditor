@@ -511,7 +511,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="split-merge-page max-w-6xl mx-auto animate-slide-up">
+  <div class="max-w-6xl mx-auto animate-slide-up">
     <!-- Header -->
     <header class="mb-4">
       <div class="flex items-center gap-3 mb-1">
@@ -541,7 +541,7 @@ onUnmounted(() => {
     </div>
 
     <!-- ========== SPLIT MODE ========== -->
-    <div v-if="mode === 'split'" class="space-y-4">
+    <div v-if="mode === 'split'" class="space-y-3">
       <!-- No file => drop zone -->
       <FileDropZone v-if="files.length === 0" @files-selected="addFiles" />
 
@@ -612,8 +612,8 @@ onUnmounted(() => {
         </div>
 
         <!-- Timeline Bar -->
-        <div class="glass-card p-5" style="overflow: visible;">
-          <h3 class="text-sm font-semibold text-text-primary mb-4">裁剪时间轴</h3>
+        <div class="glass-card p-4" style="overflow: visible;">
+          <h3 class="text-sm font-semibold text-text-primary mb-3">裁剪时间轴</h3>
 
           <!-- The timeline -->
           <div
@@ -668,9 +668,9 @@ onUnmounted(() => {
         </div>
 
         <!-- Fine-tuning inputs -->
-        <div class="glass-card p-5">
-          <h3 class="text-sm font-semibold text-text-primary mb-3">精确调整（可选）</h3>
-          <div class="flex items-center gap-4 flex-wrap">
+        <div class="glass-card p-4">
+          <h3 class="text-sm font-semibold text-text-primary mb-2">精确调整（可选）</h3>
+          <div class="flex items-center gap-3 flex-wrap">
             <div class="flex items-center gap-1.5">
               <span class="text-xs text-text-secondary w-12">开始</span>
               <input v-model="startHour" class="time-input" maxlength="2" />
@@ -692,7 +692,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Cut-to-list action -->
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-3">
           <button
             @click="cutToClipList"
             :disabled="clipDurationSec <= 0 || cuttingInProgress"
@@ -715,8 +715,8 @@ onUnmounted(() => {
         </div>
 
         <!-- Clips List -->
-        <div v-if="clips.length > 0" class="glass-card p-5">
-          <h3 class="text-sm font-semibold text-text-primary mb-3">
+        <div v-if="clips.length > 0" class="glass-card p-4">
+          <h3 class="text-sm font-semibold text-text-primary mb-2">
             已裁切片段
             <span class="text-xs text-text-muted font-normal ml-2">（{{ clips.length }} 个）</span>
           </h3>
@@ -768,9 +768,9 @@ onUnmounted(() => {
     </div>
 
     <!-- ========== MERGE MODE ========== -->
-    <div v-else class="space-y-5">
+    <div v-else class="space-y-3">
       <!-- Clips list (from split) -->
-      <div v-if="clips.length > 0" class="glass-card p-5">
+      <div v-if="clips.length > 0" class="glass-card p-4">
         <h3 class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
           裁切片断
           <span class="text-xs text-text-muted font-normal">（勾选 {{ selectedClipCount }} / {{ clips.length }}）</span>
@@ -866,8 +866,8 @@ onUnmounted(() => {
       </div>
 
       <!-- Output settings -->
-      <div class="glass-card p-5">
-        <h3 class="text-sm font-semibold text-text-primary mb-3">输出设置</h3>
+      <div class="glass-card p-4">
+        <h3 class="text-sm font-semibold text-text-primary mb-2">输出设置</h3>
         <div class="flex items-center gap-3">
           <button
             @click="selectOutputPath"
@@ -924,10 +924,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.split-merge-page {
-  padding-bottom: 24px;
-}
-
 /* ---- Video Player ---- */
 .video-player-container {
   overflow: hidden;

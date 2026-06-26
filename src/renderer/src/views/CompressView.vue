@@ -174,9 +174,9 @@ const canStart = computed((): boolean => {
       <p class="text-text-secondary text-sm">智能压缩视频文件大小，支持 H.264 / H.265 编码</p>
     </header>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <!-- Left: File List -->
-      <div class="space-y-4">
+      <div class="space-y-3">
         <FileDropZone @files-selected="addFiles" />
 
         <!-- File Table -->
@@ -225,10 +225,10 @@ const canStart = computed((): boolean => {
       </div>
 
       <!-- Right: Parameters -->
-      <div class="space-y-4">
+      <div class="space-y-3">
         <!-- Compression Presets -->
-        <div class="glass-card p-5">
-          <h3 class="text-base font-semibold text-text-primary mb-4">压缩预设</h3>
+        <div class="glass-card p-4">
+          <h3 class="text-base font-semibold text-text-primary mb-3">压缩预设</h3>
           <div class="grid grid-cols-2 gap-2">
             <button
               v-for="p in settingsStore.compressPresets"
@@ -260,7 +260,7 @@ const canStart = computed((): boolean => {
 
         <!-- Custom Parameters -->
         <Transition name="fade">
-          <div v-if="customMode" class="glass-card p-5 space-y-4">
+          <div v-if="customMode" class="glass-card p-4 space-y-3">
             <h3 class="text-base font-semibold text-text-primary">自定义参数</h3>
 
             <!-- CRF Slider -->
@@ -319,7 +319,7 @@ const canStart = computed((): boolean => {
         </Transition>
 
         <!-- Output -->
-        <div class="glass-card p-5">
+        <div class="glass-card p-4">
           <h3 class="text-base font-semibold text-text-primary mb-3">输出设置</h3>
           <button
             @click="selectOutputDir"

@@ -9,7 +9,7 @@ import TitleBar from './components/TitleBar.vue'
     <TitleBar />
     <div class="flex flex-1 overflow-hidden">
       <SideNav />
-      <main class="flex-1 overflow-auto p-6 animate-fade-in">
+      <main class="flex-1 overflow-auto p-4 animate-fade-in">
         <RouterView v-slot="{ Component, route }">
           <Transition name="page" mode="out-in">
             <component :is="Component" :key="route.path" />

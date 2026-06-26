@@ -228,9 +228,9 @@ function switchMode(newMode: 'encrypt' | 'decrypt'): void {
       </button>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <!-- Left: File Area -->
-      <div class="space-y-4">
+      <div class="space-y-3">
         <FileDropZone @files-selected="addFiles" />
 
         <!-- Directory Scan Button -->
@@ -262,10 +262,10 @@ function switchMode(newMode: 'encrypt' | 'decrypt'): void {
       </div>
 
       <!-- Right: Parameters -->
-      <div class="space-y-4">
+      <div class="space-y-3">
         <!-- Password -->
-        <div class="glass-card p-5">
-          <h3 class="text-base font-semibold text-text-primary mb-4">
+        <div class="glass-card p-4">
+          <h3 class="text-base font-semibold text-text-primary mb-3">
             {{ mode === 'encrypt' ? '设置密码' : '输入密码' }}
           </h3>
 
@@ -319,7 +319,7 @@ function switchMode(newMode: 'encrypt' | 'decrypt'): void {
         </div>
 
         <!-- Output -->
-        <div class="glass-card p-5">
+        <div class="glass-card p-4">
           <h3 class="text-base font-semibold text-text-primary mb-3">输出设置</h3>
           <button
             @click="selectOutputDirForAll"
