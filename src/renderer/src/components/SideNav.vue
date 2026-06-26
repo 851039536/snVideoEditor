@@ -117,10 +117,10 @@ const navWidth = computed((): string => {
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md, 8px);
   background: linear-gradient(135deg, rgba(91, 141, 239, 0.08), rgba(167, 139, 250, 0.08));
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.12s ease;
 }
 
 .nav-item:hover::after {
@@ -128,12 +128,12 @@ const navWidth = computed((): string => {
 }
 
 .nav-item.active {
-  background: rgba(91, 141, 239, 0.1);
+  background: hsl(var(--primary) / 0.1);
 }
 
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity 0.12s ease;
 }
 
 .fade-enter-from,

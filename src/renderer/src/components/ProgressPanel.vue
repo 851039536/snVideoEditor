@@ -84,7 +84,7 @@ const statusText = computed((): string => {
 <style scoped>
 .slide-up-enter-active,
 .slide-up-leave-active {
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
 }
 
 .slide-up-enter-from,

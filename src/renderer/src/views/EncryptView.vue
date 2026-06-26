@@ -376,27 +376,27 @@ function switchMode(newMode: 'encrypt' | 'decrypt'): void {
 <style scoped>
 .input-field {
   padding: 10px 14px;
-  background: #21262D;
-  border: 1px solid #30363D;
-  border-radius: 8px;
-  color: #E6EDF3;
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md, 8px);
+  color: hsl(var(--foreground));
   font-size: 14px;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.12s;
 }
 
 .input-field:focus {
-  border-color: #5B8DEF;
+  border-color: hsl(var(--primary));
 }
 
 .input-field::placeholder {
-  color: #484F58;
+  color: hsl(var(--muted-foreground));
 }
 
 code {
-  background: rgba(91, 141, 239, 0.1);
+  background: hsl(var(--primary) / 0.1);
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: calc(var(--radius-sm, 4px) - 1px);
   font-size: 12px;
 }
 </style>

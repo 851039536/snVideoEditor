@@ -359,19 +359,19 @@ const canStart = computed((): boolean => {
 
 <style scoped>
 .preset-btn:hover {
-  border-color: rgba(123, 92, 252, 0.3);
-  background: rgba(123, 92, 252, 0.05);
+  border-color: hsl(var(--primary) / 0.3);
+  background: hsl(var(--primary) / 0.05);
 }
 
 .select-input {
   padding: 8px 12px;
-  background: #21262D;
-  border: 1px solid #30363D;
-  border-radius: 8px;
-  color: #E6EDF3;
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md, 8px);
+  color: hsl(var(--foreground));
   font-size: 14px;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.12s;
   appearance: none;
   background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%238B949E' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
   background-repeat: no-repeat;
@@ -381,7 +381,7 @@ const canStart = computed((): boolean => {
 }
 
 .select-input:focus {
-  border-color: #7C5CFC;
+  border-color: hsl(var(--primary));
 }
 
 .slider {
@@ -399,15 +399,15 @@ const canStart = computed((): boolean => {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #E6EDF3;
-  border: 2px solid #7C5CFC;
+  background: hsl(var(--foreground));
+  border: 2px solid hsl(var(--primary));
   cursor: pointer;
   box-shadow: 0 0 8px rgba(123, 92, 252, 0.4);
 }
 
 .fade-enter-active,
 .fade-leave-active {
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
 }
 
 .fade-enter-from,

@@ -942,7 +942,7 @@ onUnmounted(() => {
   position: relative;
   width: 100%;
   height: 48px;
-  background: #161B22;
+  background: hsl(var(--background));
   border-radius: 10px;
   display: flex;
   overflow: visible;
@@ -961,7 +961,7 @@ onUnmounted(() => {
   position: relative;
   height: 100%;
   background: linear-gradient(90deg, rgba(91, 141, 239, 0.3), rgba(167, 139, 250, 0.35));
-  border-left: 2px solid #5B8DEF;
+  border-left: 2px solid hsl(var(--primary));
   border-right: 2px solid #A78BFA;
   flex-shrink: 0;
 }
@@ -972,7 +972,7 @@ onUnmounted(() => {
   width: 2px;
   height: 100%;
   background: #FF6B6B;
-  box-shadow: 0 0 6px rgba(255, 107, 107, 0.7);
+  outline: 1px solid rgba(255, 107, 107, 0.3);
   z-index: 5;
   transition: left 0.1s linear;
   pointer-events: none;
@@ -1011,14 +1011,14 @@ onUnmounted(() => {
   width: 3px;
   height: 60%;
   border-radius: 2px;
-  background: #E6EDF3;
+  background: hsl(var(--foreground));
   opacity: 0.8;
-  transition: opacity 0.15s, background 0.15s;
+  transition: opacity 0.12s, background 0.12s;
 }
 
 .trim-handle:hover::after {
   opacity: 1;
-  background: #FFF;
+  background: hsl(var(--foreground));
 }
 
 .trim-handle-start::before,
@@ -1042,16 +1042,16 @@ onUnmounted(() => {
   text-align: center;
   font-size: 13px;
   font-family: monospace;
-  background: #21262D;
-  border: 1px solid #30363D;
-  border-radius: 6px;
-  color: #E6EDF3;
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-base, 6px);
+  color: hsl(var(--foreground));
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.12s;
 }
 
 .time-input:focus {
-  border-color: #5B8DEF;
+  border-color: hsl(var(--primary));
 }
 
 /* ---- Responsive ---- */
