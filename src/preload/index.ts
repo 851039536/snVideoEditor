@@ -25,6 +25,10 @@ export interface FileInfo {
 }
 
 const electronAPI = {
+  // App info
+  getTempDir: (): Promise<string> =>
+    ipcRenderer.invoke('app:getTempDir'),
+
   // File operations
   selectVideoFiles: (): Promise<string[]> =>
     ipcRenderer.invoke('file:selectVideoFiles'),

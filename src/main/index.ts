@@ -19,6 +19,16 @@ import type { ProgressInfo } from '../preload/index'
 // Track active operations for cancellation
 let activeProcess: { cancel: () => void } | null = null
 
+// Temp directory for clip segments
+function getTempClipsDir(): string {
+  const dir = join(app.getPath('temp'), 'sn-video-clips')
+  const fs = require('fs')
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true })
+  }
+  return dir
+}
+
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1200,
@@ -223,6 +233,13 @@ function registerCryptoHandlers(): void {
   })
 }
 
+// App info handlers
+function registerAppHandlers(): void {
+  ipcMain.handle('app:getTempDir', async () => {
+    return getTempClipsDir()
+  })
+}
+
 // Cancel operation
 function registerCancelHandler(): void {
   ipcMain.handle('operation:cancel', async () => {
@@ -276,6 +293,7 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  registerAppHandlers()
   registerFileHandlers()
   registerSplitMergeHandlers()
   registerCompressHandlers()

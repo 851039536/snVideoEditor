@@ -18,6 +18,17 @@ interface VideoMeta {
   size: number
 }
 
+interface ClipItem {
+  id: string
+  sourceFile: string
+  sourceFileName: string
+  startSec: number
+  endSec: number
+  duration: number
+  outputFile: string
+  selected: boolean
+}
+
 const store = useProgressStore()
 
 // ---- Mode ----
@@ -54,6 +65,11 @@ const outputName = ref('')
 const outputDir = ref('')
 const errorMsg = ref('')
 
+// ---- Clip list ----
+const clips = ref<ClipItem[]>([])
+const cuttingInProgress = ref(false)
+let clipIdCounter = 0
+
 // ---- Computed ----
 
 const videoSrc = computed((): string => {
@@ -79,11 +95,14 @@ const clipDurationStr = computed((): string => {
 
 const canStart = computed((): boolean => {
   if (mode.value === 'split') {
-    if (files.value.length === 0) { return false }
-    if (clipDurationSec.value <= 0) { return false }
-    return true
+    return false  // Split mode uses cutToClipList instead
   }
-  return files.value.length >= 2
+  const selectedClips = clips.value.filter((c) => c.selected)
+  return (selectedClips.length + files.value.length) >= 2
+})
+
+const selectedClipCount = computed((): number => {
+  return clips.value.filter((c) => c.selected).length
 })
 
 // Timeline bar percentages
@@ -129,7 +148,6 @@ function clamp(val: number, min: number, max: number): number {
 
 // Guard to prevent circular update: manual input ↔ trim time
 let syncingFromTrim = false
-let syncingFromInput = false
 
 function syncManualToTrim(): void {
   syncingFromTrim = true
@@ -144,13 +162,11 @@ function syncManualToTrim(): void {
 
 function syncTrimFromInputs(): void {
   if (syncingFromTrim) { return }
-  syncingFromInput = true
   const s = hmsToSeconds(startHour.value, startMin.value, startSec.value)
   const e = hmsToSeconds(endHour.value, endMin.value, endSec.value)
   const max = duration.value || 99999
   trimStartSec.value = clamp(s, 0, trimEndSec.value - 0.5)
   trimEndSec.value = clamp(e, trimStartSec.value + 0.5, max)
-  syncingFromInput = false
   if (videoPlayer.value) {
     videoPlayer.value.currentTime = trimStartSec.value
     currentTime.value = trimStartSec.value
@@ -353,6 +369,65 @@ function onGlobalMouseUp(): void {
   dragging.value = null
 }
 
+// ---- Clip list management ----
+
+async function cutToClipList(): Promise<void> {
+  if (clipDurationSec.value <= 0) {
+    errorMsg.value = '请选择有效的片段范围'
+    return
+  }
+
+  errorMsg.value = ''
+  cuttingInProgress.value = true
+
+  try {
+    const tempDir = await window.electronAPI.getTempDir()
+    clipIdCounter++
+    const clipId = `clip_${Date.now()}_${clipIdCounter}`
+    const outputFile = `${tempDir}/${clipId}.mp4`
+
+    const success = await window.electronAPI.splitVideo({
+      input: files.value[0],
+      output: outputFile,
+      startTime: startTimeStr.value,
+      duration: clipDurationStr.value
+    })
+
+    if (success) {
+      clips.value.push({
+        id: clipId,
+        sourceFile: files.value[0],
+        sourceFileName: getFileName(files.value[0]),
+        startSec: trimStartSec.value,
+        endSec: trimEndSec.value,
+        duration: clipDurationSec.value,
+        outputFile,
+        selected: true
+      })
+    }
+  } catch (e) {
+    errorMsg.value = `裁切失败: ${e instanceof Error ? e.message : String(e)}`
+  } finally {
+    cuttingInProgress.value = false
+  }
+}
+
+function removeClip(index: number): void {
+  clips.value.splice(index, 1)
+}
+
+function toggleClipSelection(index: number): void {
+  clips.value[index].selected = !clips.value[index].selected
+}
+
+function moveClip(index: number, direction: -1 | 1): void {
+  const newIndex = index + direction
+  if (newIndex < 0 || newIndex >= clips.value.length) { return }
+  const temp = clips.value[index]
+  clips.value[index] = clips.value[newIndex]
+  clips.value[newIndex] = temp
+}
+
 // ---- Output & Process ----
 
 async function selectOutputPath(): Promise<void> {
@@ -367,27 +442,28 @@ async function startProcess(): Promise<void> {
   errorMsg.value = ''
   if (!await validateOutput()) { return }
 
-  store.start(mode.value === 'split' ? 'split' : 'merge')
+  // Collect selected clip output files + external files
+  const selectedClipFiles = clips.value
+    .filter((c) => c.selected)
+    .map((c) => c.outputFile)
+  const allInputs = [...selectedClipFiles, ...files.value]
+
+  if (allInputs.length < 2) {
+    errorMsg.value = '至少需要 2 个文件才能合并'
+    return
+  }
+
+  store.start('merge')
 
   window.electronAPI.onProgress((info) => {
     store.update(info)
   })
 
   try {
-    let result = false
-    if (mode.value === 'split') {
-      result = await window.electronAPI.splitVideo({
-        input: files.value[0],
-        output: outputDir.value,
-        startTime: startTimeStr.value,
-        duration: clipDurationStr.value
-      })
-    } else {
-      result = await window.electronAPI.mergeVideos({
-        inputs: files.value,
-        output: outputDir.value
-      })
-    }
+    const result = await window.electronAPI.mergeVideos({
+      inputs: allInputs,
+      output: outputDir.value
+    })
     if (result) {
       store.finish()
     }
@@ -615,39 +691,70 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Output + Action -->
-        <div class="flex items-start gap-4">
-          <div class="flex-1 glass-card p-4">
-            <div class="flex items-center gap-3">
-              <button
-                @click="selectOutputPath"
-                class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary hover:bg-bg-primary text-text-secondary hover:text-text-primary transition-all text-sm border border-transparent hover:border-accent-blue/30"
-              >
-                <Folder :size="16" />
-                选择输出位置
-              </button>
-              <p v-if="outputDir" class="text-xs text-accent-light truncate flex-1">
-                {{ outputDir }}
-              </p>
-            </div>
-          </div>
-
+        <!-- Cut-to-list action -->
+        <div class="flex items-center gap-4">
           <button
-            @click="startProcess"
-            :disabled="!canStart || store.isProcessing"
+            @click="cutToClipList"
+            :disabled="clipDurationSec <= 0 || cuttingInProgress"
             class="px-8 py-2.5 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-            :class="canStart && !store.isProcessing
+            :class="clipDurationSec > 0 && !cuttingInProgress
               ? 'bg-gradient-to-r from-accent-blue to-accent-purple hover:shadow-lg hover:shadow-purple-500/25'
               : 'bg-bg-tertiary text-text-muted'"
           >
-            <template v-if="!store.isProcessing">
-              <Play :size="18" class="inline mr-2 -mt-0.5" />
-              开始裁剪
+            <template v-if="!cuttingInProgress">
+              <Scissors :size="18" class="inline mr-2 -mt-0.5" />
+              裁切到列表
             </template>
             <template v-else>
-              处理中...
+              裁切中...
             </template>
           </button>
+          <span class="text-xs text-text-muted">
+            片段将无损添加到下方列表，可切换至合并 Tab 统一拼接
+          </span>
+        </div>
+
+        <!-- Clips List -->
+        <div v-if="clips.length > 0" class="glass-card p-5">
+          <h3 class="text-sm font-semibold text-text-primary mb-3">
+            已裁切片段
+            <span class="text-xs text-text-muted font-normal ml-2">（{{ clips.length }} 个）</span>
+          </h3>
+          <div class="space-y-2 max-h-64 overflow-y-auto">
+            <div
+              v-for="(clip, idx) in clips"
+              :key="clip.id"
+              class="flex items-center gap-3 p-2.5 rounded-lg bg-bg-tertiary/50 hover:bg-bg-tertiary transition-colors group"
+            >
+              <!-- Checkbox -->
+              <input
+                type="checkbox"
+                :checked="clip.selected"
+                @change="toggleClipSelection(idx)"
+                class="w-4 h-4 rounded accent-accent-blue cursor-pointer"
+              />
+              <!-- Info -->
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-text-primary font-medium truncate">{{ clip.sourceFileName }}</span>
+                  <span class="text-xs text-text-muted font-mono flex-shrink-0">
+                    {{ secondsToHMS(clip.startSec) }} → {{ secondsToHMS(clip.endSec) }}
+                  </span>
+                </div>
+                <div class="text-xs text-text-muted mt-0.5">
+                  时长 {{ secondsToHMS(clip.duration) }}
+                </div>
+              </div>
+              <!-- Remove -->
+              <button
+                @click="removeClip(idx)"
+                class="p-1 rounded hover:bg-danger/20 transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
+                title="移除"
+              >
+                <X :size="14" class="text-danger" />
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Error -->
@@ -661,58 +768,107 @@ onUnmounted(() => {
     </div>
 
     <!-- ========== MERGE MODE ========== -->
-    <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <!-- Left: Files -->
-      <div class="space-y-4">
-        <FileDropZone @files-selected="addFiles" />
-
-        <div v-if="files.length > 0" class="glass-card p-4 space-y-2 max-h-80 overflow-y-auto">
+    <div v-else class="space-y-5">
+      <!-- Clips list (from split) -->
+      <div v-if="clips.length > 0" class="glass-card p-5">
+        <h3 class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+          裁切片断
+          <span class="text-xs text-text-muted font-normal">（勾选 {{ selectedClipCount }} / {{ clips.length }}）</span>
+        </h3>
+        <div class="space-y-2 max-h-64 overflow-y-auto">
           <div
-            v-for="(file, idx) in files"
-            :key="file"
-            class="flex items-center gap-2 p-2 rounded-lg bg-bg-tertiary/50 hover:bg-bg-tertiary transition-colors group"
+            v-for="(clip, idx) in clips"
+            :key="clip.id"
+            class="flex items-center gap-3 p-2.5 rounded-lg bg-bg-tertiary/50 hover:bg-bg-tertiary transition-colors group"
           >
-            <VideoPreview :file-path="file" />
-            <div class="flex flex-col gap-1 ml-auto">
+            <input
+              type="checkbox"
+              :checked="clip.selected"
+              @change="toggleClipSelection(idx)"
+              class="w-4 h-4 rounded accent-accent-blue cursor-pointer flex-shrink-0"
+            />
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-text-primary font-medium truncate">{{ clip.sourceFileName }}</span>
+                <span class="text-xs text-text-muted font-mono flex-shrink-0">
+                  {{ secondsToHMS(clip.startSec) }} → {{ secondsToHMS(clip.endSec) }}
+                </span>
+              </div>
+              <div class="text-xs text-text-muted mt-0.5">
+                时长 {{ secondsToHMS(clip.duration) }}
+              </div>
+            </div>
+            <!-- Reorder -->
+            <div class="flex flex-col gap-0.5">
               <button
-                @click="moveFile(idx, -1)"
+                @click="moveClip(idx, -1)"
                 :disabled="idx === 0"
                 class="p-0.5 rounded hover:bg-bg-primary disabled:opacity-30 transition-all"
               >
-                <ArrowUp :size="14" class="text-text-secondary" />
+                <ArrowUp :size="13" class="text-text-secondary" />
               </button>
               <button
-                @click="moveFile(idx, 1)"
-                :disabled="idx === files.length - 1"
+                @click="moveClip(idx, 1)"
+                :disabled="idx === clips.length - 1"
                 class="p-0.5 rounded hover:bg-bg-primary disabled:opacity-30 transition-all"
               >
-                <ArrowDown :size="14" class="text-text-secondary" />
+                <ArrowDown :size="13" class="text-text-secondary" />
               </button>
             </div>
             <button
-              @click="removeFile(idx)"
-              class="p-1 rounded hover:bg-danger/20 transition-all opacity-0 group-hover:opacity-100 ml-1"
+              @click="removeClip(idx)"
+              class="p-1 rounded hover:bg-danger/20 transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
+              title="移除"
             >
               <X :size="14" class="text-danger" />
             </button>
           </div>
         </div>
+        <p v-if="clips.length === 0" class="text-xs text-text-muted text-center py-4">
+          暂无片段，请先在裁剪模式下添加
+        </p>
       </div>
 
-      <!-- Right: Actions -->
-      <div class="space-y-4">
-        <div class="glass-card p-5">
-          <h3 class="text-base font-semibold text-text-primary mb-3">合并文件列表</h3>
-          <p class="text-sm text-text-secondary">
-            当前已添加 <span class="text-accent-blue font-semibold">{{ files.length }}</span> 个文件
-          </p>
-          <p class="text-xs text-text-muted mt-2">
-            使用箭头调整顺序，合并时按列表顺序拼接
-          </p>
-        </div>
+      <!-- External files -->
+      <FileDropZone @files-selected="addFiles" />
 
-        <div class="glass-card p-5">
-          <h3 class="text-base font-semibold text-text-primary mb-3">输出设置</h3>
+      <div v-if="files.length > 0" class="glass-card p-4 space-y-2 max-h-48 overflow-y-auto">
+        <h3 class="text-sm font-semibold text-text-primary mb-2">外部文件（{{ files.length }} 个）</h3>
+        <div
+          v-for="(file, idx) in files"
+          :key="file"
+          class="flex items-center gap-2 p-2 rounded-lg bg-bg-tertiary/50 hover:bg-bg-tertiary transition-colors group"
+        >
+          <VideoPreview :file-path="file" />
+          <div class="flex flex-col gap-1 ml-auto">
+            <button
+              @click="moveFile(idx, -1)"
+              :disabled="idx === 0"
+              class="p-0.5 rounded hover:bg-bg-primary disabled:opacity-30 transition-all"
+            >
+              <ArrowUp :size="14" class="text-text-secondary" />
+            </button>
+            <button
+              @click="moveFile(idx, 1)"
+              :disabled="idx === files.length - 1"
+              class="p-0.5 rounded hover:bg-bg-primary disabled:opacity-30 transition-all"
+            >
+              <ArrowDown :size="14" class="text-text-secondary" />
+            </button>
+          </div>
+          <button
+            @click="removeFile(idx)"
+            class="p-1 rounded hover:bg-danger/20 transition-all opacity-0 group-hover:opacity-100 ml-1"
+          >
+            <X :size="14" class="text-danger" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Output settings -->
+      <div class="glass-card p-5">
+        <h3 class="text-sm font-semibold text-text-primary mb-3">输出设置</h3>
+        <div class="flex items-center gap-3">
           <button
             @click="selectOutputPath"
             class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary hover:bg-bg-primary text-text-secondary hover:text-text-primary transition-all text-sm border border-transparent hover:border-accent-blue/30"
@@ -720,34 +876,49 @@ onUnmounted(() => {
             <Folder :size="16" />
             选择输出位置
           </button>
-          <p v-if="outputDir" class="text-xs text-accent-light mt-2 truncate">
+          <p v-if="outputDir" class="text-xs text-accent-light truncate flex-1">
             {{ outputDir }}
           </p>
         </div>
-
-        <div v-if="errorMsg" class="p-3 rounded-lg bg-danger/10 border border-danger/30">
-          <p class="text-sm text-danger">{{ errorMsg }}</p>
-        </div>
-
-        <button
-          @click="startProcess"
-          :disabled="!canStart || store.isProcessing"
-          class="w-full py-3 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
-          :class="canStart && !store.isProcessing
-            ? 'bg-gradient-to-r from-accent-blue to-accent-purple hover:shadow-lg hover:shadow-purple-500/25'
-            : 'bg-bg-tertiary text-text-muted'"
-        >
-          <template v-if="!store.isProcessing">
-            <Play :size="18" class="inline mr-2 -mt-0.5" />
-            开始合并
-          </template>
-          <template v-else>
-            处理中...
-          </template>
-        </button>
-
-        <ProgressPanel />
       </div>
+
+      <!-- Summary -->
+      <div v-if="selectedClipCount > 0 || files.length > 0" class="glass-card p-4">
+        <p class="text-sm text-text-secondary">
+          将合并
+          <span v-if="selectedClipCount > 0" class="text-accent-blue font-semibold">{{ selectedClipCount }}</span>
+          <span v-if="selectedClipCount > 0"> 个裁切片断</span>
+          <span v-if="selectedClipCount > 0 && files.length > 0"> + </span>
+          <span v-if="files.length > 0" class="text-accent-purple font-semibold">{{ files.length }}</span>
+          <span v-if="files.length > 0"> 个外部文件</span>
+        </p>
+        <p class="text-xs text-text-muted mt-1">
+          合并顺序：裁切片断（按列表顺序）→ 外部文件（按列表顺序）
+        </p>
+      </div>
+
+      <div v-if="errorMsg" class="p-3 rounded-lg bg-danger/10 border border-danger/30">
+        <p class="text-sm text-danger">{{ errorMsg }}</p>
+      </div>
+
+      <button
+        @click="startProcess"
+        :disabled="!canStart || store.isProcessing"
+        class="w-full py-3 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
+        :class="canStart && !store.isProcessing
+          ? 'bg-gradient-to-r from-accent-blue to-accent-purple hover:shadow-lg hover:shadow-purple-500/25'
+          : 'bg-bg-tertiary text-text-muted'"
+      >
+        <template v-if="!store.isProcessing">
+          <Play :size="18" class="inline mr-2 -mt-0.5" />
+          合并选中片段
+        </template>
+        <template v-else>
+          处理中...
+        </template>
+      </button>
+
+      <ProgressPanel />
     </div>
   </div>
 </template>

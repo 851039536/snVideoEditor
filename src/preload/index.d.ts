@@ -23,6 +23,9 @@ export interface FileInfo {
 }
 
 export interface ElectronAPI {
+  // App info
+  getTempDir: () => Promise<string>
+
   // File operations
   selectVideoFiles: () => Promise<string[]>
   selectSingleVideoFile: () => Promise<string | null>
