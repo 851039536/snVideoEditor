@@ -1,22 +1,22 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
 import SideNav from './components/SideNav.vue'
-
-const handleWindowMinimize = (): void => {
-  window.electron?.process?.platform
-}
+import TitleBar from './components/TitleBar.vue'
 </script>
 
 <template>
-  <div class="flex h-screen w-screen overflow-hidden bg-bg-primary">
-    <SideNav />
-    <main class="flex-1 overflow-auto p-6 animate-fade-in">
-      <RouterView v-slot="{ Component, route }">
-        <Transition name="page" mode="out-in">
-          <component :is="Component" :key="route.path" />
-        </Transition>
-      </RouterView>
-    </main>
+  <div class="flex flex-col h-screen w-screen overflow-hidden bg-bg-primary">
+    <TitleBar />
+    <div class="flex flex-1 overflow-hidden">
+      <SideNav />
+      <main class="flex-1 overflow-auto p-6 animate-fade-in">
+        <RouterView v-slot="{ Component, route }">
+          <Transition name="page" mode="out-in">
+            <component :is="Component" :key="route.path" />
+          </Transition>
+        </RouterView>
+      </main>
+    </div>
   </div>
 </template>
 

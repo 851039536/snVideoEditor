@@ -42,8 +42,8 @@ const navWidth = computed((): string => {
     :style="{ width: navWidth }"
   >
     <!-- Logo Header -->
-    <div class="h-14 flex items-center justify-center border-b border-bg-tertiary drag-region">
-      <div class="flex items-center gap-2 no-drag">
+    <div class="h-14 flex items-center justify-center border-b border-bg-tertiary">
+      <div class="flex items-center gap-2">
         <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent-blue to-accent-purple flex items-center justify-center">
           <Video :size="16" class="text-white" />
         </div>
@@ -64,7 +64,7 @@ const navWidth = computed((): string => {
         v-for="item in navItems"
         :key="item.path"
         @click="router.push(item.path)"
-        class="nav-item no-drag flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative"
+        class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative"
         :class="isActive(item.path) ? 'active' : ''"
       >
         <component 
@@ -95,7 +95,7 @@ const navWidth = computed((): string => {
     <div class="p-2 border-t border-bg-tertiary">
       <button
         @click="toggleCollapsed"
-        class="no-drag w-full flex items-center justify-center p-2 rounded-lg hover:bg-bg-tertiary transition-colors duration-200"
+        class="w-full flex items-center justify-center p-2 rounded-lg hover:bg-bg-tertiary transition-colors duration-200"
       >
         <component 
           :is="collapsed ? ChevronRight : ChevronLeft"

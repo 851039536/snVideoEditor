@@ -124,7 +124,33 @@ const electronAPI = {
 
   // Cancel
   cancelOperation: (): Promise<boolean> =>
-    ipcRenderer.invoke('operation:cancel')
+    ipcRenderer.invoke('operation:cancel'),
+
+  // Window controls
+  windowMinimize: (): void => {
+    ipcRenderer.send('window:minimize')
+  },
+
+  windowMaximize: (): void => {
+    ipcRenderer.send('window:maximize')
+  },
+
+  windowClose: (): void => {
+    ipcRenderer.send('window:close')
+  },
+
+  windowIsMaximized: (): Promise<boolean> =>
+    ipcRenderer.invoke('window:isMaximized'),
+
+  onMaximizeChange: (callback: (isMaximized: boolean) => void): void => {
+    ipcRenderer.on('window:maximizeChange', (_event, isMaximized: boolean) => {
+      callback(isMaximized)
+    })
+  },
+
+  removeMaximizeChangeListener: (): void => {
+    ipcRenderer.removeAllListeners('window:maximizeChange')
+  }
 }
 
 if (process.contextIsolated) {

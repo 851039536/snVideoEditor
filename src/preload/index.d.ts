@@ -89,6 +89,14 @@ export interface ElectronAPI {
 
   // Cancel
   cancelOperation: () => Promise<boolean>
+
+  // Window controls
+  windowMinimize: () => void
+  windowMaximize: () => void
+  windowClose: () => void
+  windowIsMaximized: () => Promise<boolean>
+  onMaximizeChange: (callback: (isMaximized: boolean) => void) => void
+  removeMaximizeChangeListener: () => void
 }
 
 declare global {

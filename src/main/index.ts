@@ -41,6 +41,14 @@ function createWindow(): void {
     mainWindow.show()
   })
 
+  mainWindow.on('maximize', () => {
+    mainWindow.webContents.send('window:maximizeChange', true)
+  })
+
+  mainWindow.on('unmaximize', () => {
+    mainWindow.webContents.send('window:maximizeChange', false)
+  })
+
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
@@ -225,6 +233,39 @@ function registerCancelHandler(): void {
   })
 }
 
+// Window controls
+function registerWindowHandlers(): void {
+  ipcMain.on('window:minimize', () => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (win) {
+      win.minimize()
+    }
+  })
+
+  ipcMain.on('window:maximize', () => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (win) {
+      if (win.isMaximized()) {
+        win.unmaximize()
+      } else {
+        win.maximize()
+      }
+    }
+  })
+
+  ipcMain.on('window:close', () => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (win) {
+      win.close()
+    }
+  })
+
+  ipcMain.handle('window:isMaximized', () => {
+    const win = BrowserWindow.getFocusedWindow()
+    return win ? win.isMaximized() : false
+  })
+}
+
 // ---- App Lifecycle ----
 
 app.whenReady().then(() => {
@@ -239,6 +280,7 @@ app.whenReady().then(() => {
   registerCompressHandlers()
   registerCryptoHandlers()
   registerCancelHandler()
+  registerWindowHandlers()
 
   createWindow()
 
