@@ -127,22 +127,30 @@ function clamp(val: number, min: number, max: number): number {
 
 // ---- Sync trim times <-> manual inputs ----
 
+// Guard to prevent circular update: manual input ↔ trim time
+let syncingFromTrim = false
+let syncingFromInput = false
+
 function syncManualToTrim(): void {
+  syncingFromTrim = true
   startHour.value = String(Math.floor(trimStartSec.value / 3600)).padStart(2, '0')
   startMin.value = String(Math.floor((trimStartSec.value % 3600) / 60)).padStart(2, '0')
   startSec.value = String(Math.floor(trimStartSec.value % 60)).padStart(2, '0')
   endHour.value = String(Math.floor(trimEndSec.value / 3600)).padStart(2, '0')
   endMin.value = String(Math.floor((trimEndSec.value % 3600) / 60)).padStart(2, '0')
   endSec.value = String(Math.floor(trimEndSec.value % 60)).padStart(2, '0')
+  syncingFromTrim = false
 }
 
 function syncTrimFromInputs(): void {
+  if (syncingFromTrim) { return }
+  syncingFromInput = true
   const s = hmsToSeconds(startHour.value, startMin.value, startSec.value)
   const e = hmsToSeconds(endHour.value, endMin.value, endSec.value)
   const max = duration.value || 99999
   trimStartSec.value = clamp(s, 0, trimEndSec.value - 0.5)
   trimEndSec.value = clamp(e, trimStartSec.value + 0.5, max)
-  syncManualToTrim()
+  syncingFromInput = false
   if (videoPlayer.value) {
     videoPlayer.value.currentTime = trimStartSec.value
     currentTime.value = trimStartSec.value
@@ -304,30 +312,23 @@ function getTimelineTime(clientX: number): number {
   return pct * duration.value
 }
 
-function onTimelineMouseDown(e: MouseEvent): void {
-  const target = e.target as HTMLElement
-  // Use data-handle attribute for reliable detection (not affected by pseudo-elements)
-  const handle = target.closest('[data-handle]') as HTMLElement | null
-  if (handle) {
-    const handleType = handle.getAttribute('data-handle')
-    if (handleType === 'start') {
-      dragging.value = 'start'
-      e.preventDefault()
-    } else if (handleType === 'end') {
-      dragging.value = 'end'
-      e.preventDefault()
-    }
-  } else {
-    // Click on timeline bar => seek to position
-    const t = getTimelineTime(e.clientX)
-    if (videoPlayer.value) {
-      videoPlayer.value.currentTime = t
-      currentTime.value = t
-    }
+function startHandleDrag(handle: 'start' | 'end', e: MouseEvent): void {
+  dragging.value = handle
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+function onTimelineClick(e: MouseEvent): void {
+  // Only seek on direct timeline click (not handle drag)
+  if (dragging.value) { return }
+  const t = getTimelineTime(e.clientX)
+  if (videoPlayer.value) {
+    videoPlayer.value.currentTime = t
+    currentTime.value = t
   }
 }
 
-function onTimelineMouseMove(e: MouseEvent): void {
+function onTimelineMove(e: MouseEvent): void {
   if (!dragging.value) { return }
   const t = getTimelineTime(e.clientX)
   if (dragging.value === 'start') {
@@ -343,11 +344,9 @@ function onTimelineMouseMove(e: MouseEvent): void {
   }
 }
 
-// Global mouse up / move for timeline dragging outside the element
+// Global mouse move/up for seamless drag tracking
 function onGlobalMouseMove(e: MouseEvent): void {
-  if (dragging.value) {
-    onTimelineMouseMove(e)
-  }
+  onTimelineMove(e)
 }
 
 function onGlobalMouseUp(): void {
@@ -544,7 +543,8 @@ onUnmounted(() => {
           <div
             ref="timelineRef"
             class="timeline-track"
-            @mousedown="onTimelineMouseDown"
+            @click="onTimelineClick"
+            @mousemove="onTimelineMove"
           >
             <!-- Left dimmed area -->
             <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
@@ -559,15 +559,15 @@ onUnmounted(() => {
                 class="timeline-playhead"
                 :style="{ left: playheadInSelectionPercent + '%' }"
               />
-              <!-- Start handle -->
+              <!-- Start handle: mousedown directly on handle -->
               <div
-                data-handle="start"
                 class="trim-handle trim-handle-start"
+                @mousedown="startHandleDrag('start', $event)"
               />
-              <!-- End handle -->
+              <!-- End handle: mousedown directly on handle -->
               <div
-                data-handle="end"
                 class="trim-handle trim-handle-end"
+                @mousedown="startHandleDrag('end', $event)"
               />
             </div>
 
