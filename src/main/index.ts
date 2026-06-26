@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, protocol, net } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta } from './modules/ffmpeg'
@@ -19,14 +19,6 @@ import type { ProgressInfo } from '../preload/index'
 // Track active operations for cancellation
 let activeProcess: { cancel: () => void } | null = null
 
-function registerCustomProtocol(): void {
-  protocol.handle('vid', (request) => {
-    const filePath = request.url.replace('vid://', '')
-    const decodedPath = decodeURIComponent(filePath.replace(/^\//, ''))
-    return net.fetch(`file:///${decodedPath.replace(/\\/g, '/')}`)
-  })
-}
-
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1200,
@@ -41,7 +33,8 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      webSecurity: false
     }
   })
 
@@ -282,8 +275,6 @@ app.whenReady().then(() => {
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
-
-  registerCustomProtocol()
 
   registerFileHandlers()
   registerSplitMergeHandlers()

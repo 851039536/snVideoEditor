@@ -58,8 +58,7 @@ const errorMsg = ref('')
 
 const videoSrc = computed((): string => {
   if (files.value.length === 0) { return '' }
-  // Use custom vid:// protocol registered in main process
-  return `vid://${files.value[0].replace(/\\/g, '/')}`
+  return `file:///${files.value[0].replace(/\\/g, '/')}`
 })
 
 const startTimeStr = computed((): string => {
@@ -245,16 +244,26 @@ watch(mode, (newMode) => {
 
 // ---- Video player controls ----
 
-function togglePlay(): void {
+async function togglePlay(): Promise<void> {
   const vp = videoPlayer.value
   if (!vp) { return }
   if (vp.paused) {
-    vp.play()
-    isPlaying.value = true
+    try {
+      await vp.play()
+    } catch (e) {
+      errorMsg.value = `播放失败: ${e instanceof Error ? e.message : String(e)}`
+    }
   } else {
     vp.pause()
-    isPlaying.value = false
   }
+}
+
+function onVideoPlay(): void {
+  isPlaying.value = true
+}
+
+function onVideoPause(): void {
+  isPlaying.value = false
 }
 
 function onTimeUpdate(): void {
@@ -464,14 +473,17 @@ onUnmounted(() => {
       <!-- Has file => full editor -->
       <template v-else>
         <!-- Video Player -->
-        <div class="video-player-container glass-card overflow-hidden">
+        <div class="video-player-container glass-card">
           <video
             v-if="videoSrc"
             ref="videoPlayer"
             :src="videoSrc"
             class="w-full rounded-t-xl"
             style="max-height: 360px; background: #000;"
+            preload="auto"
             @timeupdate="onTimeUpdate"
+            @play="onVideoPlay"
+            @pause="onVideoPause"
             @ended="onVideoEnded"
             @error="(e: Event) => { errorMsg = '视频加载失败: ' + ((e.target as HTMLVideoElement)?.error?.message || '未知错误') }"
             @loadedmetadata="() => { if (videoPlayer) { videoPlayer.currentTime = trimStartSec } }"
