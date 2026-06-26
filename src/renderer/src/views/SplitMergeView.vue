@@ -58,7 +58,8 @@ const errorMsg = ref('')
 
 const videoSrc = computed((): string => {
   if (files.value.length === 0) { return '' }
-  return `file:///${files.value[0].replace(/\\/g, '/')}`
+  // Use custom vid:// protocol registered in main process
+  return `vid://${files.value[0].replace(/\\/g, '/')}`
 })
 
 const startTimeStr = computed((): string => {
@@ -100,6 +101,12 @@ const endPercent = computed((): number => {
 const playheadPercent = computed((): number => {
   if (duration.value <= 0) { return 0 }
   return (currentTime.value / duration.value) * 100
+})
+
+const playheadInSelectionPercent = computed((): number => {
+  const range = endPercent.value - startPercent.value
+  if (range <= 0) { return 50 }
+  return ((playheadPercent.value - startPercent.value) / range) * 100
 })
 
 // ---- Helpers ----
@@ -290,12 +297,17 @@ function getTimelineTime(clientX: number): number {
 
 function onTimelineMouseDown(e: MouseEvent): void {
   const target = e.target as HTMLElement
-  if (target.classList.contains('trim-handle-start')) {
-    dragging.value = 'start'
-    e.preventDefault()
-  } else if (target.classList.contains('trim-handle-end')) {
-    dragging.value = 'end'
-    e.preventDefault()
+  // Use data-handle attribute for reliable detection (not affected by pseudo-elements)
+  const handle = target.closest('[data-handle]') as HTMLElement | null
+  if (handle) {
+    const handleType = handle.getAttribute('data-handle')
+    if (handleType === 'start') {
+      dragging.value = 'start'
+      e.preventDefault()
+    } else if (handleType === 'end') {
+      dragging.value = 'end'
+      e.preventDefault()
+    }
   } else {
     // Click on timeline bar => seek to position
     const t = getTimelineTime(e.clientX)
@@ -461,6 +473,7 @@ onUnmounted(() => {
             style="max-height: 360px; background: #000;"
             @timeupdate="onTimeUpdate"
             @ended="onVideoEnded"
+            @error="(e: Event) => { errorMsg = '视频加载失败: ' + ((e.target as HTMLVideoElement)?.error?.message || '未知错误') }"
             @loadedmetadata="() => { if (videoPlayer) { videoPlayer.currentTime = trimStartSec } }"
           />
           <div v-else class="flex items-center justify-center h-48 bg-black/50 rounded-t-xl">
@@ -512,7 +525,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Timeline Bar -->
-        <div class="glass-card p-5">
+        <div class="glass-card p-5" style="overflow: visible;">
           <h3 class="text-sm font-semibold text-text-primary mb-4">裁剪时间轴</h3>
 
           <!-- The timeline -->
@@ -524,26 +537,25 @@ onUnmounted(() => {
             <!-- Left dimmed area -->
             <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
 
-            <!-- Selected area -->
+            <!-- Selected area (flex item, no left offset needed) -->
             <div
               class="timeline-selected"
-              :style="{ left: startPercent + '%', width: (endPercent - startPercent) + '%' }"
+              :style="{ width: (endPercent - startPercent) + '%' }"
             >
-              <!-- Playhead -->
+              <!-- Playhead (positioned relative to selected area) -->
               <div
                 class="timeline-playhead"
-                :style="{ left: ((playheadPercent - startPercent) / (endPercent - startPercent) * 100) + '%' }"
-                :class="{ 'dragging': dragging === 'playhead' }"
+                :style="{ left: playheadInSelectionPercent + '%' }"
               />
               <!-- Start handle -->
               <div
+                data-handle="start"
                 class="trim-handle trim-handle-start"
-                :style="{ left: '-2px' }"
               />
               <!-- End handle -->
               <div
+                data-handle="end"
                 class="trim-handle trim-handle-end"
-                :style="{ right: '-2px' }"
               />
             </div>
 
@@ -750,7 +762,7 @@ onUnmounted(() => {
   background: #161B22;
   border-radius: 10px;
   display: flex;
-  overflow: hidden;
+  overflow: visible;
   cursor: pointer;
   user-select: none;
 }
@@ -790,9 +802,9 @@ onUnmounted(() => {
 /* ---- Trim Handles ---- */
 .trim-handle {
   position: absolute;
-  top: 0;
-  width: 10px;
-  height: 100%;
+  top: -4px;
+  width: 16px;
+  height: calc(100% + 8px);
   cursor: ew-resize;
   z-index: 10;
   display: flex;
@@ -801,10 +813,12 @@ onUnmounted(() => {
 }
 
 .trim-handle-start {
+  left: -8px;
   border-radius: 2px 0 0 2px;
 }
 
 .trim-handle-end {
+  right: -8px;
   border-radius: 0 2px 2px 0;
 }
 
