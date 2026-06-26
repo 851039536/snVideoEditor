@@ -1,11 +1,150 @@
-import { spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const ffmpegPath: string = require('ffmpeg-static')
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const ffprobePath: string = require('ffprobe-static').path
+/**
+ * Resolve ffmpeg binary path with multiple fallbacks.
+ * Some environments (corporate Windows, AV software) may block
+ * the ffmpeg-static binary, so we fall back to system PATH.
+ */
+function resolveFfmpegPath(): string {
+  // 1. Try env var first (user override)
+  if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
+    return process.env.FFMPEG_PATH
+  }
+
+  // 2. Try ffmpeg-static (may be blocked by AV on Windows)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const p = require('ffmpeg-static')
+    if (p && typeof p === 'string') {
+      // Verify the binary is actually runnable
+      if (canExecute(p)) {
+        return p
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. Search node_modules relative to __dirname
+  const exeName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+  const searchDirs = [
+    __dirname,
+    path.join(__dirname, '..'),
+    path.join(__dirname, '..', '..'),
+    process.cwd()
+  ]
+
+  for (const dir of searchDirs) {
+    const candidate = path.join(dir, 'node_modules', 'ffmpeg-static', exeName)
+    if (fs.existsSync(candidate) && canExecute(candidate)) {
+      return candidate
+    }
+  }
+
+  // 4. Fallback: use system ffmpeg from PATH (bare "ffmpeg")
+  try {
+    const { execSync } = require('child_process')
+    const result = execSync(
+      process.platform === 'win32' ? 'where ffmpeg 2>nul' : 'which ffmpeg 2>/dev/null',
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+    const sysPath = result.trim().split('\n')[0]?.trim()
+    if (sysPath && canExecute(sysPath)) {
+      return sysPath
+    }
+  } catch {
+    // ignore
+  }
+
+  throw new Error(
+    `找不到可用的 FFmpeg。请安装 FFmpeg 并将其添加到 PATH，或设置 FFMPEG_PATH 环境变量。`
+  )
+}
+
+/**
+ * Check if a binary file is actually executable.
+ * On Windows, the file may exist but be blocked by security policy.
+ */
+function canExecute(binaryPath: string): boolean {
+  // Quick existence check first
+  if (!fs.existsSync(binaryPath)) {
+    return false
+  }
+
+  // On non-Windows, assume it's executable if it exists
+  if (process.platform !== 'win32') {
+    return true
+  }
+
+  // On Windows, try to spawn with -version to verify it runs
+  try {
+    const result = spawnSync(binaryPath, ['-version'], {
+      timeout: 10000,
+      windowsHide: true
+    })
+    return result.status === 0 || !result.error
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resolve ffprobe binary path with multiple fallbacks.
+ */
+function resolveFfprobePath(): string {
+  if (process.env.FFPROBE_PATH && fs.existsSync(process.env.FFPROBE_PATH)) {
+    return process.env.FFPROBE_PATH
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const p = require('ffprobe-static')
+    if (p?.path && typeof p.path === 'string' && canExecute(p.path)) {
+      return p.path
+    }
+  } catch {
+    // ignore
+  }
+
+  const exeName = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'
+  const searchDirs = [
+    __dirname,
+    path.join(__dirname, '..'),
+    path.join(__dirname, '..', '..'),
+    process.cwd()
+  ]
+
+  for (const dir of searchDirs) {
+    const candidate = path.join(dir, 'node_modules', 'ffprobe-static', exeName)
+    if (fs.existsSync(candidate) && canExecute(candidate)) {
+      return candidate
+    }
+  }
+
+  // Fallback to system PATH
+  try {
+    const { execSync } = require('child_process')
+    const result = execSync(
+      process.platform === 'win32' ? 'where ffprobe 2>nul' : 'which ffprobe 2>/dev/null',
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+    const sysPath = result.trim().split('\n')[0]?.trim()
+    if (sysPath && canExecute(sysPath)) {
+      return sysPath
+    }
+  } catch {
+    // ignore
+  }
+
+  throw new Error(
+    `找不到可用的 ffprobe。请安装 FFmpeg 并将其添加到 PATH，或设置 FFPROBE_PATH 环境变量。`
+  )
+}
+
+const ffmpegPath: string = resolveFfmpegPath()
+const ffprobePath: string = resolveFfprobePath()
 
 export interface ProgressCallback {
   (data: { percent: number; currentFile: number; totalFiles: number; speed: string; eta: string }): void
@@ -140,7 +279,7 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
     })
 
     proc.on('error', (err: Error) => {
-      reject(new Error(`启动 FFmpeg 失败: ${err.message}`))
+      reject(new Error(`启动 FFmpeg 失败 (${ffmpegPath}): ${err.message}`))
     })
   })
 }
@@ -228,7 +367,7 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
       if (fs.existsSync(concatListPath)) {
         fs.unlinkSync(concatListPath)
       }
-      reject(new Error(`启动 FFmpeg 失败: ${err.message}`))
+      reject(new Error(`启动 FFmpeg 失败 (${ffmpegPath}): ${err.message}`))
     })
   })
 }
@@ -287,7 +426,7 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
     })
 
     ffprobeProcess.on('error', (err: Error) => {
-      reject(new Error(`启动 ffprobe 失败: ${err.message}`))
+      reject(new Error(`启动 ffprobe 失败 (${ffprobePath}): ${err.message}`))
     })
   })
 }
@@ -386,7 +525,7 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
     })
 
     proc.on('error', (err: Error) => {
-      reject(new Error(`启动 FFmpeg 失败: ${err.message}`))
+      reject(new Error(`启动 FFmpeg 失败 (${ffmpegPath}): ${err.message}`))
     })
   })
 }
