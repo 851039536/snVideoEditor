@@ -10,7 +10,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/split-merge',
     name: 'SplitMerge',
-    component: () => import('@/views/SplitMergeView.vue')
+    component: () => import('@/views/SplitMerge/SplitMergeView.vue')
   },
   {
     path: '/compress',

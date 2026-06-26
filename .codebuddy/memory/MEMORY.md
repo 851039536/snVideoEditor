@@ -29,11 +29,17 @@ snVideoEditor/
 2. **Compress（压缩）**: 4级预设 + 自定义CRF/分辨率/码率/编码 / 批量处理
 3. **Encrypt（加密解密）**: AES-256-CTR 流式加解密 / 密码强度检测 / 文件夹批量
 
+## 文件组织规则
+- **views 子目录规则**：完整功能模块放在 `views/<功能名>/` 子目录下，主页面命名为 `<功能名>View.vue`，子组件放同目录
+  - 示例：SplitMerge 功能 → `views/SplitMerge/SplitMergeView.vue` + `views/SplitMerge/ClipList.vue`
+- **components 目录**：仅放跨模块共享的通用组件
+- 新增功能页面时同步更新 `router/index.ts`、HomeView 入口卡片
+
 ## 代码风格
 - if 语句必须带花括号 `{}`
 - 主进程模块用 function 导出，通过 ipcMain.handle/handle 注册
 - 预加载通过 contextBridge 暴露 typed API
-- Vue 组件使用 Composition API + `<script setup>`
+- Vue 组件使用 Composition API + `<script setup lang="ts">`
 
 ## 设计风格
 - 深色科技风（Dark Tech）

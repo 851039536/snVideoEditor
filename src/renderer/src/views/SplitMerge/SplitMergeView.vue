@@ -7,6 +7,7 @@ import {
 import FileDropZone from '@/components/FileDropZone.vue'
 import VideoPreview from '@/components/VideoPreview.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
+import ClipList from './ClipList.vue'
 import { useProgressStore } from '@/stores/progress'
 
 interface VideoMeta {
@@ -46,7 +47,7 @@ const duration = ref(0)
 
 // ---- Timeline drag state ----
 const timelineRef = ref<HTMLDivElement | null>(null)
-const dragging = ref<'start' | 'end' | 'playhead' | null>(null)
+const dragging = ref<'start' | 'end' | null>(null)
 
 // Trim times in seconds (normalized 0..duration)
 const trimStartSec = ref(0)
@@ -249,14 +250,6 @@ function moveFile(index: number, direction: -1 | 1): void {
   files.value[newIndex] = temp
 }
 
-function switchToSplit(): void {
-  mode.value = 'split'
-  loadFirstFileOnly()
-  if (files.value.length > 0) {
-    loadVideoMeta(files.value[0])
-  }
-}
-
 watch(mode, (newMode) => {
   if (newMode === 'split') {
     loadFirstFileOnly()
@@ -287,8 +280,14 @@ function onVideoPlay(): void {
 }
 
 function onVideoPause(): void {
+  if (endedGuard) {
+    endedGuard = false
+    return
+  }
   isPlaying.value = false
 }
+
+let endedGuard = false
 
 function onTimeUpdate(): void {
   if (!videoPlayer.value) { return }
@@ -303,7 +302,20 @@ function onTimeUpdate(): void {
 }
 
 function onVideoEnded(): void {
+  endedGuard = true
   isPlaying.value = false
+}
+
+function onVideoError(e: Event): void {
+  const video = e.target as HTMLVideoElement
+  errorMsg.value = `视频加载失败: ${video?.error?.message || '未知错误'}`
+}
+
+function onVideoLoaded(): void {
+  if (videoPlayer.value) {
+    videoPlayer.value.currentTime = trimStartSec.value
+    currentTime.value = trimStartSec.value
+  }
 }
 
 function seekToStart(): void {
@@ -525,7 +537,7 @@ onUnmounted(() => {
     <!-- Mode Tabs -->
     <div class="flex gap-1 mb-4 p-1 rounded-lg bg-bg-tertiary w-fit">
       <button
-        @click="switchToSplit"
+        @click="mode = 'split'"
         class="px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200"
         :class="mode === 'split' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
       >
@@ -560,8 +572,8 @@ onUnmounted(() => {
             @play="onVideoPlay"
             @pause="onVideoPause"
             @ended="onVideoEnded"
-            @error="(e: Event) => { errorMsg = '视频加载失败: ' + ((e.target as HTMLVideoElement)?.error?.message || '未知错误') }"
-            @loadedmetadata="() => { if (videoPlayer) { videoPlayer.currentTime = trimStartSec } }"
+            @error="onVideoError"
+            @loadedmetadata="onVideoLoaded"
           />
           <div v-else class="flex items-center justify-center h-48 bg-black/50 rounded-t-xl">
             <Video :size="40" class="text-text-muted opacity-30" />
@@ -620,7 +632,6 @@ onUnmounted(() => {
             ref="timelineRef"
             class="timeline-track"
             @click="onTimelineClick"
-            @mousemove="onTimelineMove"
           >
             <!-- Left dimmed area -->
             <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
@@ -715,47 +726,12 @@ onUnmounted(() => {
         </div>
 
         <!-- Clips List -->
-        <div v-if="clips.length > 0" class="glass-card p-4">
-          <h3 class="text-sm font-semibold text-text-primary mb-2">
-            已裁切片段
-            <span class="text-xs text-text-muted font-normal ml-2">（{{ clips.length }} 个）</span>
-          </h3>
-          <div class="space-y-2 max-h-64 overflow-y-auto">
-            <div
-              v-for="(clip, idx) in clips"
-              :key="clip.id"
-              class="flex items-center gap-3 p-2.5 rounded-lg bg-bg-tertiary/50 hover:bg-bg-tertiary transition-colors group"
-            >
-              <!-- Checkbox -->
-              <input
-                type="checkbox"
-                :checked="clip.selected"
-                @change="toggleClipSelection(idx)"
-                class="w-4 h-4 rounded accent-accent-blue cursor-pointer"
-              />
-              <!-- Info -->
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="text-xs text-text-primary font-medium truncate">{{ clip.sourceFileName }}</span>
-                  <span class="text-xs text-text-muted font-mono flex-shrink-0">
-                    {{ secondsToHMS(clip.startSec) }} → {{ secondsToHMS(clip.endSec) }}
-                  </span>
-                </div>
-                <div class="text-xs text-text-muted mt-0.5">
-                  时长 {{ secondsToHMS(clip.duration) }}
-                </div>
-              </div>
-              <!-- Remove -->
-              <button
-                @click="removeClip(idx)"
-                class="p-1 rounded hover:bg-danger/20 transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
-                title="移除"
-              >
-                <X :size="14" class="text-danger" />
-              </button>
-            </div>
-          </div>
-        </div>
+        <ClipList
+          v-if="clips.length > 0"
+          :clips="clips"
+          @toggle="toggleClipSelection"
+          @remove="removeClip"
+        />
 
         <!-- Error -->
         <div v-if="errorMsg" class="p-3 rounded-lg bg-danger/10 border border-danger/30">
@@ -770,64 +746,18 @@ onUnmounted(() => {
     <!-- ========== MERGE MODE ========== -->
     <div v-else class="space-y-3">
       <!-- Clips list (from split) -->
-      <div v-if="clips.length > 0" class="glass-card p-4">
-        <h3 class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
-          裁切片断
-          <span class="text-xs text-text-muted font-normal">（勾选 {{ selectedClipCount }} / {{ clips.length }}）</span>
-        </h3>
-        <div class="space-y-2 max-h-64 overflow-y-auto">
-          <div
-            v-for="(clip, idx) in clips"
-            :key="clip.id"
-            class="flex items-center gap-3 p-2.5 rounded-lg bg-bg-tertiary/50 hover:bg-bg-tertiary transition-colors group"
-          >
-            <input
-              type="checkbox"
-              :checked="clip.selected"
-              @change="toggleClipSelection(idx)"
-              class="w-4 h-4 rounded accent-accent-blue cursor-pointer flex-shrink-0"
-            />
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="text-xs text-text-primary font-medium truncate">{{ clip.sourceFileName }}</span>
-                <span class="text-xs text-text-muted font-mono flex-shrink-0">
-                  {{ secondsToHMS(clip.startSec) }} → {{ secondsToHMS(clip.endSec) }}
-                </span>
-              </div>
-              <div class="text-xs text-text-muted mt-0.5">
-                时长 {{ secondsToHMS(clip.duration) }}
-              </div>
-            </div>
-            <!-- Reorder -->
-            <div class="flex flex-col gap-0.5">
-              <button
-                @click="moveClip(idx, -1)"
-                :disabled="idx === 0"
-                class="p-0.5 rounded hover:bg-bg-primary disabled:opacity-30 transition-all"
-              >
-                <ArrowUp :size="13" class="text-text-secondary" />
-              </button>
-              <button
-                @click="moveClip(idx, 1)"
-                :disabled="idx === clips.length - 1"
-                class="p-0.5 rounded hover:bg-bg-primary disabled:opacity-30 transition-all"
-              >
-                <ArrowDown :size="13" class="text-text-secondary" />
-              </button>
-            </div>
-            <button
-              @click="removeClip(idx)"
-              class="p-1 rounded hover:bg-danger/20 transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
-              title="移除"
-            >
-              <X :size="14" class="text-danger" />
-            </button>
-          </div>
-        </div>
-        <p v-if="clips.length === 0" class="text-xs text-text-muted text-center py-4">
-          暂无片段，请先在裁剪模式下添加
-        </p>
-      </div>
+      <ClipList
+        v-if="clips.length > 0"
+        :clips="clips"
+        :show-reorder="true"
+        :selected-count="selectedClipCount"
+        @toggle="toggleClipSelection"
+        @remove="removeClip"
+        @move="moveClip"
+      />
+      <p v-else class="text-xs text-text-muted text-center py-4 glass-card p-4">
+        暂无片段，请先在裁剪模式下添加
+      </p>
 
       <!-- External files -->
       <FileDropZone @files-selected="addFiles" />
