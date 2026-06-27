@@ -227,8 +227,8 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
     }
 
     const args = [
-      '-i', opts.input,
       '-ss', opts.startTime,
+      '-i', opts.input,
       '-t', opts.duration,
       '-c', 'copy',
       '-avoid_negative_ts', 'make_zero',

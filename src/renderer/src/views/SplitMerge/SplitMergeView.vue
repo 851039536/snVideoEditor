@@ -256,6 +256,8 @@ watch(mode, (newMode) => {
     if (files.value.length > 0) {
       loadVideoMeta(files.value[0])
     }
+  } else if (newMode === 'merge') {
+    files.value = []
   }
 })
 
