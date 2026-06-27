@@ -704,19 +704,19 @@ onUnmounted(() => {
 
         <!-- Fine-tuning inputs -->
         <div class="glass-card p-4">
-          <h3 class="text-sm font-semibold text-text-primary mb-2">精确调整（可选）</h3>
-          <div class="flex items-center gap-3 flex-wrap">
-            <div class="flex items-center gap-1.5">
-              <span class="text-xs text-text-secondary w-12">开始</span>
+          <h3 class="text-xs font-semibold text-text-secondary mb-1.5 text-center">精确调整（可选）</h3>
+          <div class="flex items-center justify-center gap-2 flex-wrap">
+            <div class="flex items-center gap-1">
+              <span class="text-xs text-text-muted w-8">开始</span>
               <input v-model="startHour" class="time-input" maxlength="2" />
               <span class="text-text-muted text-xs">:</span>
               <input v-model="startMin" class="time-input" maxlength="2" />
               <span class="text-text-muted text-xs">:</span>
               <input v-model="startSec" class="time-input" maxlength="2" />
             </div>
-            <span class="text-text-muted text-lg">→</span>
-            <div class="flex items-center gap-1.5">
-              <span class="text-xs text-text-secondary w-12">结束</span>
+            <span class="text-text-muted text-sm">→</span>
+            <div class="flex items-center gap-1">
+              <span class="text-xs text-text-muted w-8">结束</span>
               <input v-model="endHour" class="time-input" maxlength="2" />
               <span class="text-text-muted text-xs">:</span>
               <input v-model="endMin" class="time-input" maxlength="2" />
@@ -987,10 +987,10 @@ onUnmounted(() => {
 
 /* ---- Time Input ---- */
 .time-input {
-  width: 38px;
-  padding: 5px 6px;
+  width: 32px;
+  padding: 3px 4px;
   text-align: center;
-  font-size: 13px;
+  font-size: 11px;
   font-family: monospace;
   background: hsl(var(--muted));
   border: 1px solid hsl(var(--border));
