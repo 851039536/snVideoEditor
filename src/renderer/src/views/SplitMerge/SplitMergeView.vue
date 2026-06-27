@@ -48,6 +48,10 @@ const duration = ref(0)
 // ---- Timeline drag state ----
 const timelineRef = ref<HTMLDivElement | null>(null)
 const dragging = ref<'start' | 'end' | null>(null)
+const lastDragClientX = ref(0)
+
+// Fine-tune: how many times finer when holding Shift (higher = finer)
+const FINE_DRAG_SCALE = 5
 
 // Trim times in seconds (normalized 0..duration)
 const trimStartSec = ref(0)
@@ -352,10 +356,33 @@ function getTimelineTime(clientX: number): number {
 
 function startHandleDrag(handle: 'start' | 'end', e: PointerEvent): void {
   dragging.value = handle
+  lastDragClientX.value = e.clientX
   const el = e.currentTarget as HTMLElement
   el.setPointerCapture(e.pointerId)
   e.preventDefault()
   e.stopPropagation()
+}
+
+// Wheel on handle: fine-tune ±0.1s per tick (Shift ±0.02s)
+function onHandleWheel(handle: 'start' | 'end', e: WheelEvent): void {
+  const step = e.shiftKey ? 0.02 : 0.1
+  const delta = e.deltaY > 0 ? step : -step
+
+  if (handle === 'start') {
+    trimStartSec.value = clamp(trimStartSec.value + delta, 0, trimEndSec.value - 0.1)
+    syncManualToTrim()
+    if (videoPlayer.value) {
+      videoPlayer.value.currentTime = trimStartSec.value
+      currentTime.value = trimStartSec.value
+    }
+  } else {
+    trimEndSec.value = clamp(trimEndSec.value + delta, trimStartSec.value + 0.1, duration.value)
+    syncManualToTrim()
+    if (videoPlayer.value) {
+      videoPlayer.value.currentTime = trimEndSec.value
+      currentTime.value = trimEndSec.value
+    }
+  }
 }
 
 function onTimelineClick(e: MouseEvent): void {
@@ -371,20 +398,46 @@ function onTimelineClick(e: MouseEvent): void {
 // Global pointer move/up for seamless drag tracking (pointer events required for setPointerCapture)
 function onGlobalPointerMove(e: PointerEvent): void {
   if (!dragging.value) { return }
-  const t = getTimelineTime(e.clientX)
+
+  let t: number
+
+  if (e.shiftKey) {
+    // Shift + drag: delta-based fine-tuning (FINE_DRAG_SCALE× finer)
+    const el = timelineRef.value
+    if (!el || duration.value <= 0) { return }
+    const rect = el.getBoundingClientRect()
+    const secondsPerPx = duration.value / rect.width
+    const deltaPx = e.clientX - lastDragClientX.value
+    const deltaTime = deltaPx * secondsPerPx / FINE_DRAG_SCALE
+
+    if (dragging.value === 'start') {
+      t = clamp(trimStartSec.value + deltaTime, 0, trimEndSec.value - 0.1)
+    } else {
+      t = clamp(trimEndSec.value + deltaTime, trimStartSec.value + 0.1, duration.value)
+    }
+    lastDragClientX.value = e.clientX
+  } else {
+    // Normal drag: absolute position mapping
+    t = getTimelineTime(e.clientX)
+  }
+
   if (dragging.value === 'start') {
-    trimStartSec.value = clamp(t, 0, trimEndSec.value - 0.1)
-    syncManualToTrim()
-    if (videoPlayer.value) {
-      videoPlayer.value.currentTime = trimStartSec.value
-      currentTime.value = trimStartSec.value
+    if (trimStartSec.value !== t) {
+      trimStartSec.value = t
+      syncManualToTrim()
+      if (videoPlayer.value) {
+        videoPlayer.value.currentTime = trimStartSec.value
+        currentTime.value = trimStartSec.value
+      }
     }
   } else if (dragging.value === 'end') {
-    trimEndSec.value = clamp(t, trimStartSec.value + 0.1, duration.value)
-    syncManualToTrim()
-    if (videoPlayer.value) {
-      videoPlayer.value.currentTime = trimEndSec.value
-      currentTime.value = trimEndSec.value
+    if (trimEndSec.value !== t) {
+      trimEndSec.value = t
+      syncManualToTrim()
+      if (videoPlayer.value) {
+        videoPlayer.value.currentTime = trimEndSec.value
+        currentTime.value = trimEndSec.value
+      }
     }
   }
 }
@@ -685,11 +738,13 @@ onUnmounted(() => {
               <div
                 class="trim-handle trim-handle-start"
                 @pointerdown="startHandleDrag('start', $event)"
+                @wheel.prevent="onHandleWheel('start', $event)"
               />
               <!-- End handle -->
               <div
                 class="trim-handle trim-handle-end"
                 @pointerdown="startHandleDrag('end', $event)"
+                @wheel.prevent="onHandleWheel('end', $event)"
               />
             </div>
 
