@@ -746,11 +746,11 @@ onUnmounted(() => {
 
         <!-- Timeline Bar -->
         <div class="glass-card p-4" style="overflow: visible;">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-2">
+          <div class="flex items-center justify-between mb-3 gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <h3 class="text-sm font-semibold text-text-primary">裁剪时间轴</h3>
               <!-- Step forward/backward -->
-              <div class="flex items-center gap-1 ml-2">
+              <div class="flex items-center gap-1">
                 <button
                   @click="stepBackward"
                   class="p-1 rounded text-text-secondary"
@@ -793,8 +793,25 @@ onUnmounted(() => {
                   <ChevronsRight :size="14" />
                 </button>
               </div>
+              <!-- Fine-tuning time inputs -->
+              <span class="w-px h-4 bg-border mx-0.5" />
+              <div class="flex items-center gap-1">
+                <span class="text-xs text-text-muted">开始</span>
+                <input v-model="startHour" class="time-input" maxlength="2" />
+                <span class="text-text-muted text-xs">:</span>
+                <input v-model="startMin" class="time-input" maxlength="2" />
+                <span class="text-text-muted text-xs">:</span>
+                <input v-model="startSec" class="time-input" maxlength="2" />
+                <span class="text-text-muted text-sm">→</span>
+                <span class="text-xs text-text-muted">结束</span>
+                <input v-model="endHour" class="time-input" maxlength="2" />
+                <span class="text-text-muted text-xs">:</span>
+                <input v-model="endMin" class="time-input" maxlength="2" />
+                <span class="text-text-muted text-xs">:</span>
+                <input v-model="endSec" class="time-input" maxlength="2" />
+              </div>
             </div>
-            <span class="text-xs text-text-secondary">
+            <span class="text-xs text-text-secondary shrink-0">
               选中片段时长：
               <span class="text-sm font-mono text-accent-blue font-semibold">{{ clipDurationStr }}</span>
             </span>
@@ -846,29 +863,6 @@ onUnmounted(() => {
 
         </div>
 
-        <!-- Fine-tuning inputs -->
-        <div class="glass-card p-4">
-          <h3 class="text-xs font-semibold text-text-secondary mb-1.5 text-center">精确调整（可选）</h3>
-          <div class="flex items-center justify-center gap-2 flex-wrap">
-            <div class="flex items-center gap-1">
-              <span class="text-xs text-text-muted w-8">开始</span>
-              <input v-model="startHour" class="time-input" maxlength="2" />
-              <span class="text-text-muted text-xs">:</span>
-              <input v-model="startMin" class="time-input" maxlength="2" />
-              <span class="text-text-muted text-xs">:</span>
-              <input v-model="startSec" class="time-input" maxlength="2" />
-            </div>
-            <span class="text-text-muted text-sm">→</span>
-            <div class="flex items-center gap-1">
-              <span class="text-xs text-text-muted w-8">结束</span>
-              <input v-model="endHour" class="time-input" maxlength="2" />
-              <span class="text-text-muted text-xs">:</span>
-              <input v-model="endMin" class="time-input" maxlength="2" />
-              <span class="text-text-muted text-xs">:</span>
-              <input v-model="endSec" class="time-input" maxlength="2" />
-            </div>
-          </div>
-        </div>
 
         <!-- Cut-to-list action -->
         <div class="flex items-center gap-3">
