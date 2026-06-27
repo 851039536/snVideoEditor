@@ -395,21 +395,32 @@ function onTimelineClick(e: MouseEvent): void {
   }
 }
 
+// Maximum resolution cap: never coarser than 2 seconds per pixel (even for long videos)
+const MAX_SECONDS_PER_PX = 2
+
 // Global pointer move/up for seamless drag tracking (pointer events required for setPointerCapture)
 function onGlobalPointerMove(e: PointerEvent): void {
   if (!dragging.value) { return }
 
+  const el = timelineRef.value
+  if (!el || duration.value <= 0) { return }
+
+  const rect = el.getBoundingClientRect()
+  const nativeRes = duration.value / rect.width // seconds per pixel in absolute mode
   let t: number
 
   if (e.shiftKey) {
-    // Shift + drag: delta-based fine-tuning (FINE_DRAG_SCALE× finer)
-    const el = timelineRef.value
-    if (!el || duration.value <= 0) { return }
-    const rect = el.getBoundingClientRect()
-    const secondsPerPx = duration.value / rect.width
-    const deltaPx = e.clientX - lastDragClientX.value
-    const deltaTime = deltaPx * secondsPerPx / FINE_DRAG_SCALE
-
+    // Shift + drag: always delta-based, FINE_DRAG_SCALE× finer than native
+    const deltaTime = (e.clientX - lastDragClientX.value) * nativeRes / FINE_DRAG_SCALE
+    if (dragging.value === 'start') {
+      t = clamp(trimStartSec.value + deltaTime, 0, trimEndSec.value - 0.1)
+    } else {
+      t = clamp(trimEndSec.value + deltaTime, trimStartSec.value + 0.1, duration.value)
+    }
+    lastDragClientX.value = e.clientX
+  } else if (nativeRes > MAX_SECONDS_PER_PX) {
+    // Long video: switch to delta mode capped at MAX_SECONDS_PER_PX for smooth control
+    const deltaTime = (e.clientX - lastDragClientX.value) * MAX_SECONDS_PER_PX
     if (dragging.value === 'start') {
       t = clamp(trimStartSec.value + deltaTime, 0, trimEndSec.value - 0.1)
     } else {
@@ -417,7 +428,7 @@ function onGlobalPointerMove(e: PointerEvent): void {
     }
     lastDragClientX.value = e.clientX
   } else {
-    // Normal drag: absolute position mapping
+    // Short video: absolute position mapping is already precise enough
     t = getTimelineTime(e.clientX)
   }
 
