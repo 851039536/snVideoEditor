@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
-import { Image, Folder, X, Zap, Clock, ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { ref, computed, watch, onUnmounted } from 'vue'
+import { Image, Folder, X, Zap, Clock } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
@@ -33,10 +33,76 @@ const widthOptions = [
   { label: '800px', value: '800' }
 ]
 
-// Segment trimming
+// Segment trimming — always visible, HH:MM:SS like SplitMerge
 const enableTrim = ref(false)
-const startTime = ref(0)
-const segmentDuration = ref(5)
+const startHour = ref('00')
+const startMin = ref('00')
+const startSec = ref('00')
+const endHour = ref('00')
+const endMin = ref('00')
+const endSec = ref('05')
+const maxDuration = ref(0)
+
+// Video player
+const videoPlayer = ref<HTMLVideoElement | null>(null)
+const isPlaying = ref(false)
+const currentTime = ref(0)
+
+const trimStartSec = computed((): number => {
+  return hmsToSeconds(startHour.value, startMin.value, startSec.value)
+})
+
+const trimEndSec = computed((): number => {
+  return hmsToSeconds(endHour.value, endMin.value, endSec.value)
+})
+
+const trimDuration = computed((): number => {
+  return Math.max(0, trimEndSec.value - trimStartSec.value)
+})
+
+const trimDurationStr = computed((): string => {
+  return secondsToHMS(trimDuration.value)
+})
+
+function secondsToHMS(totalSec: number): string {
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = Math.floor(totalSec % 60)
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+function hmsToSeconds(h: string, m: string, s: string): number {
+  return parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s)
+}
+
+function clamp(val: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, val))
+}
+
+let syncing = false
+
+function syncTrimFromInputs(): void {
+  if (syncing) { return }
+  syncing = true
+  const s = hmsToSeconds(startHour.value, startMin.value, startSec.value)
+  const e = hmsToSeconds(endHour.value, endMin.value, endSec.value)
+  const max = maxDuration.value || 99999
+  const clampedStart = clamp(s, 0, max)
+  const clampedEnd = clamp(e, clampedStart + 0.5, max)
+  if (clampedStart !== s) {
+    const hms = secondsToHMS(clampedStart).split(':')
+    startHour.value = hms[0]; startMin.value = hms[1]; startSec.value = hms[2]
+  }
+  if (clampedEnd !== e) {
+    const hms = secondsToHMS(clampedEnd).split(':')
+    endHour.value = hms[0]; endMin.value = hms[1]; endSec.value = hms[2]
+  }
+  syncing = false
+}
+
+watch([startHour, startMin, startSec, endHour, endMin, endSec], () => {
+  syncTrimFromInputs()
+})
 
 // Loop
 const loopCount = ref(0)
@@ -49,7 +115,68 @@ interface FileEntry {
 }
 
 const files = ref<FileEntry[]>([])
+
+// Auto-set end time when first file metadata loads
+watch(() => files.value[0]?.meta, (meta) => {
+  if (!meta || meta.duration <= 0) { return }
+  maxDuration.value = meta.duration
+  const hms = secondsToHMS(meta.duration).split(':')
+  endHour.value = hms[0]
+  endMin.value = hms[1]
+  endSec.value = hms[2]
+})
 const errorMsg = ref('')
+
+const videoSrc = computed((): string => {
+  if (files.value.length === 0) { return '' }
+  return `file:///${files.value[0].path.replace(/\\/g, '/')}`
+})
+
+// ---- Video player controls ----
+
+async function togglePlay(): Promise<void> {
+  const vp = videoPlayer.value
+  if (!vp) { return }
+  if (vp.paused) {
+    try { await vp.play() } catch (_e) { /* ignore */ }
+  } else {
+    vp.pause()
+  }
+}
+
+function onVideoPlay(): void { isPlaying.value = true }
+function onVideoPause(): void { isPlaying.value = false }
+function onVideoEnded(): void { isPlaying.value = false }
+
+function onTimeUpdate(): void {
+  if (!videoPlayer.value) { return }
+  currentTime.value = videoPlayer.value.currentTime
+  // Auto-stop at end trim point when trim is enabled
+  if (enableTrim.value && currentTime.value >= trimEndSec.value) {
+    videoPlayer.value.pause()
+    videoPlayer.value.currentTime = trimEndSec.value
+    currentTime.value = trimEndSec.value
+  }
+}
+
+function onVideoLoaded(): void {
+  if (videoPlayer.value) {
+    videoPlayer.value.currentTime = enableTrim.value ? trimStartSec.value : 0
+    currentTime.value = enableTrim.value ? trimStartSec.value : 0
+  }
+}
+
+function onVideoError(e: Event): void {
+  const v = e.target as HTMLVideoElement
+  console.error('视频加载失败:', v?.error?.message)
+}
+
+// Seek video when trim times change
+watch([trimStartSec, trimEndSec], ([start]) => {
+  if (!enableTrim.value || !videoPlayer.value) { return }
+  videoPlayer.value.currentTime = start
+  currentTime.value = start
+})
 
 const computedWidth = computed((): number => {
   return parseInt(selectedWidth.value)
@@ -92,7 +219,7 @@ async function selectOutputDir(): Promise<void> {
 
 function estimateOutputSize(entry: FileEntry): string {
   if (!entry.meta || entry.meta.duration === 0) { return '未知' }
-  const duration = enableTrim.value ? segmentDuration.value : entry.meta.duration
+  const duration = enableTrim.value ? trimDuration.value : entry.meta.duration
   const w = computedWidth.value > 0 ? computedWidth.value : (entry.meta.width || 640)
   const pixels = w * (w * 9 / 16)
   const frames = duration * fps.value
@@ -102,14 +229,6 @@ function estimateOutputSize(entry: FileEntry): string {
   const estMB = estBytes / (1024 * 1024)
   if (estMB < 0.1) { return '< 0.1 MB' }
   return `~${estMB.toFixed(1)} MB`
-}
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) { return '0 B' }
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
 }
 
 function formatDuration(seconds: number): string {
@@ -141,8 +260,8 @@ async function startConvert(): Promise<void> {
   })
 
   try {
-    const trimmedStart = enableTrim.value ? startTime.value : undefined
-    const trimmedDuration = enableTrim.value ? segmentDuration.value : undefined
+    const trimmedStart = enableTrim.value ? trimStartSec.value : undefined
+    const trimmedDuration = enableTrim.value ? trimDuration.value : undefined
 
     if (files.value.length === 1) {
       const f = files.value[0]
@@ -206,6 +325,52 @@ onUnmounted(() => {
       <!-- Left: File List -->
       <div class="space-y-3">
         <FileDropZone @files-selected="addFiles" />
+
+        <!-- Video Player -->
+        <div v-if="files.length > 0" class="video-player-container glass-card">
+          <video
+            v-if="videoSrc"
+            ref="videoPlayer"
+            :src="videoSrc"
+            class="w-full"
+            style="max-height: 260px; background: #000;"
+            preload="auto"
+            @timeupdate="onTimeUpdate"
+            @play="onVideoPlay"
+            @pause="onVideoPause"
+            @ended="onVideoEnded"
+            @error="onVideoError"
+            @loadedmetadata="onVideoLoaded"
+          />
+          <div v-else class="flex items-center justify-center h-32 bg-black rounded-t-xl">
+            <Image :size="28" class="text-text-muted opacity-30" />
+          </div>
+
+          <!-- Player Controls -->
+          <div class="flex items-center justify-between px-3 py-2 bg-bg-secondary/80">
+            <div class="flex items-center gap-2">
+              <button
+                @click="togglePlay"
+                class="p-1.5 rounded-full"
+                :class="isPlaying ? 'bg-accent-purple' : 'bg-accent-blue'"
+              >
+                <svg v-if="isPlaying" class="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="4" width="4" height="16" rx="1" />
+                  <rect x="14" y="4" width="4" height="16" rx="1" />
+                </svg>
+                <svg v-else class="w-3.5 h-3.5 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5,3 19,12 5,21" />
+                </svg>
+              </button>
+              <span class="text-xs font-mono text-text-secondary">
+                {{ secondsToHMS(currentTime) }} / {{ secondsToHMS(maxDuration) }}
+              </span>
+            </div>
+            <span v-if="files[0]?.meta" class="text-xs text-text-muted truncate ml-2 max-w-[160px]">
+              {{ files[0].path.split(/[/\\]/).pop() }}
+            </span>
+          </div>
+        </div>
 
         <!-- File Table -->
         <div v-if="files.length > 0" class="glass-card overflow-hidden">
@@ -327,49 +492,52 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Segment Trimming (optional) -->
+        <!-- Segment Trimming (optional) — HH:MM:SS like SplitMerge -->
         <div class="glass-card p-4">
-          <button
-            @click="enableTrim = !enableTrim"
-            class="w-full flex items-center justify-between"
-          >
+          <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
               <Clock :size="16" class="text-text-secondary" />
-              <h3 class="text-base font-semibold text-text-primary">截取片段 (可选)</h3>
+              <h3 class="text-sm font-semibold text-text-primary">截取片段 (可选)</h3>
             </div>
-            <component
-              :is="enableTrim ? ChevronUp : ChevronDown"
-              :size="16"
-              class="text-text-secondary"
-            />
-          </button>
+            <button
+              @click="enableTrim = !enableTrim"
+              class="text-xs px-2 py-1 rounded-md border transition-colors"
+              :class="enableTrim
+                ? 'border-warning/50 text-warning bg-warning/10'
+                : 'border-bg-tertiary text-text-secondary'"
+            >
+              {{ enableTrim ? '已启用' : '关闭' }}
+            </button>
+          </div>
 
-          <Transition name="fade">
-            <div v-if="enableTrim" class="mt-3 space-y-3">
-              <div>
-                <label class="text-sm text-text-secondary mb-1 block">起始时间 (秒)</label>
-                <input
-                  v-model.number="startTime"
-                  type="number"
-                  min="0"
-                  step="0.1"
-                  class="input-field w-full"
-                  placeholder="0"
-                />
+          <p v-if="!enableTrim" class="text-xs text-text-muted">
+            关闭时转换整个视频；启用后可按起止时间精确截取片段
+          </p>
+
+          <template v-if="enableTrim">
+            <div class="flex items-center justify-center gap-2 flex-wrap mt-2">
+              <div class="flex items-center gap-1">
+                <span class="text-xs text-text-muted w-8">起始</span>
+                <input v-model="startHour" class="time-input" maxlength="2" />
+                <span class="text-text-muted text-xs">:</span>
+                <input v-model="startMin" class="time-input" maxlength="2" />
+                <span class="text-text-muted text-xs">:</span>
+                <input v-model="startSec" class="time-input" maxlength="2" />
               </div>
-              <div>
-                <label class="text-sm text-text-secondary mb-1 block">持续时长 (秒)</label>
-                <input
-                  v-model.number="segmentDuration"
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  class="input-field w-full"
-                  placeholder="5"
-                />
+              <span class="text-text-muted text-sm">→</span>
+              <div class="flex items-center gap-1">
+                <span class="text-xs text-text-muted w-8">结束</span>
+                <input v-model="endHour" class="time-input" maxlength="2" />
+                <span class="text-text-muted text-xs">:</span>
+                <input v-model="endMin" class="time-input" maxlength="2" />
+                <span class="text-text-muted text-xs">:</span>
+                <input v-model="endSec" class="time-input" maxlength="2" />
               </div>
             </div>
-          </Transition>
+            <p class="text-center text-xs text-warning mt-2">
+              截取时长: <span class="font-mono font-semibold">{{ trimDurationStr }}</span>
+            </p>
+          </template>
         </div>
 
         <!-- Output Settings -->
@@ -412,6 +580,10 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.video-player-container {
+  overflow: hidden;
+}
+
 .preset-btn {
   /* no hover animation */
 }
@@ -463,6 +635,19 @@ onUnmounted(() => {
 
 .input-field::placeholder {
   color: hsl(var(--muted-foreground));
+}
+
+.time-input {
+  width: 2rem;
+  padding: 3px 4px;
+  text-align: center;
+  font-size: 0.6875rem;
+  font-family: monospace;
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-base, 6px);
+  color: hsl(var(--foreground));
+  outline: none;
 }
 
 .fade-enter-active,
