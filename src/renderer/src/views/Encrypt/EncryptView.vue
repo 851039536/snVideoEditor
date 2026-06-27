@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
-import { Shield, Lock, Unlock, Folder, Play, Eye, EyeOff, X, FileVideo, FolderOpen } from 'lucide-vue-next'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import { Shield, Lock, Unlock, Folder, Play, Pause, Eye, EyeOff, X, FileVideo, FolderOpen } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
@@ -21,6 +21,36 @@ interface CryptoEntry {
 
 const files = ref<CryptoEntry[]>([])
 const errorMsg = ref('')
+
+// ---- Video Player ----
+const videoPlayer = ref<HTMLVideoElement | null>(null)
+const isPlaying = ref(false)
+const currentTime = ref(0)
+const duration = ref(0)
+interface VideoMeta { duration: number; width: number; height: number; bitrate: number; codec: string; size: number }
+const videoMeta = ref<VideoMeta | null>(null)
+const previewTempPath = ref('')
+const previewPreparing = ref(false)
+
+const videoSrc = computed((): string => {
+  if (files.value.length === 0) { return '' }
+  if (mode.value === 'encrypt') {
+    return `file:///${files.value[0].path.replace(/\\/g, '/')}`
+  }
+  // decrypt mode: use temp decrypted file
+  if (previewTempPath.value) {
+    return `file:///${previewTempPath.value.replace(/\\/g, '/')}`
+  }
+  return ''
+})
+
+const canPlayVideo = computed((): boolean => {
+  return files.value.length > 0
+})
+
+const needsPasswordForPreview = computed((): boolean => {
+  return mode.value === 'decrypt' && files.value.length > 0 && password.value.length < 4
+})
 
 // Password
 const password = ref('')
@@ -85,7 +115,185 @@ async function selectDir(): Promise<void> {
 
 function removeFile(index: number): void {
   files.value.splice(index, 1)
+  if (index === 0) {
+    resetPlayer()
+  }
 }
+
+// ---- Video playback helpers ----
+
+function secondsToHMS(totalSec: number): string {
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = Math.floor(totalSec % 60)
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+function formatSize(bytes: number): string {
+  if (bytes === 0) { return '0 B' }
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
+}
+
+function getFileName(filePath: string): string {
+  return filePath.split(/[/\\]/).pop() || filePath
+}
+
+async function cleanupPreviewTemp(): Promise<void> {
+  if (previewTempPath.value) {
+    await window.electronAPI.deleteFile(previewTempPath.value)
+    previewTempPath.value = ''
+  }
+}
+
+async function resetPlayer(): Promise<void> {
+  if (videoPlayer.value) {
+    videoPlayer.value.pause()
+  }
+  isPlaying.value = false
+  currentTime.value = 0
+  duration.value = 0
+  videoMeta.value = null
+  await cleanupPreviewTemp()
+}
+
+async function prepareDecryptPreview(): Promise<void> {
+  if (mode.value !== 'decrypt') { return }
+  const firstFile = files.value[0]
+  if (!firstFile || password.value.length < 4) { return }
+
+  // Clean up old temp first
+  await cleanupPreviewTemp()
+
+  previewPreparing.value = true
+  try {
+    const tempDir = await window.electronAPI.getTempDir()
+    const tempName = `sn_preview_${Date.now()}.mp4`
+    const tempPath = `${tempDir}/${tempName}`
+
+    const success = await window.electronAPI.decryptFile({
+      input: firstFile.path,
+      output: tempPath,
+      password: password.value
+    })
+
+    if (!success) {
+      errorMsg.value = '预览解密失败，请检查密码是否正确'
+      previewPreparing.value = false
+      return
+    }
+
+    // Verify it's still the current file (not switched during async)
+    if (files.value[0]?.path !== firstFile.path) {
+      await window.electronAPI.deleteFile(tempPath)
+      previewPreparing.value = false
+      return
+    }
+
+    previewTempPath.value = tempPath
+    await nextTick()
+    if (videoPlayer.value) {
+      videoPlayer.value.load()
+      videoPlayer.value.currentTime = 0
+    }
+
+    // Load meta from decrypted temp
+    try {
+      const meta = await window.electronAPI.getVideoMeta(tempPath)
+      if (files.value[0]?.path === firstFile.path) {
+        videoMeta.value = meta as VideoMeta
+        duration.value = meta.duration
+      }
+    } catch (_e) {
+      // ignore
+    }
+  } catch (_e) {
+    // ignore
+  } finally {
+    previewPreparing.value = false
+  }
+}
+
+async function loadVideoMeta(filePath: string): Promise<void> {
+  try {
+    const meta = await window.electronAPI.getVideoMeta(filePath)
+    if (files.value.length === 0 || files.value[0]?.path !== filePath) { return }
+    videoMeta.value = meta as VideoMeta
+    duration.value = meta.duration
+    await nextTick()
+    if (videoPlayer.value) {
+      videoPlayer.value.load()
+      videoPlayer.value.currentTime = 0
+    }
+  } catch (_e) {
+    // ignore meta load errors
+  }
+}
+
+async function togglePlay(): Promise<void> {
+  const vp = videoPlayer.value
+  if (!vp) { return }
+  if (vp.paused) {
+    try { await vp.play() } catch (_e) { /* ignore */ }
+  } else {
+    vp.pause()
+  }
+}
+
+function onVideoPlay(): void { isPlaying.value = true }
+function onVideoPause(): void { isPlaying.value = false }
+function onVideoEnded(): void { isPlaying.value = false }
+
+function onTimeUpdate(): void {
+  if (!videoPlayer.value) { return }
+  currentTime.value = videoPlayer.value.currentTime
+}
+
+function onVideoLoaded(): void {
+  if (videoPlayer.value) {
+    videoPlayer.value.currentTime = 0
+    currentTime.value = 0
+  }
+}
+
+function onVideoError(e: Event): void {
+  const video = e.target as HTMLVideoElement
+  console.error('视频加载失败:', video?.error?.message)
+}
+
+// Auto-load meta / prepare preview when first file changes
+watch(() => files.value[0]?.path, (newPath) => {
+  if (!newPath) {
+    resetPlayer()
+    return
+  }
+  if (mode.value === 'encrypt') {
+    loadVideoMeta(newPath)
+  } else if (mode.value === 'decrypt') {
+    prepareDecryptPreview()
+  }
+})
+
+// Re-prepare decrypt preview when password changes (debounced by user typing)
+let previewDebounceTimer: ReturnType<typeof setTimeout> | null = null
+watch(password, (newPwd) => {
+  if (mode.value !== 'decrypt' || files.value.length === 0) { return }
+  if (previewDebounceTimer) { clearTimeout(previewDebounceTimer) }
+  if (newPwd.length >= 4) {
+    previewDebounceTimer = setTimeout(() => {
+      prepareDecryptPreview()
+    }, 600)
+  } else {
+    resetPlayer()
+  }
+})
+
+// Reset player when switching mode
+watch(mode, () => {
+  resetPlayer()
+})
 
 async function selectOutputDirForAll(): Promise<void> {
   const dir = await window.electronAPI.selectDirectory()
@@ -196,6 +404,8 @@ function switchMode(newMode: 'encrypt' | 'decrypt'): void {
 
 onUnmounted(() => {
   window.electronAPI?.removeProgressListener()
+  cleanupPreviewTemp()
+  if (previewDebounceTimer) { clearTimeout(previewDebounceTimer) }
 })
 </script>
 
@@ -245,6 +455,65 @@ onUnmounted(() => {
           <FolderOpen :size="16" />
           {{ mode === 'encrypt' ? '扫描视频文件夹' : '扫描加密文件夹' }}
         </button>
+
+        <!-- Video Preview -->
+        <div v-if="canPlayVideo" class="video-player-container glass-card">
+          <!-- Needs password for decrypt preview -->
+          <div v-if="needsPasswordForPreview" class="flex items-center justify-center h-36 bg-black/50 rounded-t-xl">
+            <div class="text-center">
+              <Lock :size="24" class="text-text-muted mx-auto mb-2" />
+              <p class="text-sm text-text-secondary">输入解密密码后可预览</p>
+            </div>
+          </div>
+          <!-- Preparing decrypt preview -->
+          <div v-else-if="previewPreparing" class="flex items-center justify-center h-36 bg-black/50 rounded-t-xl">
+            <div class="text-center">
+              <div class="w-6 h-6 mx-auto mb-2 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
+              <p class="text-sm text-text-secondary">正在准备预览...</p>
+            </div>
+          </div>
+          <!-- Video element -->
+          <video
+            v-else-if="videoSrc"
+            ref="videoPlayer"
+            :src="videoSrc"
+            class="w-full rounded-t-xl"
+            style="max-height: 280px; background: #000;"
+            preload="auto"
+            @timeupdate="onTimeUpdate"
+            @play="onVideoPlay"
+            @pause="onVideoPause"
+            @ended="onVideoEnded"
+            @error="onVideoError"
+            @loadedmetadata="onVideoLoaded"
+          />
+          <div v-else class="flex items-center justify-center h-36 bg-black/50 rounded-t-xl">
+            <FileVideo :size="32" class="text-text-muted opacity-30" />
+          </div>
+
+          <!-- Player Controls -->
+          <div class="flex items-center justify-between px-3 py-2 bg-bg-secondary/80">
+            <div class="flex items-center gap-2">
+              <button
+                @click="togglePlay"
+                class="p-1.5 rounded-full bg-accent-blue"
+              >
+                <Pause v-if="isPlaying" :size="14" class="text-white" />
+                <Play v-else :size="14" class="text-white ml-0.5" />
+              </button>
+              <span class="text-xs font-mono text-text-secondary">
+                {{ secondsToHMS(currentTime) }} / {{ secondsToHMS(duration) }}
+              </span>
+            </div>
+            <div class="flex items-center gap-3 text-xs text-text-muted">
+              <span v-if="videoMeta">{{ videoMeta.width }}×{{ videoMeta.height }}</span>
+              <span v-if="videoMeta">{{ formatSize(videoMeta.size) }}</span>
+              <span class="text-accent-blue font-mono truncate max-w-[140px]">
+                {{ getFileName(files[0]?.path || '') }}
+              </span>
+            </div>
+          </div>
+        </div>
 
         <!-- File List -->
         <div v-if="files.length > 0" class="glass-card p-4 space-y-2 max-h-72 overflow-y-auto">
@@ -378,6 +647,10 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.video-player-container {
+  overflow: hidden;
+}
+
 .input-field {
   padding: 10px 14px;
   background: hsl(var(--muted));
