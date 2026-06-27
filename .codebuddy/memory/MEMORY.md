@@ -42,8 +42,10 @@ snVideoEditor/
 - Vue 组件使用 Composition API + `<script setup lang="ts">`
 
 ## 设计风格
-- 深色科技风（Dark Tech）
-- 配色: 背景 #0D1117/#161B22/#21262D, 文字 #E6EDF3/#8B949E
+- 深色科技风（Dark Tech），支持一键切换浅色主题（Sun/Moon 按钮）
+- 主题通过 `<html>.light` class + CSS 变量双体系驱动，localStorage 持久化
+- 深色配色: bg #0D1117/#161B22/#21262D, text #E6EDF3/#8B949E
+- 浅色配色: bg #FFFFFF/#F6F8FA/#EBEDF0, text #1F2328/#656D76
 - 渐变: accent-blue #5B8DEF → accent-purple #A78BFA
 - 霓虹蓝紫光晕卡片 + 微动效
 

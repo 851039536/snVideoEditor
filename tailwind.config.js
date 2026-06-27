@@ -8,19 +8,19 @@ export default {
   theme: {
     extend: {
       colors: {
-        'bg-primary': '#0D1117',
-        'bg-secondary': '#161B22',
-        'bg-tertiary': '#21262D',
-        'text-primary': '#E6EDF3',
-        'text-secondary': '#8B949E',
-        'text-muted': '#484F58',
-        'accent-blue': '#5B8DEF',
-        'accent-purple': '#7C5CFC',
-        'accent-light': '#A78BFA',
-        'success': '#3FB950',
-        'danger': '#F85149',
-        'warning': '#D29922',
-        'info': '#58A6FF'
+        'bg-primary': 'var(--color-bg-primary)',
+        'bg-secondary': 'var(--color-bg-secondary)',
+        'bg-tertiary': 'var(--color-bg-tertiary)',
+        'text-primary': 'var(--color-text-primary)',
+        'text-secondary': 'var(--color-text-secondary)',
+        'text-muted': 'var(--color-text-muted)',
+        'accent-blue': 'var(--color-accent-blue)',
+        'accent-purple': 'var(--color-accent-purple)',
+        'accent-light': 'var(--color-accent-light)',
+        'success': 'var(--color-success)',
+        'danger': 'var(--color-danger)',
+        'warning': 'var(--color-warning)',
+        'info': 'var(--color-info)'
       },
       fontFamily: {
         sans: ['PingFang SC', 'Microsoft YaHei', 'sans-serif']

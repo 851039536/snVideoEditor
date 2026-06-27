@@ -57,10 +57,14 @@ src/
 - 新增功能页面时同步更新 `router/index.ts`、HomeView 入口卡片
 
 ## 设计风格
-- 深色科技风（Dark Tech）
-- 配色: bg #0D1117 / #161B22 / #21262D, text #E6EDF3 / #8B949E
-- 渐变主色: accent-blue #5B8DEF → accent-purple #A78BFA
+- 深色科技风（Dark Tech），支持一键切换浅色主题
+- 主题通过 `<html>` 上的 `.light` class + CSS 变量双体系驱动
+- 配色全部使用 CSS 变量，Tailwind 通过 `var(--color-*)` 引用
+- 深色: bg #0D1117 / #161B22 / #21262D, text #E6EDF3 / #8B949E
+- 浅色: bg #FFFFFF / #F6F8FA / #EBEDF0, text #1F2328 / #656D76
+- 渐变主色: accent-blue → accent-purple
 - 玻璃态卡片 + 霓虹光晕 + 微动效
+- 主题切换按钮位于 SideNav 底部，localStorage 持久化
 
 ## 构建注意事项
 - **禁止私自执行 `npm run build` 或 `dotnet build`**，太慢太卡，修改后由用户自行验证

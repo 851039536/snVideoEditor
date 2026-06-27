@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    /* Dark theme (default) */
     --background: 240 24% 15%;
     --foreground: 210 40% 98%;
     --card: 240 24% 15%;
@@ -15,11 +16,54 @@
     --border: 217 19% 27%;
     --ring: 224 76% 48%;
 
+    /* CSS variable tokens for Tailwind colors */
+    --color-bg-primary: #0D1117;
+    --color-bg-secondary: #161B22;
+    --color-bg-tertiary: #21262D;
+    --color-text-primary: #E6EDF3;
+    --color-text-secondary: #8B949E;
+    --color-text-muted: #484F58;
+    --color-accent-blue: #5B8DEF;
+    --color-accent-purple: #7C5CFC;
+    --color-accent-light: #A78BFA;
+    --color-success: #3FB950;
+    --color-danger: #F85149;
+    --color-warning: #D29922;
+    --color-info: #58A6FF;
+
     /* Design tokens */
     --radius-sm: 4px;
     --radius-base: 6px;
     --radius-md: 8px;
     --radius-lg: 12px;
+  }
+
+  .light {
+    /* Light theme */
+    --background: 0 0% 100%;
+    --foreground: 215 28% 17%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 28% 17%;
+    --primary: 220 70% 50%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --border: 214 32% 91%;
+    --ring: 224 76% 48%;
+
+    --color-bg-primary: #FFFFFF;
+    --color-bg-secondary: #F6F8FA;
+    --color-bg-tertiary: #EBEDF0;
+    --color-text-primary: #1F2328;
+    --color-text-secondary: #656D76;
+    --color-text-muted: #8B949E;
+    --color-accent-blue: #3B71D0;
+    --color-accent-purple: #6C4CD0;
+    --color-accent-light: #8B6CE0;
+    --color-success: #2DA44E;
+    --color-danger: #CF222E;
+    --color-warning: #BF8700;
+    --color-info: #0969DA;
   }
 
   * {

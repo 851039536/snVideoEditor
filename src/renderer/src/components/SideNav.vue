@@ -2,11 +2,13 @@
 import { useRouter } from 'vue-router'
 import { 
   Home, Scissors, FileVideo, Shield, 
-  ChevronLeft, ChevronRight, Video
+  ChevronLeft, ChevronRight, Video, Sun, Moon
 } from 'lucide-vue-next'
 import { ref, computed } from 'vue'
+import { useSettingsStore } from '@/stores/settings'
 
 const router = useRouter()
+const settingsStore = useSettingsStore()
 const collapsed = ref(false)
 
 interface NavItem {
@@ -91,8 +93,18 @@ const navWidth = computed((): string => {
       </button>
     </div>
 
-    <!-- Collapse Toggle -->
-    <div class="p-2 border-t border-bg-tertiary">
+    <!-- Bottom Actions -->
+    <div class="p-2 border-t border-bg-tertiary space-y-1">
+      <!-- Theme Toggle -->
+      <button
+        @click="settingsStore.toggleTheme()"
+        class="w-full flex items-center justify-center p-2 rounded-lg hover:bg-bg-tertiary transition-colors duration-200"
+        :title="settingsStore.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
+      >
+        <Sun v-if="settingsStore.theme === 'dark'" :size="18" class="text-warning" />
+        <Moon v-else :size="18" class="text-accent-purple" />
+      </button>
+      <!-- Collapse Toggle -->
       <button
         @click="toggleCollapsed"
         class="w-full flex items-center justify-center p-2 rounded-lg hover:bg-bg-tertiary transition-colors duration-200"
