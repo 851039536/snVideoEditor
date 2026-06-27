@@ -5,7 +5,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     name: 'Home',
-    component: () => import('@/views/HomeView.vue')
+    component: () => import('@/views/Home/HomeView.vue')
   },
   {
     path: '/split-merge',
@@ -15,12 +15,12 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/compress',
     name: 'Compress',
-    component: () => import('@/views/CompressView.vue')
+    component: () => import('@/views/Compress/CompressView.vue')
   },
   {
     path: '/encrypt',
     name: 'Encrypt',
-    component: () => import('@/views/EncryptView.vue')
+    component: () => import('@/views/Encrypt/EncryptView.vue')
   }
 ]
 
