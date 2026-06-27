@@ -650,7 +650,13 @@ onUnmounted(() => {
 
         <!-- Timeline Bar -->
         <div class="glass-card p-4" style="overflow: visible;">
-          <h3 class="text-sm font-semibold text-text-primary mb-3">裁剪时间轴</h3>
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-text-primary">裁剪时间轴</h3>
+            <span class="text-xs text-text-secondary">
+              选中片段时长：
+              <span class="text-sm font-mono text-accent-blue font-semibold">{{ clipDurationStr }}</span>
+            </span>
+          </div>
 
           <!-- The timeline -->
           <div
@@ -694,13 +700,6 @@ onUnmounted(() => {
             <span class="text-xs font-mono text-accent-purple">{{ endTimeStr }}</span>
           </div>
 
-          <!-- Duration label -->
-          <div class="flex justify-center mt-3">
-            <span class="text-xs text-text-secondary">
-              选中片段时长：
-              <span class="text-sm font-mono text-accent-blue font-semibold">{{ clipDurationStr }}</span>
-            </span>
-          </div>
         </div>
 
         <!-- Fine-tuning inputs -->
