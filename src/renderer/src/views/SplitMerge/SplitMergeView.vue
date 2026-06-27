@@ -987,10 +987,10 @@ onUnmounted(() => {
 
 /* ---- Time Input ---- */
 .time-input {
-  width: 32px;
+  width: 2rem;
   padding: 3px 4px;
   text-align: center;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-family: monospace;
   background: hsl(var(--muted));
   border: 1px solid hsl(var(--border));

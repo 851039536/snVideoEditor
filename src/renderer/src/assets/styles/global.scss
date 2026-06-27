@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    font-size: 14px;
+  }
+
   :root {
     /* Dark theme (default) */
     --background: 240 24% 15%;

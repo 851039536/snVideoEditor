@@ -34,7 +34,7 @@ const toggleCollapsed = (): void => {
 }
 
 const navWidth = computed((): string => {
-  return collapsed.value ? '64px' : '200px'
+  return collapsed.value ? '4rem' : '12.5rem'
 })
 </script>
 
