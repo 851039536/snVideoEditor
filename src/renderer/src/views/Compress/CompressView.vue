@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { FileVideo, Folder, Play, X, Info, Zap } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
@@ -158,6 +158,10 @@ function formatDuration(seconds: number): string {
 
 const canStart = computed((): boolean => {
   return files.value.length > 0 && !progressStore.isProcessing
+})
+
+onUnmounted(() => {
+  window.electronAPI?.removeProgressListener()
 })
 </script>
 

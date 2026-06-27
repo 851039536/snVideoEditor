@@ -100,6 +100,9 @@ export interface ElectronAPI {
   windowIsMaximized: () => Promise<boolean>
   onMaximizeChange: (callback: (isMaximized: boolean) => void) => void
   removeMaximizeChangeListener: () => void
+
+  // File deletion
+  deleteFile: (filePath: string) => Promise<boolean>
 }
 
 declare global {

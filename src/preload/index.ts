@@ -117,6 +117,7 @@ const electronAPI = {
 
   // Progress
   onProgress: (callback: (info: ProgressInfo) => void): void => {
+    ipcRenderer.removeAllListeners('operation:progress')
     ipcRenderer.on('operation:progress', (_event, data: ProgressInfo) => {
       callback(data)
     })
@@ -154,7 +155,11 @@ const electronAPI = {
 
   removeMaximizeChangeListener: (): void => {
     ipcRenderer.removeAllListeners('window:maximizeChange')
-  }
+  },
+
+  // File deletion
+  deleteFile: (filePath: string): Promise<boolean> =>
+    ipcRenderer.invoke('file:delete', filePath)
 }
 
 if (process.contextIsolated) {

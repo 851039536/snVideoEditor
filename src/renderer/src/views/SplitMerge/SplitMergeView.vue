@@ -218,10 +218,15 @@ function loadFirstFileOnly(): void {
 
 async function loadVideoMeta(filePath: string): Promise<void> {
   try {
-    videoMeta.value = await window.electronAPI.getVideoMeta(filePath)
-    duration.value = videoMeta.value.duration
+    const meta = await window.electronAPI.getVideoMeta(filePath)
+    // Guard: discard stale metadata if file has changed while loading
+    if (files.value.length === 0 || files.value[0] !== filePath) {
+      return
+    }
+    videoMeta.value = meta
+    duration.value = meta.duration
     trimStartSec.value = 0
-    trimEndSec.value = videoMeta.value.duration
+    trimEndSec.value = meta.duration
     currentTime.value = 0
     syncManualToTrim()
     await nextTick()
@@ -258,6 +263,9 @@ watch(mode, (newMode) => {
     }
   } else if (newMode === 'merge') {
     files.value = []
+    outputName.value = ''
+    outputDir.value = ''
+    errorMsg.value = ''
   }
 })
 
@@ -427,6 +435,10 @@ async function cutToClipList(): Promise<void> {
 }
 
 function removeClip(index: number): void {
+  const clip = clips.value[index]
+  if (clip) {
+    window.electronAPI.deleteFile(clip.outputFile)
+  }
   clips.value.splice(index, 1)
 }
 
@@ -479,6 +491,10 @@ async function startProcess(): Promise<void> {
       output: outputDir.value
     })
     if (result) {
+      // Clean up selected clip temp files after successful merge
+      for (const c of clips.value.filter((c) => c.selected)) {
+        window.electronAPI.deleteFile(c.outputFile)
+      }
       store.finish()
     }
   } catch (e) {

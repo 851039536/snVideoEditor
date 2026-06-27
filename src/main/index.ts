@@ -238,6 +238,18 @@ function registerAppHandlers(): void {
   ipcMain.handle('app:getTempDir', async () => {
     return getTempClipsDir()
   })
+
+  ipcMain.handle('file:delete', async (_event, filePath: string) => {
+    try {
+      const fs = require('fs')
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath)
+      }
+      return true
+    } catch {
+      return false
+    }
+  })
 }
 
 // Cancel operation

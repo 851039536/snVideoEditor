@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { Shield, Lock, Unlock, Folder, Play, Eye, EyeOff, X, FileVideo, FolderOpen } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
@@ -193,6 +193,10 @@ function switchMode(newMode: 'encrypt' | 'decrypt'): void {
   files.value = []
   errorMsg.value = ''
 }
+
+onUnmounted(() => {
+  window.electronAPI?.removeProgressListener()
+})
 </script>
 
 <template>

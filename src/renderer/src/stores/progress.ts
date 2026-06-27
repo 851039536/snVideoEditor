@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import type { ProgressInfo } from '../../../preload/index'
 
 export const useProgressStore = defineStore('progress', () => {
@@ -7,14 +7,15 @@ export const useProgressStore = defineStore('progress', () => {
   const progress = ref<ProgressInfo | null>(null)
   const operationType = ref<string>('')
   const startTime = ref<number>(0)
+  const elapsedSeconds = ref(0)
+  let timer: ReturnType<typeof setInterval> | null = null
 
   const elapsed = computed((): string => {
-    if (startTime.value === 0) {
+    if (elapsedSeconds.value === 0) {
       return '00:00'
     }
-    const seconds = Math.floor((Date.now() - startTime.value) / 1000)
-    const m = Math.floor(seconds / 60)
-    const s = seconds % 60
+    const m = Math.floor(elapsedSeconds.value / 60)
+    const s = elapsedSeconds.value % 60
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
   })
 
@@ -30,6 +31,21 @@ export const useProgressStore = defineStore('progress', () => {
     return progress.value?.totalFiles || 0
   })
 
+  function startTimer(): void {
+    stopTimer()
+    elapsedSeconds.value = 0
+    timer = setInterval(() => {
+      elapsedSeconds.value++
+    }, 1000)
+  }
+
+  function stopTimer(): void {
+    if (timer !== null) {
+      clearInterval(timer)
+      timer = null
+    }
+  }
+
   function start(type: string): void {
     isProcessing.value = true
     operationType.value = type
@@ -42,6 +58,7 @@ export const useProgressStore = defineStore('progress', () => {
       speed: '准备中...',
       eta: '计算中...'
     }
+    startTimer()
   }
 
   function update(info: ProgressInfo): void {
@@ -55,7 +72,7 @@ export const useProgressStore = defineStore('progress', () => {
       progress.value.eta = '0s'
     }
     isProcessing.value = false
-    startTime.value = 0
+    stopTimer()
   }
 
   function reset(): void {
@@ -63,6 +80,7 @@ export const useProgressStore = defineStore('progress', () => {
     progress.value = null
     operationType.value = ''
     startTime.value = 0
+    stopTimer()
   }
 
   function cancel(): void {
