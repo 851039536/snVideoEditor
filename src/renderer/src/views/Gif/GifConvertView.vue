@@ -120,10 +120,14 @@ const files = ref<FileEntry[]>([])
 watch(() => files.value[0]?.meta, (meta) => {
   if (!meta || meta.duration <= 0) { return }
   maxDuration.value = meta.duration
-  const hms = secondsToHMS(meta.duration).split(':')
-  endHour.value = hms[0]
-  endMin.value = hms[1]
-  endSec.value = hms[2]
+  // Only auto-set end if not yet set by user (keep visible selection range)
+  if (trimDuration.value <= 0 || trimEndSec.value > meta.duration) {
+    const clampEnd = Math.min(5, meta.duration)
+    const hms = secondsToHMS(clampEnd).split(':')
+    endHour.value = hms[0]
+    endMin.value = hms[1]
+    endSec.value = hms[2]
+  }
 })
 const errorMsg = ref('')
 
@@ -171,11 +175,85 @@ function onVideoError(e: Event): void {
   console.error('视频加载失败:', v?.error?.message)
 }
 
-// Seek video when trim times change
+// Seek video when trim times change (from manual inputs only)
 watch([trimStartSec, trimEndSec], ([start]) => {
   if (!enableTrim.value || !videoPlayer.value) { return }
   videoPlayer.value.currentTime = start
   currentTime.value = start
+})
+
+// ---- Timeline drag handles ----
+
+const timelineRef = ref<HTMLDivElement | null>(null)
+const dragging = ref<'start' | 'end' | null>(null)
+
+const startPercent = computed((): number => {
+  if (maxDuration.value <= 0) { return 0 }
+  return (trimStartSec.value / maxDuration.value) * 100
+})
+
+const endPercent = computed((): number => {
+  if (maxDuration.value <= 0) { return 100 }
+  return (trimEndSec.value / maxDuration.value) * 100
+})
+
+const playheadPercent = computed((): number => {
+  if (maxDuration.value <= 0) { return 0 }
+  return (currentTime.value / maxDuration.value) * 100
+})
+
+function getTimelineTime(clientX: number): number {
+  const el = timelineRef.value
+  if (!el || maxDuration.value <= 0) { return 0 }
+  const rect = el.getBoundingClientRect()
+  const pct = clamp((clientX - rect.left) / rect.width, 0, 1)
+  return pct * maxDuration.value
+}
+
+function startHandleDrag(handle: 'start' | 'end', e: MouseEvent): void {
+  dragging.value = handle
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+function onTimelineClick(e: MouseEvent): void {
+  if (dragging.value) { return }
+  const t = getTimelineTime(e.clientX)
+  if (videoPlayer.value) {
+    videoPlayer.value.currentTime = t
+    currentTime.value = t
+  }
+}
+
+function onTimelineMove(e: MouseEvent): void {
+  if (!dragging.value || !enableTrim.value) { return }
+  const t = getTimelineTime(e.clientX)
+  if (dragging.value === 'start') {
+    const clamped = clamp(t, 0, trimEndSec.value - 0.1)
+    const hms = secondsToHMS(clamped).split(':')
+    startHour.value = hms[0]; startMin.value = hms[1]; startSec.value = hms[2]
+    if (videoPlayer.value) {
+      videoPlayer.value.currentTime = clamped
+      currentTime.value = clamped
+    }
+  } else {
+    const clamped = clamp(t, trimStartSec.value + 0.1, maxDuration.value)
+    const hms = secondsToHMS(clamped).split(':')
+    endHour.value = hms[0]; endMin.value = hms[1]; endSec.value = hms[2]
+  }
+}
+
+function onGlobalMouseMove(e: MouseEvent): void { onTimelineMove(e) }
+function onGlobalMouseUp(): void { dragging.value = null }
+
+if (typeof window !== 'undefined') {
+  document.addEventListener('mousemove', onGlobalMouseMove)
+  document.addEventListener('mouseup', onGlobalMouseUp)
+}
+
+onUnmounted(() => {
+  document.removeEventListener('mousemove', onGlobalMouseMove)
+  document.removeEventListener('mouseup', onGlobalMouseUp)
 })
 
 const computedWidth = computed((): number => {
@@ -372,6 +450,75 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- Segment Trimming — Timeline + Time Inputs -->
+        <div v-if="files.length > 0" class="glass-card p-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <Clock :size="16" class="text-text-secondary" />
+              <h3 class="text-sm font-semibold text-text-primary">截取片段</h3>
+            </div>
+            <button
+              @click="enableTrim = !enableTrim"
+              class="text-xs px-3 py-1 rounded-md border transition-colors font-medium"
+              :class="enableTrim
+                ? 'border-warning/50 text-warning bg-warning/10'
+                : 'border-bg-tertiary text-text-secondary'"
+            >
+              {{ enableTrim ? '已启用' : '关闭' }}
+            </button>
+          </div>
+
+          <p v-if="!enableTrim" class="text-xs text-text-muted mb-3">
+            拖拽下方摇杆选取范围，点击「关闭」按钮启用截取
+          </p>
+
+          <!-- Timeline Bar with Drag Handles -->
+          <div class="mb-3">
+            <div
+              ref="timelineRef"
+              class="timeline-track"
+              @click="onTimelineClick"
+            >
+              <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
+              <div class="timeline-selected" :style="{ width: (endPercent - startPercent) + '%' }">
+                <div class="timeline-playhead" :style="{ left: ((playheadPercent - startPercent) / (endPercent - startPercent) * 100) + '%' }" />
+                <div class="trim-handle trim-handle-start" @mousedown="startHandleDrag('start', $event)" />
+                <div class="trim-handle trim-handle-end" @mousedown="startHandleDrag('end', $event)" />
+              </div>
+              <div class="timeline-dimmed-r" :style="{ width: (100 - endPercent) + '%' }" />
+            </div>
+            <div class="flex justify-between mt-1.5 px-1">
+              <span class="text-xs font-mono text-accent-blue">{{ secondsToHMS(trimStartSec) }}</span>
+              <span class="text-xs font-mono text-text-muted">{{ secondsToHMS(maxDuration) }}</span>
+              <span class="text-xs font-mono text-accent-purple">{{ secondsToHMS(trimEndSec) }}</span>
+            </div>
+          </div>
+
+          <!-- HH:MM:SS fine-tuning -->
+          <div class="flex items-center justify-center gap-2 flex-wrap">
+            <div class="flex items-center gap-1">
+              <span class="text-xs text-text-muted w-8">起始</span>
+              <input v-model="startHour" class="time-input" maxlength="2" />
+              <span class="text-text-muted text-xs">:</span>
+              <input v-model="startMin" class="time-input" maxlength="2" />
+              <span class="text-text-muted text-xs">:</span>
+              <input v-model="startSec" class="time-input" maxlength="2" />
+            </div>
+            <span class="text-text-muted text-sm">→</span>
+            <div class="flex items-center gap-1">
+              <span class="text-xs text-text-muted w-8">结束</span>
+              <input v-model="endHour" class="time-input" maxlength="2" />
+              <span class="text-text-muted text-xs">:</span>
+              <input v-model="endMin" class="time-input" maxlength="2" />
+              <span class="text-text-muted text-xs">:</span>
+              <input v-model="endSec" class="time-input" maxlength="2" />
+            </div>
+          </div>
+          <p class="text-center text-xs text-warning mt-2">
+            截取时长: <span class="font-mono font-semibold">{{ trimDurationStr }}</span>
+          </p>
+        </div>
+
         <!-- File Table -->
         <div v-if="files.length > 0" class="glass-card overflow-hidden">
           <table class="w-full text-sm">
@@ -492,54 +639,6 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Segment Trimming (optional) — HH:MM:SS like SplitMerge -->
-        <div class="glass-card p-4">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-2">
-              <Clock :size="16" class="text-text-secondary" />
-              <h3 class="text-sm font-semibold text-text-primary">截取片段 (可选)</h3>
-            </div>
-            <button
-              @click="enableTrim = !enableTrim"
-              class="text-xs px-2 py-1 rounded-md border transition-colors"
-              :class="enableTrim
-                ? 'border-warning/50 text-warning bg-warning/10'
-                : 'border-bg-tertiary text-text-secondary'"
-            >
-              {{ enableTrim ? '已启用' : '关闭' }}
-            </button>
-          </div>
-
-          <p v-if="!enableTrim" class="text-xs text-text-muted">
-            关闭时转换整个视频；启用后可按起止时间精确截取片段
-          </p>
-
-          <template v-if="enableTrim">
-            <div class="flex items-center justify-center gap-2 flex-wrap mt-2">
-              <div class="flex items-center gap-1">
-                <span class="text-xs text-text-muted w-8">起始</span>
-                <input v-model="startHour" class="time-input" maxlength="2" />
-                <span class="text-text-muted text-xs">:</span>
-                <input v-model="startMin" class="time-input" maxlength="2" />
-                <span class="text-text-muted text-xs">:</span>
-                <input v-model="startSec" class="time-input" maxlength="2" />
-              </div>
-              <span class="text-text-muted text-sm">→</span>
-              <div class="flex items-center gap-1">
-                <span class="text-xs text-text-muted w-8">结束</span>
-                <input v-model="endHour" class="time-input" maxlength="2" />
-                <span class="text-text-muted text-xs">:</span>
-                <input v-model="endMin" class="time-input" maxlength="2" />
-                <span class="text-text-muted text-xs">:</span>
-                <input v-model="endSec" class="time-input" maxlength="2" />
-              </div>
-            </div>
-            <p class="text-center text-xs text-warning mt-2">
-              截取时长: <span class="font-mono font-semibold">{{ trimDurationStr }}</span>
-            </p>
-          </template>
-        </div>
-
         <!-- Output Settings -->
         <div class="glass-card p-4">
           <h3 class="text-base font-semibold text-text-primary mb-3">输出设置</h3>
@@ -648,6 +747,80 @@ onUnmounted(() => {
   border-radius: var(--radius-base, 6px);
   color: hsl(var(--foreground));
   outline: none;
+}
+
+/* ---- Timeline ---- */
+.timeline-track {
+  position: relative;
+  width: 100%;
+  height: 40px;
+  background: hsl(var(--background));
+  border-radius: 10px;
+  display: flex;
+  overflow: visible;
+  cursor: pointer;
+  user-select: none;
+}
+
+.timeline-dimmed-l,
+.timeline-dimmed-r {
+  height: 100%;
+  background: rgba(22, 27, 34, 0.8);
+  flex-shrink: 0;
+}
+
+.timeline-selected {
+  position: relative;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(240, 160, 80, 0.3), rgba(210, 153, 34, 0.35));
+  border-left: 2px solid #F0A050;
+  border-right: 2px solid #D29922;
+  flex-shrink: 0;
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: #FF6B6B;
+  outline: 1px solid rgba(255, 107, 107, 0.3);
+  z-index: 5;
+  transition: left 0.1s linear;
+  pointer-events: none;
+}
+
+/* ---- Trim Handles ---- */
+.trim-handle {
+  position: absolute;
+  top: -4px;
+  width: 16px;
+  height: calc(100% + 8px);
+  cursor: ew-resize;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.trim-handle-start {
+  left: -8px;
+  border-radius: 2px 0 0 2px;
+}
+
+.trim-handle-end {
+  right: -8px;
+  border-radius: 0 2px 2px 0;
+}
+
+.trim-handle::after {
+  content: '';
+  position: absolute;
+  width: 3px;
+  height: 60%;
+  border-radius: 2px;
+  background: hsl(var(--foreground));
+  opacity: 0.8;
 }
 
 .fade-enter-active,
