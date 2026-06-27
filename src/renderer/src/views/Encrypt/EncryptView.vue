@@ -216,16 +216,16 @@ onUnmounted(() => {
     <div class="flex gap-1 mb-6 p-1 rounded-lg bg-bg-tertiary w-fit">
       <button
         @click="switchMode('encrypt')"
-        class="px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2"
-        :class="mode === 'encrypt' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+        class="px-4 py-1.5 rounded-md text-sm font-medium flex items-center gap-2"
+        :class="mode === 'encrypt' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary'"
       >
         <Lock :size="14" />
         加密
       </button>
       <button
         @click="switchMode('decrypt')"
-        class="px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200 flex items-center gap-2"
-        :class="mode === 'decrypt' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+        class="px-4 py-1.5 rounded-md text-sm font-medium flex items-center gap-2"
+        :class="mode === 'decrypt' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary'"
       >
         <Unlock :size="14" />
         解密
@@ -240,7 +240,7 @@ onUnmounted(() => {
         <!-- Directory Scan Button -->
         <button
           @click="selectDir"
-          class="w-full flex items-center justify-center gap-2 p-3 rounded-lg border border-dashed border-bg-tertiary hover:border-accent-blue/30 hover:bg-bg-tertiary/30 text-text-secondary hover:text-text-primary transition-all text-sm"
+          class="w-full flex items-center justify-center gap-2 p-3 rounded-lg border border-dashed border-bg-tertiary text-text-secondary text-sm"
         >
           <FolderOpen :size="16" />
           {{ mode === 'encrypt' ? '扫描视频文件夹' : '扫描加密文件夹' }}
@@ -251,13 +251,13 @@ onUnmounted(() => {
           <div
             v-for="(file, idx) in files"
             :key="file.path"
-            class="flex items-center gap-2 p-2 rounded-lg bg-bg-tertiary/50 hover:bg-bg-tertiary transition-colors group"
+            class="flex items-center gap-2 p-2 rounded-lg bg-bg-tertiary/50 transition-colors group"
           >
             <FileVideo :size="16" class="text-accent-blue flex-shrink-0" />
             <span class="text-sm text-text-primary truncate flex-1">{{ file.name }}</span>
             <button
               @click="removeFile(idx)"
-              class="p-1 rounded hover:bg-danger/20 transition-all opacity-0 group-hover:opacity-100"
+              class="p-1 rounded"
             >
               <X :size="14" class="text-danger" />
             </button>
@@ -283,7 +283,7 @@ onUnmounted(() => {
               />
               <button
                 @click="showPassword = !showPassword"
-                class="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary"
               >
                 <EyeOff v-if="showPassword" :size="16" />
                 <Eye v-else :size="16" />
@@ -327,7 +327,7 @@ onUnmounted(() => {
           <h3 class="text-base font-semibold text-text-primary mb-3">输出设置</h3>
           <button
             @click="selectOutputDirForAll"
-            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary hover:bg-bg-primary text-text-secondary hover:text-text-primary transition-all text-sm border border-transparent hover:border-accent-blue/30"
+            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary text-text-secondary text-sm border border-transparent"
           >
             <Folder :size="16" />
             选择输出目录
@@ -363,7 +363,7 @@ onUnmounted(() => {
           :disabled="!canStart() || progressStore.isProcessing"
           class="w-full py-3 rounded-xl font-semibold text-white transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
           :class="canStart() && !progressStore.isProcessing
-            ? 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:shadow-lg hover:shadow-emerald-500/25'
+            ? 'bg-gradient-to-r from-emerald-500 to-teal-500'
             : 'bg-bg-tertiary text-text-muted'"
         >
           <Lock v-if="mode === 'encrypt'" :size="18" />
@@ -385,11 +385,6 @@ onUnmounted(() => {
   border-radius: var(--radius-md, 8px);
   color: hsl(var(--foreground));
   outline: none;
-  transition: border-color 0.12s;
-}
-
-.input-field:focus {
-  border-color: hsl(var(--primary));
 }
 
 .input-field::placeholder {

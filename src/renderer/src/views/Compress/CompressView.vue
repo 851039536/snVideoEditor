@@ -198,7 +198,7 @@ onUnmounted(() => {
               <tr
                 v-for="(entry, idx) in files"
                 :key="entry.path"
-                class="border-b border-bg-tertiary/50 hover:bg-bg-tertiary/30 transition-colors"
+                class="border-b border-bg-tertiary/50"
               >
                 <td class="p-3">
                   <div class="flex items-center gap-2">
@@ -217,7 +217,7 @@ onUnmounted(() => {
                 <td class="p-3 text-right">
                   <button
                     @click="removeFile(idx)"
-                    class="p-1 rounded hover:bg-danger/20 transition-all opacity-0 group-hover:opacity-100"
+                    class="p-1 rounded"
                   >
                     <X :size="14" class="text-danger" />
                   </button>
@@ -255,7 +255,7 @@ onUnmounted(() => {
             class="mt-3 w-full p-2 rounded-lg text-sm border transition-all"
             :class="customMode
               ? 'border-accent-purple/50 text-accent-purple bg-accent-purple/10'
-              : 'border-dashed border-bg-tertiary text-text-secondary hover:border-accent-blue/30'"
+              : 'border-dashed border-bg-tertiary text-text-secondary'"
           >
             <Zap :size="14" class="inline mr-1 -mt-0.5" />
             {{ customMode ? '自定义模式已启用' : '切换自定义参数' }}
@@ -327,7 +327,7 @@ onUnmounted(() => {
           <h3 class="text-base font-semibold text-text-primary mb-3">输出设置</h3>
           <button
             @click="selectOutputDir"
-            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary hover:bg-bg-primary text-text-secondary hover:text-text-primary transition-all text-sm border border-transparent hover:border-accent-purple/30"
+            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary text-text-secondary text-sm border border-transparent"
           >
             <Folder :size="16" />
             选择输出目录
@@ -348,7 +348,7 @@ onUnmounted(() => {
           :disabled="!canStart"
           class="w-full py-3 rounded-xl font-semibold text-white transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
           :class="canStart
-            ? 'bg-gradient-to-r from-accent-purple to-pink-500 hover:shadow-lg hover:shadow-purple-500/25'
+            ? 'bg-gradient-to-r from-accent-purple to-pink-500'
             : 'bg-bg-tertiary text-text-muted'"
         >
           <Zap :size="18" />
@@ -362,9 +362,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.preset-btn:hover {
-  border-color: hsl(var(--primary) / 0.3);
-  background: hsl(var(--primary) / 0.05);
+.preset-btn {
+  /* hover animation removed */
 }
 
 .select-input {
@@ -374,17 +373,12 @@ onUnmounted(() => {
   border-radius: var(--radius-md, 8px);
   color: hsl(var(--foreground));
   outline: none;
-  transition: border-color 0.12s;
   appearance: none;
   background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%238B949E' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
   background-repeat: no-repeat;
   background-position: right 8px center;
   background-size: 20px;
   padding-right: 32px;
-}
-
-.select-input:focus {
-  border-color: hsl(var(--primary));
 }
 
 .slider {

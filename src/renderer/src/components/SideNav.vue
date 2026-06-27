@@ -66,20 +66,20 @@ const navWidth = computed((): string => {
         v-for="item in navItems"
         :key="item.path"
         @click="router.push(item.path)"
-        class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative"
+        class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg relative"
         :class="isActive(item.path) ? 'active' : ''"
       >
         <component 
           :is="item.icon"
           :size="20"
-          class="transition-colors duration-200 flex-shrink-0"
+          class="flex-shrink-0"
           :class="isActive(item.path) ? '' : 'text-text-secondary'"
           :style="isActive(item.path) ? { color: item.color } : undefined"
         />
         <Transition name="fade">
           <span
             v-if="!collapsed"
-            class="text-sm whitespace-nowrap transition-colors duration-200"
+            class="text-sm whitespace-nowrap"
             :class="isActive(item.path) ? 'text-text-primary' : 'text-text-secondary'"
           >
             {{ item.name }}
@@ -99,7 +99,7 @@ const navWidth = computed((): string => {
       <!-- Theme Toggle -->
       <button
         @click="settingsStore.toggleTheme()"
-        class="w-full flex items-center justify-center p-2 rounded-lg hover:bg-bg-tertiary transition-colors duration-200"
+        class="w-full flex items-center justify-center p-2 rounded-lg"
         :title="settingsStore.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
       >
         <Sun v-if="settingsStore.theme === 'dark'" :size="18" class="text-warning" />
@@ -108,7 +108,7 @@ const navWidth = computed((): string => {
       <!-- Collapse Toggle -->
       <button
         @click="toggleCollapsed"
-        class="w-full flex items-center justify-center p-2 rounded-lg hover:bg-bg-tertiary transition-colors duration-200"
+        class="w-full flex items-center justify-center p-2 rounded-lg"
       >
         <component 
           :is="collapsed ? ChevronRight : ChevronLeft"
@@ -124,20 +124,6 @@ const navWidth = computed((): string => {
 .nav-item {
   position: relative;
   overflow: hidden;
-}
-
-.nav-item::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: var(--radius-md, 8px);
-  background: linear-gradient(135deg, rgba(91, 141, 239, 0.08), rgba(167, 139, 250, 0.08));
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-
-.nav-item:hover::after {
-  opacity: 1;
 }
 
 .nav-item.active {

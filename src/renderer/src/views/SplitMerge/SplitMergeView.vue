@@ -563,15 +563,15 @@ onUnmounted(() => {
     <div class="flex gap-1 mb-4 p-1 rounded-lg bg-bg-tertiary w-fit">
       <button
         @click="mode = 'split'"
-        class="px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200"
-        :class="mode === 'split' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+        class="px-4 py-1.5 rounded-md text-sm font-medium"
+        :class="mode === 'split' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary'"
       >
         裁剪
       </button>
       <button
         @click="mode = 'merge'"
-        class="px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200"
-        :class="mode === 'merge' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'"
+        class="px-4 py-1.5 rounded-md text-sm font-medium"
+        :class="mode === 'merge' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary'"
       >
         合并
       </button>
@@ -609,21 +609,21 @@ onUnmounted(() => {
             <div class="flex items-center gap-2">
               <button
                 @click="seekToStart"
-                class="player-btn p-1.5 rounded-md hover:bg-bg-tertiary transition-colors"
+                class="player-btn p-1.5 rounded-md"
                 title="跳到开始"
               >
                 <SkipBack :size="16" class="text-text-secondary" />
               </button>
               <button
                 @click="togglePlay"
-                class="player-btn p-2 rounded-full bg-accent-blue hover:bg-accent-blue/80 transition-all"
+                class="player-btn p-2 rounded-full bg-accent-blue"
               >
                 <Pause v-if="isPlaying" :size="16" class="text-white" />
                 <Play v-else :size="16" class="text-white ml-0.5" />
               </button>
               <button
                 @click="seekToEnd"
-                class="player-btn p-1.5 rounded-md hover:bg-bg-tertiary transition-colors"
+                class="player-btn p-1.5 rounded-md"
                 title="跳到结束"
               >
                 <SkipForward :size="16" class="text-text-secondary" />
@@ -639,10 +639,10 @@ onUnmounted(() => {
               <span class="text-accent-blue font-mono">{{ getFileName(files[0]) }}</span>
               <button
                 @click="removeFile(0)"
-                class="p-1 rounded hover:bg-danger/20 transition-colors"
+                class="p-1 rounded"
                 title="移除"
               >
-                <X :size="14" class="text-text-muted hover:text-danger" />
+                <X :size="14" class="text-text-muted" />
               </button>
             </div>
           </div>
@@ -733,7 +733,7 @@ onUnmounted(() => {
             :disabled="clipDurationSec <= 0 || cuttingInProgress"
             class="px-8 py-2.5 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
             :class="clipDurationSec > 0 && !cuttingInProgress
-              ? 'bg-gradient-to-r from-accent-blue to-accent-purple hover:shadow-lg hover:shadow-purple-500/25'
+              ? 'bg-gradient-to-r from-accent-blue to-accent-purple'
               : 'bg-bg-tertiary text-text-muted'"
           >
             <template v-if="!cuttingInProgress">
@@ -791,28 +791,28 @@ onUnmounted(() => {
         <div
           v-for="(file, idx) in files"
           :key="file"
-          class="flex items-center gap-2 p-2 rounded-lg bg-bg-tertiary/50 hover:bg-bg-tertiary transition-colors group"
+          class="flex items-center gap-2 p-2 rounded-lg bg-bg-tertiary/50 transition-colors group"
         >
           <VideoPreview :file-path="file" />
           <div class="flex flex-col gap-1 ml-auto">
             <button
               @click="moveFile(idx, -1)"
               :disabled="idx === 0"
-              class="p-0.5 rounded hover:bg-bg-primary disabled:opacity-30 transition-all"
+              class="p-0.5 rounded disabled:opacity-30"
             >
               <ArrowUp :size="14" class="text-text-secondary" />
             </button>
             <button
               @click="moveFile(idx, 1)"
               :disabled="idx === files.length - 1"
-              class="p-0.5 rounded hover:bg-bg-primary disabled:opacity-30 transition-all"
+              class="p-0.5 rounded disabled:opacity-30"
             >
               <ArrowDown :size="14" class="text-text-secondary" />
             </button>
           </div>
           <button
             @click="removeFile(idx)"
-            class="p-1 rounded hover:bg-danger/20 transition-all opacity-0 group-hover:opacity-100 ml-1"
+            class="p-1 rounded opacity-0 group-hover:opacity-100 ml-1"
           >
             <X :size="14" class="text-danger" />
           </button>
@@ -825,7 +825,7 @@ onUnmounted(() => {
         <div class="flex items-center gap-3">
           <button
             @click="selectOutputPath"
-            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary hover:bg-bg-primary text-text-secondary hover:text-text-primary transition-all text-sm border border-transparent hover:border-accent-blue/30"
+            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary text-text-secondary text-sm border border-transparent"
           >
             <Folder :size="16" />
             选择输出位置
@@ -860,7 +860,7 @@ onUnmounted(() => {
         :disabled="!canStart || store.isProcessing"
         class="w-full py-3 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
         :class="canStart && !store.isProcessing
-          ? 'bg-gradient-to-r from-accent-blue to-accent-purple hover:shadow-lg hover:shadow-purple-500/25'
+          ? 'bg-gradient-to-r from-accent-blue to-accent-purple'
           : 'bg-bg-tertiary text-text-muted'"
       >
         <template v-if="!store.isProcessing">
@@ -963,12 +963,6 @@ onUnmounted(() => {
   border-radius: 2px;
   background: hsl(var(--foreground));
   opacity: 0.8;
-  transition: opacity 0.12s, background 0.12s;
-}
-
-.trim-handle:hover::after {
-  opacity: 1;
-  background: hsl(var(--foreground));
 }
 
 .trim-handle-start::before,
@@ -976,13 +970,6 @@ onUnmounted(() => {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(91, 141, 239, 0.15);
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.trim-handle:hover::before {
-  opacity: 1;
 }
 
 /* ---- Time Input ---- */
@@ -997,11 +984,6 @@ onUnmounted(() => {
   border-radius: var(--radius-base, 6px);
   color: hsl(var(--foreground));
   outline: none;
-  transition: border-color 0.12s;
-}
-
-.time-input:focus {
-  border-color: hsl(var(--primary));
 }
 
 /* ---- Responsive ---- */

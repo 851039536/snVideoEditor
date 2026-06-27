@@ -117,12 +117,6 @@
     backdrop-filter: blur(16px);
     border: 1px solid hsl(var(--border) / 0.6);
     border-radius: var(--radius-lg, 12px);
-    transition: border-color 0.12s, transform 0.12s;
-  }
-
-  .glass-card:hover {
-    border-color: hsl(var(--primary) / 0.6);
-    transform: scale(1.02);
   }
 
   .gradient-text {
@@ -151,14 +145,7 @@
     pointer-events: none;
   }
 
-  .glow-hover {
-    transition: border-color 0.12s, transform 0.12s;
-  }
-
-  .glow-hover:hover {
-    border-color: hsl(var(--primary) / 0.5);
-    transform: translateY(-2px);
-  }
+  // .glow-hover class removed (no more hover animation)
 }
 
 @layer utilities {

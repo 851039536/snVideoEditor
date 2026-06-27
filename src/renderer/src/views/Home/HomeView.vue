@@ -66,21 +66,21 @@ const cards: FeatureCard[] = [
         v-for="card in cards"
         :key="card.path"
         @click="router.push(card.path)"
-        class="glass-card p-6 text-left group cursor-pointer relative overflow-hidden"
+        class="glass-card p-6 text-left cursor-pointer relative overflow-hidden"
       >
         <!-- Background Gradient -->
         <div 
-          class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br"
+          class="absolute inset-0 opacity-0 bg-gradient-to-br"
           :class="card.gradient"
         />
 
         <!-- Content -->
         <div class="relative z-10">
-          <div class="w-12 h-12 rounded-xl bg-bg-tertiary flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-            <component :is="card.icon" :size="24" class="text-accent-blue group-hover:text-accent-purple transition-colors duration-300" />
+          <div class="w-12 h-12 rounded-xl bg-bg-tertiary flex items-center justify-center mb-4">
+            <component :is="card.icon" :size="24" class="text-accent-blue" />
           </div>
           
-          <h3 class="text-lg font-semibold text-text-primary mb-2 group-hover:text-accent-light transition-colors duration-300">
+          <h3 class="text-lg font-semibold text-text-primary mb-2">
             {{ card.title }}
           </h3>
           
@@ -93,16 +93,16 @@ const cards: FeatureCard[] = [
             <span
               v-for="feat in card.features"
               :key="feat"
-              class="text-xs px-2 py-1 rounded-md bg-bg-tertiary text-text-secondary group-hover:bg-bg-primary/80 transition-colors duration-300"
+              class="text-xs px-2 py-1 rounded-md bg-bg-tertiary text-text-secondary"
             >
               {{ feat }}
             </span>
           </div>
 
           <!-- Action -->
-          <div class="flex items-center gap-2 text-accent-blue group-hover:text-accent-purple transition-colors duration-300">
+          <div class="flex items-center gap-2 text-accent-blue">
             <span class="text-sm font-medium">开始使用</span>
-            <ArrowRight :size="16" class="group-hover:translate-x-1 transition-transform duration-300" />
+            <ArrowRight :size="16" />
           </div>
         </div>
       </button>
