@@ -9,6 +9,7 @@ import VideoPreview from '@/components/VideoPreview.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import ClipList from './ClipList.vue'
 import { useProgressStore } from '@/stores/progress'
+import { secondsToHMS } from '@/lib/time'
 
 interface VideoMeta {
   duration: number
@@ -137,19 +138,28 @@ const playheadInSelectionPercent = computed((): number => {
 
 // ---- Helpers ----
 
-function secondsToHMS(totalSec: number): string {
-  const h = Math.floor(totalSec / 3600)
-  const m = Math.floor((totalSec % 3600) / 60)
-  const s = Math.floor(totalSec % 60)
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
-
 function hmsToSeconds(h: string, m: string, s: string): number {
   return parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s)
 }
 
 function clamp(val: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, val))
+}
+
+function seekVideoPlayer(t: number): void {
+  if (videoPlayer.value) {
+    videoPlayer.value.currentTime = t
+    currentTime.value = t
+  }
+}
+
+function swapArrayElements<T>(arr: T[], index: number, direction: -1 | 1): boolean {
+  const newIndex = index + direction
+  if (newIndex < 0 || newIndex >= arr.length) { return false }
+  const temp = arr[index]
+  arr[index] = arr[newIndex]
+  arr[newIndex] = temp
+  return true
 }
 
 // ---- Sync trim times <-> manual inputs ----
@@ -159,12 +169,16 @@ let syncingFromTrim = false
 
 function syncManualToTrim(): void {
   syncingFromTrim = true
-  startHour.value = String(Math.floor(trimStartSec.value / 3600)).padStart(2, '0')
-  startMin.value = String(Math.floor((trimStartSec.value % 3600) / 60)).padStart(2, '0')
-  startSec.value = String(Math.floor(trimStartSec.value % 60)).padStart(2, '0')
-  endHour.value = String(Math.floor(trimEndSec.value / 3600)).padStart(2, '0')
-  endMin.value = String(Math.floor((trimEndSec.value % 3600) / 60)).padStart(2, '0')
-  endSec.value = String(Math.floor(trimEndSec.value % 60)).padStart(2, '0')
+  const startStr = secondsToHMS(trimStartSec.value)
+  const endStr = secondsToHMS(trimEndSec.value)
+  const [sh, sm, ss] = startStr.split(':')
+  const [eh, em, es] = endStr.split(':')
+  startHour.value = sh
+  startMin.value = sm
+  startSec.value = ss
+  endHour.value = eh
+  endMin.value = em
+  endSec.value = es
   syncingFromTrim = false
 }
 
@@ -175,10 +189,7 @@ function syncTrimFromInputs(): void {
   const max = duration.value || 99999
   trimStartSec.value = clamp(s, 0, trimEndSec.value - 0.5)
   trimEndSec.value = clamp(e, trimStartSec.value + 0.5, max)
-  if (videoPlayer.value) {
-    videoPlayer.value.currentTime = trimStartSec.value
-    currentTime.value = trimStartSec.value
-  }
+  seekVideoPlayer(trimStartSec.value)
 }
 
 watch([startHour, startMin, startSec], () => {
@@ -255,11 +266,7 @@ function removeFile(index: number): void {
 }
 
 function moveFile(index: number, direction: -1 | 1): void {
-  const newIndex = index + direction
-  if (newIndex < 0 || newIndex >= files.value.length) { return }
-  const temp = files.value[index]
-  files.value[index] = files.value[newIndex]
-  files.value[newIndex] = temp
+  swapArrayElements(files.value, index, direction)
 }
 
 watch(mode, (newMode) => {
@@ -308,13 +315,15 @@ let endedGuard = false
 
 function onTimeUpdate(): void {
   if (!videoPlayer.value) { return }
-  currentTime.value = videoPlayer.value.currentTime
+  const t = videoPlayer.value.currentTime
   // Auto-stop at end trim point
-  if (currentTime.value >= trimEndSec.value) {
+  if (t >= trimEndSec.value) {
     videoPlayer.value.pause()
     videoPlayer.value.currentTime = trimEndSec.value
     currentTime.value = trimEndSec.value
     isPlaying.value = false
+  } else {
+    currentTime.value = t
   }
 }
 
@@ -329,36 +338,25 @@ function onVideoError(e: Event): void {
 }
 
 function onVideoLoaded(): void {
-  if (videoPlayer.value) {
-    videoPlayer.value.currentTime = trimStartSec.value
-    currentTime.value = trimStartSec.value
-  }
+  seekVideoPlayer(trimStartSec.value)
 }
 
 function seekToStart(): void {
-  if (!videoPlayer.value) { return }
-  videoPlayer.value.currentTime = trimStartSec.value
-  currentTime.value = trimStartSec.value
+  seekVideoPlayer(trimStartSec.value)
 }
 
 function seekToEnd(): void {
-  if (!videoPlayer.value) { return }
-  videoPlayer.value.currentTime = trimEndSec.value
-  currentTime.value = trimEndSec.value
+  seekVideoPlayer(trimEndSec.value)
 }
 
 function stepBackward(): void {
-  if (!videoPlayer.value) { return }
   const t = clamp(currentTime.value - stepSeconds.value, 0, duration.value)
-  videoPlayer.value.currentTime = t
-  currentTime.value = t
+  seekVideoPlayer(t)
 }
 
 function stepForward(): void {
-  if (!videoPlayer.value) { return }
   const t = clamp(currentTime.value + stepSeconds.value, 0, duration.value)
-  videoPlayer.value.currentTime = t
-  currentTime.value = t
+  seekVideoPlayer(t)
 }
 
 // Snap start/end handle to current video position
@@ -399,28 +397,18 @@ function onHandleWheel(handle: 'start' | 'end', e: WheelEvent): void {
   if (handle === 'start') {
     trimStartSec.value = clamp(trimStartSec.value + delta, 0, trimEndSec.value - 0.1)
     syncManualToTrim()
-    if (videoPlayer.value) {
-      videoPlayer.value.currentTime = trimStartSec.value
-      currentTime.value = trimStartSec.value
-    }
+    seekVideoPlayer(trimStartSec.value)
   } else {
     trimEndSec.value = clamp(trimEndSec.value + delta, trimStartSec.value + 0.1, duration.value)
     syncManualToTrim()
-    if (videoPlayer.value) {
-      videoPlayer.value.currentTime = trimEndSec.value
-      currentTime.value = trimEndSec.value
-    }
+    seekVideoPlayer(trimEndSec.value)
   }
 }
 
 function onTimelineClick(e: MouseEvent): void {
   // Only seek on direct timeline click (not handle drag)
   if (dragging.value) { return }
-  const t = getTimelineTime(e.clientX)
-  if (videoPlayer.value) {
-    videoPlayer.value.currentTime = t
-    currentTime.value = t
-  }
+  seekVideoPlayer(getTimelineTime(e.clientX))
 }
 
 // Maximum resolution cap: never coarser than 2 seconds per pixel (even for long videos)
@@ -435,48 +423,40 @@ function onGlobalPointerMove(e: PointerEvent): void {
 
   const rect = el.getBoundingClientRect()
   const nativeRes = duration.value / rect.width // seconds per pixel in absolute mode
-  let t: number
+  let rawT: number // unclamped target time, will be clamped below
+  let updateLastX = false
 
   if (e.shiftKey) {
-    // Shift + drag: always delta-based, FINE_DRAG_SCALE× finer than native
-    const deltaTime = (e.clientX - lastDragClientX.value) * nativeRes / FINE_DRAG_SCALE
-    if (dragging.value === 'start') {
-      t = clamp(trimStartSec.value + deltaTime, 0, trimEndSec.value - 0.1)
-    } else {
-      t = clamp(trimEndSec.value + deltaTime, trimStartSec.value + 0.1, duration.value)
-    }
-    lastDragClientX.value = e.clientX
+    // Shift + drag: delta-based, FINE_DRAG_SCALE× finer than native
+    const base = dragging.value === 'start' ? trimStartSec.value : trimEndSec.value
+    rawT = base + (e.clientX - lastDragClientX.value) * nativeRes / FINE_DRAG_SCALE
+    updateLastX = true
   } else if (nativeRes > MAX_SECONDS_PER_PX) {
-    // Long video: switch to delta mode capped at MAX_SECONDS_PER_PX for smooth control
-    const deltaTime = (e.clientX - lastDragClientX.value) * MAX_SECONDS_PER_PX
-    if (dragging.value === 'start') {
-      t = clamp(trimStartSec.value + deltaTime, 0, trimEndSec.value - 0.1)
-    } else {
-      t = clamp(trimEndSec.value + deltaTime, trimStartSec.value + 0.1, duration.value)
-    }
-    lastDragClientX.value = e.clientX
+    // Long video: delta mode capped at MAX_SECONDS_PER_PX for smooth control
+    const base = dragging.value === 'start' ? trimStartSec.value : trimEndSec.value
+    rawT = base + (e.clientX - lastDragClientX.value) * MAX_SECONDS_PER_PX
+    updateLastX = true
   } else {
     // Short video: absolute position mapping is already precise enough
-    t = getTimelineTime(e.clientX)
+    rawT = getTimelineTime(e.clientX)
   }
 
+  if (updateLastX) { lastDragClientX.value = e.clientX }
+
+  // ---- Unified apply: clamp + assign + sync + seek ----
   if (dragging.value === 'start') {
-    if (trimStartSec.value !== t) {
-      trimStartSec.value = t
+    const clamped = clamp(rawT, 0, trimEndSec.value - 0.1)
+    if (trimStartSec.value !== clamped) {
+      trimStartSec.value = clamped
       syncManualToTrim()
-      if (videoPlayer.value) {
-        videoPlayer.value.currentTime = trimStartSec.value
-        currentTime.value = trimStartSec.value
-      }
+      seekVideoPlayer(clamped)
     }
-  } else if (dragging.value === 'end') {
-    if (trimEndSec.value !== t) {
-      trimEndSec.value = t
+  } else {
+    const clamped = clamp(rawT, trimStartSec.value + 0.1, duration.value)
+    if (trimEndSec.value !== clamped) {
+      trimEndSec.value = clamped
       syncManualToTrim()
-      if (videoPlayer.value) {
-        videoPlayer.value.currentTime = trimEndSec.value
-        currentTime.value = trimEndSec.value
-      }
+      seekVideoPlayer(clamped)
     }
   }
 }
@@ -543,11 +523,7 @@ function toggleClipSelection(index: number): void {
 }
 
 function moveClip(index: number, direction: -1 | 1): void {
-  const newIndex = index + direction
-  if (newIndex < 0 || newIndex >= clips.value.length) { return }
-  const temp = clips.value[index]
-  clips.value[index] = clips.value[newIndex]
-  clips.value[newIndex] = temp
+  swapArrayElements(clips.value, index, direction)
 }
 
 // ---- Output & Process ----

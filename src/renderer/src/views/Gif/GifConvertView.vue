@@ -175,9 +175,9 @@ function onVideoError(e: Event): void {
   console.error('视频加载失败:', v?.error?.message)
 }
 
-// Seek video when trim times change (from manual inputs only)
-watch([trimStartSec, trimEndSec], ([start]) => {
-  if (!enableTrim.value || !videoPlayer.value) { return }
+// Seek video when trim start changes (from drag or manual input)
+watch(trimStartSec, (start) => {
+  if (!videoPlayer.value) { return }
   videoPlayer.value.currentTime = start
   currentTime.value = start
 })
@@ -226,7 +226,7 @@ function onTimelineClick(e: MouseEvent): void {
 }
 
 function onTimelineMove(e: MouseEvent): void {
-  if (!dragging.value || !enableTrim.value) { return }
+  if (!dragging.value) { return }
   const t = getTimelineTime(e.clientX)
   if (dragging.value === 'start') {
     const clamped = clamp(t, 0, trimEndSec.value - 0.1)

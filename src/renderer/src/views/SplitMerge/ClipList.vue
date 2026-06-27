@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { X, ArrowUp, ArrowDown } from 'lucide-vue-next'
+import { secondsToHMS } from '@/lib/time'
 
 interface ClipItem {
   id: string
@@ -26,13 +27,6 @@ const emit = defineEmits<{
   remove: [index: number]
   move: [index: number, direction: -1 | 1]
 }>()
-
-function secondsToHMS(totalSec: number): string {
-  const h = Math.floor(totalSec / 3600)
-  const m = Math.floor((totalSec % 3600) / 60)
-  const s = Math.floor(totalSec % 60)
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
 </script>
 
 <template>
