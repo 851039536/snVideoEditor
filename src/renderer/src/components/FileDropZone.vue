@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { Upload, FileVideo } from 'lucide-vue-next'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+
+const props = withDefaults(defineProps<{
+  acceptedExtensions?: string[]
+}>(), {
+  acceptedExtensions: () => ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp']
+})
 
 const emit = defineEmits<{
   filesSelected: [files: string[]]
@@ -31,7 +37,7 @@ async function processFiles(fileList: FileList): Promise<void> {
   const videoFiles: string[] = []
   for (let i = 0; i < fileList.length; i++) {
     const file = fileList[i]
-    if (file.type.startsWith('video/') || isVideoExtension(file.name)) {
+    if (file.type.startsWith('video/') || isAcceptableExtension(file.name)) {
       // @ts-ignore - Electron returns the path
       videoFiles.push(file.path || file.name)
     }
@@ -41,11 +47,14 @@ async function processFiles(fileList: FileList): Promise<void> {
   }
 }
 
-function isVideoExtension(filename: string): boolean {
-  const videoExts = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp']
+function isAcceptableExtension(filename: string): boolean {
   const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'))
-  return videoExts.includes(ext)
+  return props.acceptedExtensions.includes(ext)
 }
+
+const acceptedExtsText = computed(() => {
+  return props.acceptedExtensions.map(e => e.replace('.', '').toUpperCase()).join(' / ')
+})
 
 async function handleClick(): Promise<void> {
   const files = await window.electronAPI.selectVideoFiles()
@@ -90,7 +99,7 @@ async function handleClick(): Promise<void> {
         拖拽视频文件到此处
       </p>
       <p class="text-text-secondary text-sm">
-        或点击选择文件 · 支持 MP4 / MKV / AVI / MOV / WebM
+        或点击选择文件 · 支持 {{ acceptedExtsText }}
       </p>
     </div>
   </div>

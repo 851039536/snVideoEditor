@@ -235,7 +235,7 @@ onUnmounted(() => {
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <!-- Left: File Area -->
       <div class="space-y-3">
-        <FileDropZone @files-selected="addFiles" />
+        <FileDropZone @files-selected="addFiles" :accepted-extensions="['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp', '.enc']" />
 
         <!-- Directory Scan Button -->
         <button
