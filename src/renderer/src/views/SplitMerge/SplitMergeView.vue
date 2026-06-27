@@ -176,11 +176,11 @@ function syncTrimFromInputs(): void {
 
 watch([startHour, startMin, startSec], () => {
   syncTrimFromInputs()
-})
+}, { flush: 'sync' })
 
 watch([endHour, endMin, endSec], () => {
   syncTrimFromInputs()
-})
+}, { flush: 'sync' })
 
 // Watch trimEndSec to clamp it when duration loads
 watch(duration, (newDur) => {
@@ -350,8 +350,10 @@ function getTimelineTime(clientX: number): number {
   return pct * duration.value
 }
 
-function startHandleDrag(handle: 'start' | 'end', e: MouseEvent): void {
+function startHandleDrag(handle: 'start' | 'end', e: PointerEvent): void {
   dragging.value = handle
+  const el = e.currentTarget as HTMLElement
+  el.setPointerCapture(e.pointerId)
   e.preventDefault()
   e.stopPropagation()
 }
@@ -366,7 +368,8 @@ function onTimelineClick(e: MouseEvent): void {
   }
 }
 
-function onTimelineMove(e: MouseEvent): void {
+// Global pointer move/up for seamless drag tracking (pointer events required for setPointerCapture)
+function onGlobalPointerMove(e: PointerEvent): void {
   if (!dragging.value) { return }
   const t = getTimelineTime(e.clientX)
   if (dragging.value === 'start') {
@@ -382,12 +385,9 @@ function onTimelineMove(e: MouseEvent): void {
   }
 }
 
-// Global mouse move/up for seamless drag tracking
-function onGlobalMouseMove(e: MouseEvent): void {
-  onTimelineMove(e)
-}
-
-function onGlobalMouseUp(): void {
+function onGlobalPointerUp(e: PointerEvent): void {
+  if (!dragging.value) { return }
+  (e.target as HTMLElement)?.releasePointerCapture?.(e.pointerId)
   dragging.value = null
 }
 
@@ -536,13 +536,13 @@ function getSizeStr(bytes: number): string {
 // ---- Lifecycle ----
 
 if (typeof window !== 'undefined') {
-  document.addEventListener('mousemove', onGlobalMouseMove)
-  document.addEventListener('mouseup', onGlobalMouseUp)
+  document.addEventListener('pointermove', onGlobalPointerMove)
+  document.addEventListener('pointerup', onGlobalPointerUp)
 }
 
 onUnmounted(() => {
-  document.removeEventListener('mousemove', onGlobalMouseMove)
-  document.removeEventListener('mouseup', onGlobalMouseUp)
+  document.removeEventListener('pointermove', onGlobalPointerMove)
+  document.removeEventListener('pointerup', onGlobalPointerUp)
   window.electronAPI?.removeProgressListener()
 })
 </script>
@@ -677,15 +677,15 @@ onUnmounted(() => {
                 class="timeline-playhead"
                 :style="{ left: playheadInSelectionPercent + '%' }"
               />
-              <!-- Start handle: mousedown directly on handle -->
+              <!-- Start handle -->
               <div
                 class="trim-handle trim-handle-start"
-                @mousedown="startHandleDrag('start', $event)"
+                @pointerdown="startHandleDrag('start', $event)"
               />
-              <!-- End handle: mousedown directly on handle -->
+              <!-- End handle -->
               <div
                 class="trim-handle trim-handle-end"
-                @mousedown="startHandleDrag('end', $event)"
+                @pointerdown="startHandleDrag('end', $event)"
               />
             </div>
 
@@ -943,6 +943,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  touch-action: none;
+  user-select: none;
 }
 
 .trim-handle-start {
