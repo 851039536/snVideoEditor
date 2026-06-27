@@ -11,7 +11,8 @@ const typeLabel = computed((): string => {
     merge: '合并',
     compress: '压缩',
     encrypt: '加密',
-    decrypt: '解密'
+    decrypt: '解密',
+    gif: 'GIF转换'
   }
   return labels[store.operationType] || '处理'
 })

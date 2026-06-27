@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { Scissors, FileVideo, Shield, ArrowRight } from 'lucide-vue-next'
+import { Scissors, FileVideo, Shield, Image, ArrowRight } from 'lucide-vue-next'
 
 const router = useRouter()
 
@@ -37,6 +37,14 @@ const cards: FeatureCard[] = [
     icon: Shield,
     gradient: 'from-emerald-500/20 to-teal-500/20',
     features: ['AES-256-CTR 加密', '流式处理大文件', '密码强度检测']
+  },
+  {
+    title: '视频转GIF',
+    description: '将视频片段转换为高质量 GIF 动图，支持调色板优化和自定义参数。',
+    path: '/gif',
+    icon: Image,
+    gradient: 'from-orange-500/20 to-yellow-500/20',
+    features: ['双通道调色板生成', '帧率/分辨率调节', '起止时间截取', '批量转换支持']
   }
 ]
 </script>
@@ -61,7 +69,7 @@ const cards: FeatureCard[] = [
     </div>
 
     <!-- Feature Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
       <button
         v-for="card in cards"
         :key="card.path"

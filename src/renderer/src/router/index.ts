@@ -21,6 +21,11 @@ const routes: RouteRecordRaw[] = [
     path: '/encrypt',
     name: 'Encrypt',
     component: () => import('@/views/Encrypt/EncryptView.vue')
+  },
+  {
+    path: '/gif',
+    name: 'Gif',
+    component: () => import('@/views/Gif/GifConvertView.vue')
   }
 ]
 

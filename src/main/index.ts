@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import * as fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, cancelFfmpegOperation } from './modules/ffmpeg'
+import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, convertToGif, batchConvertToGif, cancelFfmpegOperation } from './modules/ffmpeg'
 import { encryptFile, decryptFile, batchProcessFiles, cancelCryptoOperation } from './modules/crypto'
 import {
   selectVideoFiles,
@@ -177,7 +177,48 @@ function registerCompressHandlers(): void {
   })
 }
 
-// Encrypt/Decrypt handlers
+// GIF conversion handlers
+function registerGifHandlers(): void {
+  ipcMain.handle('video:convertToGif', async (event, opts: {
+    input: string
+    output: string
+    fps: number
+    width: number
+    quality: 'high' | 'medium' | 'low'
+    startTime?: number
+    duration?: number
+    loop: number
+  }) => {
+    return convertToGif({
+      ...opts,
+      onProgress: (data) => {
+        sendProgress(event, { ...data, type: 'gif' })
+      }
+    })
+  })
+
+  ipcMain.handle('video:batchConvertToGif', async (event, opts: {
+    files: {
+      input: string
+      output: string
+      fps: number
+      width: number
+      quality: 'high' | 'medium' | 'low'
+      startTime?: number
+      duration?: number
+      loop: number
+    }[]
+  }) => {
+    return batchConvertToGif({
+      ...opts,
+      onProgress: (data) => {
+        sendProgress(event, { ...data, type: 'gif' })
+      }
+    })
+  })
+}
+
+// Encryption/Decryption handlers
 function registerCryptoHandlers(): void {
   ipcMain.handle('crypto:encrypt', async (event, opts: {
     input: string
@@ -303,6 +344,7 @@ app.whenReady().then(() => {
   registerFileHandlers()
   registerSplitMergeHandlers()
   registerCompressHandlers()
+  registerGifHandlers()
   registerCryptoHandlers()
   registerCancelHandler()
   registerWindowHandlers()

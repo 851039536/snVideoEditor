@@ -2,7 +2,7 @@
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import {
   Scissors, X, ArrowUp, ArrowDown, Folder, Play, Pause,
-  SkipBack, SkipForward, Video
+  SkipBack, SkipForward, Video, ChevronsLeft, ChevronsRight
 } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import VideoPreview from '@/components/VideoPreview.vue'
@@ -64,6 +64,9 @@ const startSec = ref('00')
 const endHour = ref('00')
 const endMin = ref('00')
 const endSec = ref('30')
+
+// ---- Step forward/backward ----
+const stepSeconds = ref(2)
 
 // ---- Output ----
 const outputName = ref('')
@@ -342,6 +345,31 @@ function seekToEnd(): void {
   if (!videoPlayer.value) { return }
   videoPlayer.value.currentTime = trimEndSec.value
   currentTime.value = trimEndSec.value
+}
+
+function stepBackward(): void {
+  if (!videoPlayer.value) { return }
+  const t = clamp(currentTime.value - stepSeconds.value, 0, duration.value)
+  videoPlayer.value.currentTime = t
+  currentTime.value = t
+}
+
+function stepForward(): void {
+  if (!videoPlayer.value) { return }
+  const t = clamp(currentTime.value + stepSeconds.value, 0, duration.value)
+  videoPlayer.value.currentTime = t
+  currentTime.value = t
+}
+
+// Snap start/end handle to current video position
+function snapStartHere(): void {
+  trimStartSec.value = clamp(currentTime.value, 0, trimEndSec.value - 0.1)
+  syncManualToTrim()
+}
+
+function snapEndHere(): void {
+  trimEndSec.value = clamp(currentTime.value, trimStartSec.value + 0.1, duration.value)
+  syncManualToTrim()
 }
 
 // ---- Timeline drag ----
@@ -719,7 +747,53 @@ onUnmounted(() => {
         <!-- Timeline Bar -->
         <div class="glass-card p-4" style="overflow: visible;">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-text-primary">裁剪时间轴</h3>
+            <div class="flex items-center gap-2">
+              <h3 class="text-sm font-semibold text-text-primary">裁剪时间轴</h3>
+              <!-- Step forward/backward -->
+              <div class="flex items-center gap-1 ml-2">
+                <button
+                  @click="stepBackward"
+                  class="p-1 rounded text-text-secondary"
+                  title="后退"
+                >
+                  <SkipBack :size="14" />
+                </button>
+                <select
+                  v-model.number="stepSeconds"
+                  class="px-1 py-0.5 text-xs font-mono bg-bg-tertiary border border-border rounded text-text-primary outline-none cursor-pointer appearance-none text-center"
+                  title="步进秒数"
+                >
+                  <option :value="1">1s</option>
+                  <option :value="2">2s</option>
+                  <option :value="5">5s</option>
+                  <option :value="10">10s</option>
+                </select>
+                <button
+                  @click="stepForward"
+                  class="p-1 rounded text-text-secondary"
+                  title="前进"
+                >
+                  <SkipForward :size="14" />
+                </button>
+                <!-- Locate to handles -->
+                <span class="w-px h-4 bg-border mx-0.5" />
+                <button
+                  @click="snapStartHere"
+                  class="p-1 rounded text-accent-blue"
+                  title="前手柄定位到此"
+                >
+                  <ChevronsLeft :size="14" />
+                </button>
+                <span class="text-text-muted text-xs font-mono leading-none">|</span>
+                <button
+                  @click="snapEndHere"
+                  class="p-1 rounded text-accent-purple"
+                  title="后手柄定位到此"
+                >
+                  <ChevronsRight :size="14" />
+                </button>
+              </div>
+            </div>
             <span class="text-xs text-text-secondary">
               选中片段时长：
               <span class="text-sm font-mono text-accent-blue font-semibold">{{ clipDurationStr }}</span>

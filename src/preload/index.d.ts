@@ -1,5 +1,5 @@
 export interface ProgressInfo {
-  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt'
+  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif'
   percent: number
   currentFile: number
   totalFiles: number
@@ -61,6 +61,31 @@ export interface ElectronAPI {
 
   batchCompress: (opts: {
     files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string }[]
+  }) => Promise<{ success: number; failed: string[] }>
+
+  // GIF conversion
+  convertToGif: (opts: {
+    input: string
+    output: string
+    fps: number
+    width: number
+    quality: 'high' | 'medium' | 'low'
+    startTime?: number
+    duration?: number
+    loop: number
+  }) => Promise<boolean>
+
+  batchConvertToGif: (opts: {
+    files: {
+      input: string
+      output: string
+      fps: number
+      width: number
+      quality: 'high' | 'medium' | 'low'
+      startTime?: number
+      duration?: number
+      loop: number
+    }[]
   }) => Promise<{ success: number; failed: string[] }>
 
   // Crypto

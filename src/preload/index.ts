@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 export interface ProgressInfo {
-  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt'
+  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif'
   percent: number
   currentFile: number
   totalFiles: number
@@ -87,6 +87,33 @@ const electronAPI = {
     files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string }[]
   }): Promise<{ success: number; failed: string[] }> =>
     ipcRenderer.invoke('video:batchCompress', opts),
+
+  // GIF conversion
+  convertToGif: (opts: {
+    input: string
+    output: string
+    fps: number
+    width: number
+    quality: 'high' | 'medium' | 'low'
+    startTime?: number
+    duration?: number
+    loop: number
+  }): Promise<boolean> =>
+    ipcRenderer.invoke('video:convertToGif', opts),
+
+  batchConvertToGif: (opts: {
+    files: {
+      input: string
+      output: string
+      fps: number
+      width: number
+      quality: 'high' | 'medium' | 'low'
+      startTime?: number
+      duration?: number
+      loop: number
+    }[]
+  }): Promise<{ success: number; failed: string[] }> =>
+    ipcRenderer.invoke('video:batchConvertToGif', opts),
 
   // Crypto
   encryptFile: (opts: {
