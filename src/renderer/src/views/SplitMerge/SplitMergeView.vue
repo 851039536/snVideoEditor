@@ -382,6 +382,10 @@ function onGlobalPointerMove(e: PointerEvent): void {
   } else if (dragging.value === 'end') {
     trimEndSec.value = clamp(t, trimStartSec.value + 0.1, duration.value)
     syncManualToTrim()
+    if (videoPlayer.value) {
+      videoPlayer.value.currentTime = trimEndSec.value
+      currentTime.value = trimEndSec.value
+    }
   }
 }
 
