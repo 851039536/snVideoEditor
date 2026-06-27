@@ -456,8 +456,15 @@ function moveClip(index: number, direction: -1 | 1): void {
 
 // ---- Output & Process ----
 
+function getMergeOutputName(): string {
+  const now = new Date()
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  return `SN_${ts}.mp4`
+}
+
 async function selectOutputPath(): Promise<void> {
-  const fn = mode.value === 'split' ? `${outputName.value}.mp4` : 'merged_output.mp4'
+  const fn = mode.value === 'split' ? `${outputName.value}.mp4` : getMergeOutputName()
   const dir = await window.electronAPI.selectSavePath(fn, 'mp4')
   if (dir) {
     outputDir.value = dir
