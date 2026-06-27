@@ -23,6 +23,19 @@ const ALGORITHM = 'aes-256-ctr'
 const HEADER_LENGTH = 64 // 16 bytes IV + 16 bytes salt + 32 bytes for future use
 const CHUNK_SIZE = 64 * 1024 // 64KB chunks
 
+// ---- Cancellation support ----
+let isCancelled = false
+let activeStreams: { input: fs.ReadStream; output: fs.WriteStream } | null = null
+
+export function cancelCryptoOperation(): void {
+  isCancelled = true
+  if (activeStreams) {
+    activeStreams.input.destroy()
+    activeStreams.output.destroy()
+    activeStreams = null
+  }
+}
+
 /**
  * Derive a 32-byte key from password and salt using PBKDF2
  */
@@ -45,6 +58,8 @@ export function encryptFile(opts: CryptoOptions): Promise<boolean> {
       return
     }
 
+    isCancelled = false
+
     const stat = fs.statSync(opts.input)
 
     const salt = crypto.randomBytes(16)
@@ -55,6 +70,7 @@ export function encryptFile(opts: CryptoOptions): Promise<boolean> {
 
     const inputStream = fs.createReadStream(opts.input, { highWaterMark: CHUNK_SIZE })
     const outputStream = fs.createWriteStream(opts.output)
+    activeStreams = { input: inputStream, output: outputStream }
 
     // Write header: IV + Salt + padding
     const header = Buffer.alloc(HEADER_LENGTH)
@@ -90,6 +106,7 @@ export function encryptFile(opts: CryptoOptions): Promise<boolean> {
       .pipe(outputStream)
 
     outputStream.on('finish', () => {
+      activeStreams = null
       if (opts.onProgress) {
         opts.onProgress({
           percent: 100,
@@ -103,15 +120,30 @@ export function encryptFile(opts: CryptoOptions): Promise<boolean> {
     })
 
     inputStream.on('error', (err: Error) => {
-      reject(new Error(`读取文件失败: ${err.message}`))
+      activeStreams = null
+      if (isCancelled) {
+        resolve(false)
+      } else {
+        reject(new Error(`读取文件失败: ${err.message}`))
+      }
     })
 
     cipher.on('error', (err: Error) => {
-      reject(new Error(`加密失败: ${err.message}`))
+      activeStreams = null
+      if (isCancelled) {
+        resolve(false)
+      } else {
+        reject(new Error(`加密失败: ${err.message}`))
+      }
     })
 
     outputStream.on('error', (err: Error) => {
-      reject(new Error(`写入文件失败: ${err.message}`))
+      activeStreams = null
+      if (isCancelled) {
+        resolve(false)
+      } else {
+        reject(new Error(`写入文件失败: ${err.message}`))
+      }
     })
   })
 }
@@ -130,6 +162,8 @@ export function decryptFile(opts: CryptoOptions): Promise<boolean> {
       reject(new Error('密码不能为空'))
       return
     }
+
+    isCancelled = false
 
     const stat = fs.statSync(opts.input)
     if (stat.size < HEADER_LENGTH) {
@@ -154,6 +188,7 @@ export function decryptFile(opts: CryptoOptions): Promise<boolean> {
       start: HEADER_LENGTH
     })
     const outputStream = fs.createWriteStream(opts.output)
+    activeStreams = { input: inputStream, output: outputStream }
 
     const dataSize = stat.size - HEADER_LENGTH
     let processed = 0
@@ -184,6 +219,7 @@ export function decryptFile(opts: CryptoOptions): Promise<boolean> {
       .pipe(outputStream)
 
     outputStream.on('finish', () => {
+      activeStreams = null
       if (opts.onProgress) {
         opts.onProgress({
           percent: 100,
@@ -197,15 +233,30 @@ export function decryptFile(opts: CryptoOptions): Promise<boolean> {
     })
 
     inputStream.on('error', (err: Error) => {
-      reject(new Error(`读取文件失败: ${err.message}`))
+      activeStreams = null
+      if (isCancelled) {
+        resolve(false)
+      } else {
+        reject(new Error(`读取文件失败: ${err.message}`))
+      }
     })
 
     decipher.on('error', () => {
-      reject(new Error('解密失败：密码错误或文件已损坏'))
+      activeStreams = null
+      if (isCancelled) {
+        resolve(false)
+      } else {
+        reject(new Error('解密失败：密码错误或文件已损坏'))
+      }
     })
 
     outputStream.on('error', (err: Error) => {
-      reject(new Error(`写入文件失败: ${err.message}`))
+      activeStreams = null
+      if (isCancelled) {
+        resolve(false)
+      } else {
+        reject(new Error(`写入文件失败: ${err.message}`))
+      }
     })
   })
 }

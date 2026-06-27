@@ -1,8 +1,9 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
+import * as fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta } from './modules/ffmpeg'
-import { encryptFile, decryptFile, batchProcessFiles } from './modules/crypto'
+import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, cancelFfmpegOperation } from './modules/ffmpeg'
+import { encryptFile, decryptFile, batchProcessFiles, cancelCryptoOperation } from './modules/crypto'
 import {
   selectVideoFiles,
   selectSingleVideoFile,
@@ -16,13 +17,9 @@ import {
 } from './modules/file'
 import type { ProgressInfo } from '../preload/index'
 
-// Track active operations for cancellation
-let activeProcess: { cancel: () => void } | null = null
-
 // Temp directory for clip segments
 function getTempClipsDir(): string {
   const dir = join(app.getPath('temp'), 'sn-video-clips')
-  const fs = require('fs')
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true })
   }
@@ -41,7 +38,7 @@ function createWindow(): void {
     backgroundColor: '#0D1117',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false
@@ -241,7 +238,6 @@ function registerAppHandlers(): void {
 
   ipcMain.handle('file:delete', async (_event, filePath: string) => {
     try {
-      const fs = require('fs')
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath)
       }
@@ -255,10 +251,8 @@ function registerAppHandlers(): void {
 // Cancel operation
 function registerCancelHandler(): void {
   ipcMain.handle('operation:cancel', async () => {
-    if (activeProcess) {
-      activeProcess.cancel()
-      activeProcess = null
-    }
+    cancelFfmpegOperation()
+    cancelCryptoOperation()
     return true
   })
 }
@@ -323,6 +317,15 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  // Clean up temporary clip files
+  const tempClipsDir = join(app.getPath('temp'), 'sn-video-clips')
+  try {
+    if (fs.existsSync(tempClipsDir)) {
+      fs.rmSync(tempClipsDir, { recursive: true, force: true })
+    }
+  } catch {
+    // Silently ignore cleanup failures
+  }
   if (process.platform !== 'darwin') {
     app.quit()
   }

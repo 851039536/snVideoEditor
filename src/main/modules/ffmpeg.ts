@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'child_process'
+import { spawn, spawnSync, type ChildProcess } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
 
@@ -146,6 +146,18 @@ function resolveFfprobePath(): string {
 const ffmpegPath: string = resolveFfmpegPath()
 const ffprobePath: string = resolveFfprobePath()
 
+// ---- Cancellation support ----
+let currentProc: ChildProcess | null = null
+let isCancelled = false
+
+export function cancelFfmpegOperation(): void {
+  isCancelled = true
+  if (currentProc) {
+    currentProc.kill('SIGTERM')
+    currentProc = null
+  }
+}
+
 export interface ProgressCallback {
   (data: { percent: number; currentFile: number; totalFiles: number; speed: string; eta: string }): void
 }
@@ -193,7 +205,7 @@ export interface BatchCompressOptions {
  */
 function parseProgressLine(
   line: string
-): { time?: string; speed?: string } | null {
+): { time: string; speed: string } | null {
   const timeMatch = line.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/)
   const speedMatch = line.match(/speed=\s*(\S+)x/)
   if (!timeMatch) {
@@ -226,6 +238,8 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
       return
     }
 
+    isCancelled = false
+
     const args = [
       '-ss', opts.startTime,
       '-i', opts.input,
@@ -237,8 +251,8 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
     ]
 
     const proc = spawn(ffmpegPath, args)
+    currentProc = proc
     let stderr = ''
-    let canceled = false
 
     proc.stderr.on('data', (data: Buffer) => {
       const chunk = data.toString()
@@ -259,7 +273,9 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
     })
 
     proc.on('close', (code: number | null) => {
-      if (canceled) {
+      currentProc = null
+      if (isCancelled) {
+        resolve(false)
         return
       }
       if (code === 0) {
@@ -279,6 +295,7 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
     })
 
     proc.on('error', (err: Error) => {
+      currentProc = null
       reject(new Error(`启动 FFmpeg 失败 (${ffmpegPath}): ${err.message}`))
     })
   })
@@ -293,6 +310,8 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
       reject(new Error('没有提供要合并的视频文件'))
       return
     }
+
+    isCancelled = false
 
     // Create temporary concat list file
     const concatDir = path.dirname(opts.output)
@@ -317,8 +336,8 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
     ]
 
     const proc = spawn(ffmpegPath, args)
+    currentProc = proc
     let stderr = ''
-    let canceled = false
 
     proc.stderr.on('data', (data: Buffer) => {
       const chunk = data.toString()
@@ -339,12 +358,14 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
     })
 
     proc.on('close', (code: number | null) => {
+      currentProc = null
       // Clean up temp file
       if (fs.existsSync(concatListPath)) {
         fs.unlinkSync(concatListPath)
       }
 
-      if (canceled) {
+      if (isCancelled) {
+        resolve(false)
         return
       }
       if (code === 0) {
@@ -364,6 +385,7 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
     })
 
     proc.on('error', (err: Error) => {
+      currentProc = null
       if (fs.existsSync(concatListPath)) {
         fs.unlinkSync(concatListPath)
       }
@@ -441,6 +463,8 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
       return
     }
 
+    isCancelled = false
+
     const args: string[] = [
       '-i', opts.input,
       '-c:v', opts.codec || 'libx264',
@@ -467,9 +491,9 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
     args.push(opts.output)
 
     const proc = spawn(ffmpegPath, args)
+    currentProc = proc
     let stderr = ''
     let meta: VideoMeta | null = null
-    let canceled = false
 
     proc.stderr.on('data', (data: Buffer) => {
       const chunk = data.toString()
@@ -505,7 +529,9 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
     })
 
     proc.on('close', (code: number | null) => {
-      if (canceled) {
+      currentProc = null
+      if (isCancelled) {
+        resolve(false)
         return
       }
       if (code === 0) {
@@ -525,6 +551,7 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
     })
 
     proc.on('error', (err: Error) => {
+      currentProc = null
       reject(new Error(`启动 FFmpeg 失败 (${ffmpegPath}): ${err.message}`))
     })
   })
