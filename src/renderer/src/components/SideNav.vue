@@ -72,14 +72,15 @@ const navWidth = computed((): string => {
         <component 
           :is="item.icon"
           :size="20"
-          :style="{ color: isActive(item.path) ? item.color : '#8B949E' }"
           class="transition-colors duration-200 flex-shrink-0"
+          :class="isActive(item.path) ? '' : 'text-text-secondary'"
+          :style="isActive(item.path) ? { color: item.color } : undefined"
         />
         <Transition name="fade">
           <span
             v-if="!collapsed"
             class="text-sm whitespace-nowrap transition-colors duration-200"
-            :style="{ color: isActive(item.path) ? '#E6EDF3' : '#8B949E' }"
+            :class="isActive(item.path) ? 'text-text-primary' : 'text-text-secondary'"
           >
             {{ item.name }}
           </span>
