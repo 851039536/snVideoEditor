@@ -4,6 +4,8 @@ import { Globe, Download, Folder, FolderOpen, Monitor, Plus, X, Trash2, Search, 
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import DownloadQueue from '@/views/Download/DownloadQueue.vue'
 import { useProgressStore } from '@/stores/progress'
+import { useHeaders } from '@/composables/useHeaders'
+import { todayDateStr, sanitizeFileName } from '@/utils/format'
 
 const progressStore = useProgressStore()
 
@@ -105,41 +107,7 @@ watch(m3u8Url, (url) => {
 
 // ─── Headers ──────────────────────────────────────────────────────────────────
 
-interface HeaderEntry {
-  key: string
-  value: string
-}
-const headers = ref<HeaderEntry[]>([
-  { key: 'Referer', value: '' },
-  { key: 'User-Agent', value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' },
-  { key: 'Origin', value: '' }
-])
-
-function addHeader(): void {
-  headers.value.push({ key: '', value: '' })
-}
-
-function removeHeader(index: number): void {
-  if (headers.value.length > 1) {
-    headers.value.splice(index, 1)
-  }
-}
-
-const UA_PRESETS = [
-  { label: 'Chrome (Win)', value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' },
-  { label: 'Firefox (Win)', value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0' },
-  { label: 'Edge (Win)', value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0' },
-  { label: 'Safari (Mac)', value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15' }
-]
-
-function applyUAPreset(ua: string): void {
-  const uaHeader = headers.value.find((h) => h.key.toLowerCase() === 'user-agent')
-  if (uaHeader) {
-    uaHeader.value = ua
-  } else {
-    headers.value.unshift({ key: 'User-Agent', value: ua })
-  }
-}
+const { headers, UA_PRESETS, addHeader, removeHeader, applyUAPreset, buildHeaders } = useHeaders()
 
 // ─── Output ──────────────────────────────────────────────────────────────────
 
@@ -169,15 +137,10 @@ async function selectCustomDir(): Promise<void> {
 }
 
 const autoFileName = computed((): string => {
+  const ts = todayDateStr()
   // Priority 1: use page title if available (from "从网页提取")
   if (fetchedTitle.value) {
-    const safe = fetchedTitle.value
-      .replace(/[\\/:*?"<>|]/g, '')   // remove illegal filename chars
-      .replace(/\s+/g, '_')            // replace whitespace with underscore
-      .replace(/_+/g, '_')             // collapse multiple underscores
-      .replace(/^_|_$/g, '')           // trim leading/trailing underscores
-      .slice(0, 80)                    // limit length
-    const ts = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const safe = sanitizeFileName(fetchedTitle.value)
     return `${safe || 'video'}_${ts}.mp4`
   }
   // Priority 2: derive from URL path
@@ -186,10 +149,9 @@ const autoFileName = computed((): string => {
     const segments = urlPath.split('/').filter(Boolean)
     const last = segments[segments.length - 1] || 'video'
     const name = last.replace(/\.(m3u8|ts|mp4|mkv|webm|avi)$/i, '')
-    const ts = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     return `${name}_${ts}.mp4`
   } catch {
-    return `download_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.mp4`
+    return `download_${ts}.mp4`
   }
 })
 
@@ -225,30 +187,27 @@ function isValidUrl(url: string): boolean {
   catch { return false }
 }
 
+const isInputUrlValid = computed(() => isValidUrl(m3u8Url.value))
+
 function looksLikeWebPage(url: string): boolean {
   if (!url) { return false }
   const lower = url.toLowerCase()
+  // Definitely a streaming URL, not a webpage
   if (lower.includes('.m3u8') || lower.includes('.ts') || lower.includes('/hls/') || lower.includes('/dash/')) {
     return false
   }
-  return (
-    lower.includes('missav') || lower.includes('jable') || lower.includes('jav') ||
-    lower.includes('pornhub') || lower.includes('xvideos') || lower.includes('xhamster') ||
-    lower.includes('vimeo') || lower.includes('dailymotion') || lower.includes('bilibili') ||
-    lower.includes('youtube') || lower.includes('youku') || lower.includes('iqiyi') ||
-    lower.includes('netfli') || lower.endsWith('.html') || lower.endsWith('.htm') || lower.endsWith('.php')
-  )
-}
-
-// ─── Build headers ───────────────────────────────────────────────────────────
-
-function buildHeaders(): Record<string, string> {
-  const result: Record<string, string> = {}
-  for (const h of headers.value) {
-    const key = h.key.trim()
-    if (key && h.value.trim()) { result[key] = h.value.trim() }
+  // Known video platforms that serve HTML pages
+  const videoHosts = ['vimeo.com', 'dailymotion.com', 'bilibili.com', 'youtube.com',
+                      'youku.com', 'iqiyi.com', 'netflix.com']
+  if (videoHosts.some((h) => lower.includes(h))) {
+    return true
   }
-  return result
+  // Common webpage extensions
+  if (lower.endsWith('.html') || lower.endsWith('.htm') || lower.endsWith('.php')) {
+    return true
+  }
+  // Generic heuristic: if no media extension, treat as webpage
+  return !/\.(mp4|mkv|webm|avi|mov|flv|wmv|m4v|3gp)(\?|$)/i.test(lower)
 }
 
 // ─── Fetch m3u8 from page ────────────────────────────────────────────────────
@@ -304,6 +263,7 @@ async function selectFetchedUrl(url: string): Promise<void> {
 // ─── Download Queue ──────────────────────────────────────────────────────────
 
 const justEnqueued = ref(false)
+let justEnqueuedTimer: ReturnType<typeof setTimeout> | null = null
 
 async function enqueueDownload(): Promise<void> {
   errorMsg.value = ''
@@ -331,7 +291,8 @@ async function enqueueDownload(): Promise<void> {
       fileName: fileName.value
     })
     justEnqueued.value = true
-    setTimeout(() => { justEnqueued.value = false }, 1800)
+    if (justEnqueuedTimer) { clearTimeout(justEnqueuedTimer) }
+    justEnqueuedTimer = setTimeout(() => { justEnqueued.value = false }, 1800)
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
   }
@@ -380,6 +341,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (justEnqueuedTimer) { clearTimeout(justEnqueuedTimer) }
   window.electronAPI?.removeProgressListener()
   window.electronAPI?.removeQueueListeners()
 })
@@ -412,12 +374,12 @@ onUnmounted(() => {
                 type="url"
                 placeholder="https://example.com/video/index.m3u8  或  网页地址"
                 class="input-base w-full pl-9 pr-4"
-                :class="{ 'border-danger': errorMsg && !isValidUrl(m3u8Url) }"
+                :class="{ 'border-danger': errorMsg && !isInputUrlValid }"
               />
             </div>
             <button
               @click="fetchM3u8FromPage"
-              :disabled="!isValidUrl(m3u8Url) || isFetching"
+              :disabled="!isInputUrlValid || isFetching"
               class="btn-secondary !px-3 !py-2 text-sm flex items-center gap-1.5 flex-shrink-0"
             >
               <Search v-if="!isFetching" :size="14" />

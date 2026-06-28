@@ -4,6 +4,7 @@ import { useProgressStore } from '@/stores/progress'
 import {
   Download, Check, X, AlertTriangle, Clock, Trash2, RotateCcw, ListOrdered, ListChecks
 } from 'lucide-vue-next'
+import { truncateUrl } from '@/utils/format'
 
 const store = useProgressStore()
 
@@ -12,26 +13,24 @@ const emit = defineEmits<{
   remove: [id: string]
 }>()
 
-const statusConfig = computed(() => ({
+const STATUS_CONFIG = {
   pending: { icon: Clock, class: 'text-yellow-400', bg: 'bg-yellow-400/10', label: '等待中' },
   downloading: { icon: Download, class: 'text-accent-blue animate-pulse', bg: 'bg-accent-blue/10', label: '下载中' },
   completed: { icon: Check, class: 'text-success', bg: 'bg-success/10', label: '已完成' },
   failed: { icon: AlertTriangle, class: 'text-danger', bg: 'bg-danger/10', label: '失败' },
   cancelled: { icon: X, class: 'text-text-muted', bg: 'bg-text-muted/10', label: '已取消' }
-}))
+} as const
 
-function truncateUrl(url: string, maxLen = 50): string {
-  if (url.length <= maxLen) { return url }
-  return url.slice(0, maxLen - 3) + '...'
-}
-
-function statusCount(status: string): number {
-  return store.queueItems.filter((i) => i.status === status).length
-}
-
-const pendingCount = computed(() => statusCount('pending'))
-const completedCount = computed(() => statusCount('completed'))
-const failedCount = computed(() => statusCount('failed'))
+const statusCounts = computed(() => {
+  const counts = { pending: 0, completed: 0, failed: 0 }
+  for (const item of store.queueItems) {
+    const s = item.status
+    if (s === 'pending') { counts.pending++ }
+    else if (s === 'completed') { counts.completed++ }
+    else if (s === 'failed') { counts.failed++ }
+  }
+  return counts
+})
 </script>
 
 <template>
@@ -44,21 +43,21 @@ const failedCount = computed(() => statusCount('failed'))
           下载队列 ({{ store.queueItems.length }})
         </h3>
         <div class="flex items-center gap-2 text-xs text-text-muted ml-2">
-          <span v-if="pendingCount > 0" class="flex items-center gap-1">
+          <span v-if="statusCounts.pending > 0" class="flex items-center gap-1">
             <span class="w-1.5 h-1.5 rounded-full bg-yellow-400" />
-            等待 {{ pendingCount }}
+            等待 {{ statusCounts.pending }}
           </span>
-          <span v-if="completedCount > 0" class="flex items-center gap-1">
+          <span v-if="statusCounts.completed > 0" class="flex items-center gap-1">
             <span class="w-1.5 h-1.5 rounded-full bg-success" />
-            完成 {{ completedCount }}
+            完成 {{ statusCounts.completed }}
           </span>
-          <span v-if="failedCount > 0" class="flex items-center gap-1">
+          <span v-if="statusCounts.failed > 0" class="flex items-center gap-1">
             <span class="w-1.5 h-1.5 rounded-full bg-danger" />
-            失败 {{ failedCount }}
+            失败 {{ statusCounts.failed }}
           </span>
         </div>
       </div>
-      <ListChecks v-if="pendingCount === 0 && store.queueItems.length > 0" :size="14" class="text-success" />
+      <ListChecks v-if="statusCounts.pending === 0 && store.queueItems.length > 0" :size="14" class="text-success" />
     </div>
 
     <!-- Queue Items -->
@@ -79,12 +78,12 @@ const failedCount = computed(() => statusCount('failed'))
           <!-- Status Icon -->
           <div
             class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center"
-            :class="statusConfig[item.status].bg"
+            :class="STATUS_CONFIG[item.status].bg"
           >
             <component
-              :is="statusConfig[item.status].icon"
+              :is="STATUS_CONFIG[item.status].icon"
               :size="14"
-              :class="statusConfig[item.status].class"
+              :class="STATUS_CONFIG[item.status].class"
             />
           </div>
 
@@ -97,12 +96,12 @@ const failedCount = computed(() => statusCount('failed'))
               <span
                 class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-medium"
                 :class="[
-                  statusConfig[item.status].bg,
-                  statusConfig[item.status].class,
+                  STATUS_CONFIG[item.status].bg,
+                  STATUS_CONFIG[item.status].class,
                   { 'animate-pulse': item.status === 'downloading' }
                 ]"
               >
-                {{ statusConfig[item.status].label }}
+                {{ STATUS_CONFIG[item.status].label }}
               </span>
             </div>
             <p class="text-[11px] text-text-muted truncate mb-1">{{ item.fileName }}</p>
