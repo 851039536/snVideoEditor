@@ -192,6 +192,7 @@ export interface CompressOptions {
   resolution: string
   bitrate: string
   codec: string
+  audioBitrate?: string
   onProgress?: ProgressCallback
 }
 
@@ -508,7 +509,7 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
     }
 
     // Audio: copy stream
-    args.push('-c:a', 'aac', '-b:a', '128k')
+    args.push('-c:a', 'aac', '-b:a', opts.audioBitrate || '32k')
 
     // Fast encode preset
     args.push('-preset', 'fast')

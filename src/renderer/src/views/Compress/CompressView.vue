@@ -26,6 +26,7 @@ const crfValue = ref(23)
 const resolution = ref('original')
 const bitrate = ref('')
 const codec = ref('libx264')
+const audioBitrate = ref('32k')
 const customMode = ref(false)
 
 const preset = computed(() => {
@@ -121,7 +122,8 @@ async function startCompress(): Promise<void> {
       crf: crfValue.value,
       resolution: resolution.value,
       bitrate: bitrate.value,
-      codec: codec.value
+      codec: codec.value,
+      audioBitrate: audioBitrate.value
     }))
     const result = await window.electronAPI.batchCompress({ files: batchFiles })
     if (result.failed.length === 0) {
@@ -314,6 +316,18 @@ onUnmounted(() => {
                 <option value="libx264">H.264 (兼容性最好)</option>
                 <option value="libx265">H.265 / HEVC (更高压缩比)</option>
                 <option value="libvpx-vp9">VP9 (Web优化)</option>
+              </select>
+            </div>
+
+            <!-- Audio Bitrate -->
+            <div>
+              <label class="text-sm text-text-secondary mb-2 block">音频码率</label>
+              <select v-model="audioBitrate" class="select-input w-full">
+                <option value="32k">32 Kbps</option>
+                <option value="64k">64 Kbps</option>
+                <option value="96k">96 Kbps</option>
+                <option value="128k">128 Kbps</option>
+                <option value="192k">192 Kbps</option>
               </select>
             </div>
           </div>

@@ -57,6 +57,7 @@ export interface ElectronAPI {
     resolution: string
     bitrate: string
     codec: string
+    audioBitrate?: string
   }) => Promise<boolean>
 
   batchCompress: (opts: {
