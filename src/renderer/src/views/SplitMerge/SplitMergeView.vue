@@ -9,7 +9,7 @@ import VideoPreview from '@/components/VideoPreview.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import ClipList from './ClipList.vue'
 import { useProgressStore } from '@/stores/progress'
-import { secondsToHMS, hmsToSeconds } from '@/utils/time'
+import { secondsToHMS } from '@/utils/time'
 import { formatSize, getFileName } from '@/utils/format'
 import { clamp } from '@/utils/math'
 import type { VideoMeta, ClipItem } from '@/types/file'
@@ -40,14 +40,49 @@ const FINE_DRAG_SCALE = 5
 // Trim times in seconds (normalized 0..duration)
 const trimStartSec = ref(0)
 const trimEndSec = ref(30)
+const isInitialTrimEnd = ref(true)
 
 // ---- Manual time inputs (for fine-tuning) ----
-const startHour = ref('00')
-const startMin = ref('00')
-const startSec = ref('00')
-const endHour = ref('00')
-const endMin = ref('00')
-const endSec = ref('30')
+// Derived from trim times via computed getter; setters write back with clamping + seek
+function hmsFieldSetter(field: 'start' | 'end', h: string, m: string, s: string): void {
+  const total = parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s)
+  if (isNaN(total)) { return }
+  if (field === 'start') {
+    trimStartSec.value = clamp(total, 0, trimEndSec.value - 0.1)
+    seekVideoPlayer(trimStartSec.value)
+  } else {
+    const max = duration.value || 99999
+    isInitialTrimEnd.value = false
+    trimEndSec.value = clamp(total, trimStartSec.value + 0.1, max)
+    seekVideoPlayer(trimEndSec.value)
+  }
+}
+
+const startHour = computed({
+  get: () => secondsToHMS(trimStartSec.value).split(':')[0],
+  set: (v: string) => hmsFieldSetter('start', v, startMin.value, startSec.value)
+})
+const startMin = computed({
+  get: () => secondsToHMS(trimStartSec.value).split(':')[1],
+  set: (v: string) => hmsFieldSetter('start', startHour.value, v, startSec.value)
+})
+const startSec = computed({
+  get: () => secondsToHMS(trimStartSec.value).split(':')[2],
+  set: (v: string) => hmsFieldSetter('start', startHour.value, startMin.value, v)
+})
+
+const endHour = computed({
+  get: () => secondsToHMS(trimEndSec.value).split(':')[0],
+  set: (v: string) => hmsFieldSetter('end', v, endMin.value, endSec.value)
+})
+const endMin = computed({
+  get: () => secondsToHMS(trimEndSec.value).split(':')[1],
+  set: (v: string) => hmsFieldSetter('end', endHour.value, v, endSec.value)
+})
+const endSec = computed({
+  get: () => secondsToHMS(trimEndSec.value).split(':')[2],
+  set: (v: string) => hmsFieldSetter('end', endHour.value, endMin.value, v)
+})
 
 // ---- Step forward/backward ----
 const stepSeconds = ref(2)
@@ -61,6 +96,7 @@ const errorMsg = ref('')
 const clips = ref<ClipItem[]>([])
 const cuttingInProgress = ref(false)
 let clipIdCounter = 0
+let loadRequestId = 0
 
 // ---- Computed ----
 
@@ -85,10 +121,7 @@ const clipDurationStr = computed((): string => {
   return secondsToHMS(clipDurationSec.value)
 })
 
-const canStart = computed((): boolean => {
-  if (mode.value === 'split') {
-    return false  // Split mode uses cutToClipList instead
-  }
+const canMerge = computed((): boolean => {
   const selectedClips = clips.value.filter((c) => c.selected)
   return (selectedClips.length + files.value.length) >= 2
 })
@@ -137,51 +170,12 @@ function swapArrayElements<T>(arr: T[], index: number, direction: -1 | 1): boole
   return true
 }
 
-// ---- Sync trim times <-> manual inputs ----
-
-// Guard to prevent circular update: manual input ↔ trim time
-let syncingFromTrim = false
-
-function syncManualToTrim(): void {
-  syncingFromTrim = true
-  const startStr = secondsToHMS(trimStartSec.value)
-  const endStr = secondsToHMS(trimEndSec.value)
-  const [sh, sm, ss] = startStr.split(':')
-  const [eh, em, es] = endStr.split(':')
-  startHour.value = sh
-  startMin.value = sm
-  startSec.value = ss
-  endHour.value = eh
-  endMin.value = em
-  endSec.value = es
-  syncingFromTrim = false
-}
-
-function syncTrimFromInputs(): void {
-  if (syncingFromTrim) { return }
-  const s = hmsToSeconds(startHour.value, startMin.value, startSec.value)
-  const e = hmsToSeconds(endHour.value, endMin.value, endSec.value)
-  const max = duration.value || 99999
-  trimStartSec.value = clamp(s, 0, trimEndSec.value - 0.5)
-  trimEndSec.value = clamp(e, trimStartSec.value + 0.5, max)
-  seekVideoPlayer(trimStartSec.value)
-}
-
-watch([startHour, startMin, startSec], () => {
-  syncTrimFromInputs()
-}, { flush: 'sync' })
-
-watch([endHour, endMin, endSec], () => {
-  syncTrimFromInputs()
-}, { flush: 'sync' })
-
 // Watch trimEndSec to clamp it when duration loads
 watch(duration, (newDur) => {
   if (newDur > 0) {
-    if (trimEndSec.value > newDur || trimEndSec.value === 30) {
+    if (trimEndSec.value > newDur || isInitialTrimEnd.value) {
       trimEndSec.value = newDur
     }
-    syncManualToTrim()
   }
 })
 
@@ -202,16 +196,12 @@ async function addFiles(newFiles: string[]): Promise<void> {
   }
 }
 
-function loadFirstFileOnly(): void {
-  if (files.value.length > 1) {
-    const first = files.value[0]
-    files.value = [first]
-  }
-}
-
 async function loadVideoMeta(filePath: string): Promise<void> {
+  const thisRequestId = ++loadRequestId
   try {
     const meta = await window.electronAPI.getVideoMeta(filePath)
+    // Guard: discard stale metadata if a newer request was made
+    if (thisRequestId !== loadRequestId) { return }
     // Guard: discard stale metadata if file has changed while loading
     if (files.value.length === 0 || files.value[0] !== filePath) {
       return
@@ -220,8 +210,8 @@ async function loadVideoMeta(filePath: string): Promise<void> {
     duration.value = meta.duration
     trimStartSec.value = 0
     trimEndSec.value = meta.duration
+    isInitialTrimEnd.value = false
     currentTime.value = 0
-    syncManualToTrim()
     await nextTick()
     if (videoPlayer.value) {
       videoPlayer.value.load()
@@ -246,7 +236,9 @@ function moveFile(index: number, direction: -1 | 1): void {
 
 watch(mode, (newMode) => {
   if (newMode === 'split') {
-    loadFirstFileOnly()
+    if (files.value.length > 1) {
+      files.value = [files.value[0]]
+    }
     if (files.value.length > 0) {
       loadVideoMeta(files.value[0])
     }
@@ -279,14 +271,8 @@ function onVideoPlay(): void {
 }
 
 function onVideoPause(): void {
-  if (endedGuard) {
-    endedGuard = false
-    return
-  }
   isPlaying.value = false
 }
-
-let endedGuard = false
 
 function onTimeUpdate(): void {
   if (!videoPlayer.value) { return }
@@ -303,7 +289,6 @@ function onTimeUpdate(): void {
 }
 
 function onVideoEnded(): void {
-  endedGuard = true
   isPlaying.value = false
 }
 
@@ -337,12 +322,11 @@ function stepForward(): void {
 // Snap start/end handle to current video position
 function snapStartHere(): void {
   trimStartSec.value = clamp(currentTime.value, 0, trimEndSec.value - 0.1)
-  syncManualToTrim()
 }
 
 function snapEndHere(): void {
+  isInitialTrimEnd.value = false
   trimEndSec.value = clamp(currentTime.value, trimStartSec.value + 0.1, duration.value)
-  syncManualToTrim()
 }
 
 // ---- Timeline drag ----
@@ -371,11 +355,10 @@ function onHandleWheel(handle: 'start' | 'end', e: WheelEvent): void {
 
   if (handle === 'start') {
     trimStartSec.value = clamp(trimStartSec.value + delta, 0, trimEndSec.value - 0.1)
-    syncManualToTrim()
     seekVideoPlayer(trimStartSec.value)
   } else {
+    isInitialTrimEnd.value = false
     trimEndSec.value = clamp(trimEndSec.value + delta, trimStartSec.value + 0.1, duration.value)
-    syncManualToTrim()
     seekVideoPlayer(trimEndSec.value)
   }
 }
@@ -423,14 +406,13 @@ function onGlobalPointerMove(e: PointerEvent): void {
     const clamped = clamp(rawT, 0, trimEndSec.value - 0.1)
     if (trimStartSec.value !== clamped) {
       trimStartSec.value = clamped
-      syncManualToTrim()
       seekVideoPlayer(clamped)
     }
   } else {
     const clamped = clamp(rawT, trimStartSec.value + 0.1, duration.value)
     if (trimEndSec.value !== clamped) {
+      isInitialTrimEnd.value = false
       trimEndSec.value = clamped
-      syncManualToTrim()
       seekVideoPlayer(clamped)
     }
   }
@@ -488,7 +470,9 @@ async function cutToClipList(): Promise<void> {
 function removeClip(index: number): void {
   const clip = clips.value[index]
   if (clip) {
-    window.electronAPI.deleteFile(clip.outputFile)
+    window.electronAPI.deleteFile(clip.outputFile).catch(() => {
+      console.warn('删除临时片段文件失败:', clip.outputFile)
+    })
   }
   clips.value.splice(index, 1)
 }
@@ -549,6 +533,8 @@ async function startProcess(): Promise<void> {
       for (const c of clips.value.filter((c) => c.selected)) {
         window.electronAPI.deleteFile(c.outputFile)
       }
+      // Remove merged clips from list to avoid stale references
+      clips.value = clips.value.filter((c) => !c.selected)
       store.finish()
     }
   } catch (e) {
@@ -578,7 +564,9 @@ if (typeof window !== 'undefined') {
 onUnmounted(() => {
   document.removeEventListener('pointermove', onGlobalPointerMove)
   document.removeEventListener('pointerup', onGlobalPointerUp)
-  window.electronAPI?.removeProgressListener()
+  if (window.electronAPI) {
+    window.electronAPI.removeProgressListener()
+  }
 })
 </script>
 
@@ -934,9 +922,9 @@ onUnmounted(() => {
 
       <button
         @click="startProcess"
-        :disabled="!canStart || store.isProcessing"
+        :disabled="!canMerge || store.isProcessing"
         class="btn-primary"
-        :class="canStart && !store.isProcessing
+        :class="canMerge && !store.isProcessing
           ? 'bg-gradient-to-r from-accent-blue to-accent-purple'
           : 'bg-bg-tertiary text-text-muted'"
       >
