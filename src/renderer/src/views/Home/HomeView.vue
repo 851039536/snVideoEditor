@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { Scissors, FileVideo, Shield, Image, ArrowRight } from 'lucide-vue-next'
+import { Scissors, FileVideo, Shield, Image, Globe, ArrowRight } from 'lucide-vue-next'
 
 const router = useRouter()
 
@@ -29,6 +29,14 @@ const cards: FeatureCard[] = [
     icon: FileVideo,
     gradient: 'from-purple-500/20 to-pink-500/20',
     features: ['多级压缩预设', '自定义码率/分辨率', '批量处理支持']
+  },
+  {
+    title: '视频下载',
+    description: '输入 m3u8 播放地址，自动下载流媒体视频并合并为 MP4 文件。',
+    path: '/download',
+    icon: Globe,
+    gradient: 'from-cyan-500/20 to-blue-500/20',
+    features: ['m3u8 流媒体下载', '自定义请求头', '无损流复制', '进度实时显示']
   },
   {
     title: '视频加密与解密',

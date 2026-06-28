@@ -129,6 +129,31 @@
 
   // .glow-hover class removed (no more hover animation)
 
+  .input-base {
+    padding: 8px 12px;
+    background: hsl(var(--muted));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius-md, 8px);
+    color: hsl(var(--foreground));
+    outline: none;
+    font-size: 0.875rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .input-base::placeholder {
+    color: hsl(var(--muted-foreground));
+  }
+
+  .input-base:focus {
+    border-color: hsl(var(--primary));
+    box-shadow: 0 0 0 2px hsl(var(--primary) / 0.25);
+  }
+
+  .input-base:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .select-input {
     padding: 8px 12px;
     background: hsl(var(--muted));

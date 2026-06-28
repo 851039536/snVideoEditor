@@ -4,6 +4,8 @@ import * as fs from 'fs'
 import * as os from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, convertToGif, batchConvertToGif, cancelFfmpegOperation, getAvailableEncoders } from './modules/ffmpeg'
+import { downloadM3u8, fetchM3u8Variants } from './modules/download'
+import { fetchPageM3u8ViaBrowser } from './modules/page-fetcher'
 import { encryptFile, decryptFile, batchProcessFiles, cancelCryptoOperation } from './modules/crypto'
 import {
   selectVideoFiles,
@@ -245,6 +247,25 @@ function registerCryptoHandlers(): void {
   )
 }
 
+// Download handlers
+function registerDownloadHandlers(): void {
+  wrapOperation<{
+    url: string
+    output: string
+    headers?: Record<string, string>
+  }>('video:download', 'download', 'download', (opts, onProgress) =>
+    downloadM3u8({ ...opts, onProgress })
+  )
+
+  ipcMain.handle('video:fetchPageM3u8Browser', async (_event, pageUrl: string) => {
+    return fetchPageM3u8ViaBrowser(pageUrl)
+  })
+
+  ipcMain.handle('video:fetchM3u8Variants', async (_event, m3u8Url: string, headers?: Record<string, string>) => {
+    return fetchM3u8Variants(m3u8Url, headers)
+  })
+}
+
 // App info handlers
 function registerAppHandlers(): void {
   ipcMain.handle('app:getTempDir', async () => {
@@ -335,6 +356,7 @@ app.whenReady().then(() => {
   registerCompressHandlers()
   registerGifHandlers()
   registerCryptoHandlers()
+  registerDownloadHandlers()
   registerCancelHandler()
   registerWindowHandlers()
 

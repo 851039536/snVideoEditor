@@ -1,5 +1,5 @@
 export interface ProgressInfo {
-  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif'
+  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download'
   percent: number
   currentFile: number
   totalFiles: number
@@ -132,6 +132,26 @@ export interface ElectronAPI {
   deleteFile: (filePath: string) => Promise<boolean>
 
   getAvailableEncoders: () => Promise<string[]>
+
+  // Download
+  downloadVideo: (opts: {
+    url: string
+    output: string
+    headers?: Record<string, string>
+  }) => Promise<boolean>
+
+  fetchPageM3u8: (pageUrl: string) => Promise<{
+    m3u8Urls: string[]
+    pageTitle: string
+    pageUrl: string
+  }>
+
+  fetchM3u8Variants: (
+    m3u8Url: string,
+    headers?: Record<string, string>
+  ) => Promise<
+    { url: string; resolution: string; height: number; label: string; bandwidth?: number }[]
+  >
 }
 
 declare global {

@@ -459,6 +459,10 @@ async function cutToClipList(): Promise<void> {
         outputFile,
         selected: true
       })
+      // Reset trim handles to default (full video range)
+      trimStartSec.value = 0
+      trimEndSec.value = duration.value
+      seekVideoPlayer(0)
     }
   } catch (e) {
     errorMsg.value = `裁切失败: ${e instanceof Error ? e.message : String(e)}`

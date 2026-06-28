@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import {
-  Home, Scissors, FileVideo, Shield, Image,
+  Home, Scissors, FileVideo, Shield, Image, Globe,
   ChevronLeft, ChevronRight, Video, Sun, Moon
 } from 'lucide-vue-next'
 import { ref, computed } from 'vue'
@@ -22,6 +22,7 @@ const navItems: NavItem[] = [
   { name: '首页', path: '/', icon: Home, color: '#E6EDF3' },
   { name: '分割合并', path: '/split-merge', icon: Scissors, color: '#5B8DEF' },
   { name: '视频压缩', path: '/compress', icon: FileVideo, color: '#7C5CFC' },
+  { name: '视频下载', path: '/download', icon: Globe, color: '#22D3EE' },
   { name: '加密解密', path: '/encrypt', icon: Shield, color: '#A78BFA' },
   { name: '视频转GIF', path: '/gif', icon: Image, color: '#F0A050' }
 ]

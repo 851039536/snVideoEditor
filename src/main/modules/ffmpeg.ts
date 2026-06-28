@@ -146,7 +146,7 @@ function resolveFfprobePath(): string {
 let _ffmpegPath: string | null = null
 let _ffprobePath: string | null = null
 
-function getFfmpegPath(): string {
+export function getFfmpegPath(): string {
   if (!_ffmpegPath) {
     _ffmpegPath = resolveFfmpegPath()
   }
@@ -248,7 +248,7 @@ export interface BatchCompressOptions {
 /**
  * Parse FFmpeg stderr output to extract progress information
  */
-function parseProgressLine(
+export function parseProgressLine(
   line: string
 ): { time: string; speed: string } | null {
   const timeMatch = line.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/)
@@ -265,12 +265,19 @@ function parseProgressLine(
 /**
  * Convert time string (HH:MM:SS.mm) to seconds
  */
-function timeToSeconds(timeStr: string): number {
+export function timeToSeconds(timeStr: string): number {
   const parts = timeStr.split(':')
   const hours = parseInt(parts[0], 10)
   const minutes = parseInt(parts[1], 10)
   const seconds = parseFloat(parts[2])
   return hours * 3600 + minutes * 60 + seconds
+}
+
+/**
+ * Set the current FFmpeg process for cancellation support
+ */
+export function setFfmpegProc(proc: ChildProcess | null): void {
+  currentProc = proc
 }
 
 /**

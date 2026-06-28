@@ -26,6 +26,11 @@ const routes: RouteRecordRaw[] = [
     path: '/gif',
     name: 'Gif',
     component: () => import('@/views/Gif/GifConvertView.vue')
+  },
+  {
+    path: '/download',
+    name: 'Download',
+    component: () => import('@/views/Download/DownloadView.vue')
   }
 ]
 
