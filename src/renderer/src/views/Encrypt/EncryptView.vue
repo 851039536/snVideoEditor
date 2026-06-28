@@ -80,15 +80,22 @@ const passwordStrength = computed((): { label: string; color: string; width: str
   return { label: '较强', color: '#58A6FF', width: '75%' }
 })
 
+
+// ---- File helpers ----
+
+async function addFileEntry(p: string): Promise<void> {
+  if (files.value.some((f) => f.path === p)) { return }
+  const output = await window.electronAPI.generateCryptoOutputPath(p, mode.value === 'encrypt')
+  files.value.push({
+    path: p,
+    outputPath: output,
+    name: p.split(/[/\\]/).pop() || p
+  })
+}
+
 async function addFiles(paths: string[]): Promise<void> {
   for (const p of paths) {
-    if (files.value.some((f) => f.path === p)) { continue }
-    const output = await window.electronAPI.generateCryptoOutputPath(p, mode.value === 'encrypt')
-    files.value.push({
-      path: p,
-      outputPath: output,
-      name: p.split(/[/\\]/).pop() || p
-    })
+    await addFileEntry(p)
   }
 }
 
@@ -103,13 +110,7 @@ async function selectDir(): Promise<void> {
   }
 
   for (const p of scannedFiles) {
-    if (files.value.some((f) => f.path === p)) { continue }
-    const output = await window.electronAPI.generateCryptoOutputPath(p, mode.value === 'encrypt')
-    files.value.push({
-      path: p,
-      outputPath: output,
-      name: p.split(/[/\\]/).pop() || p
-    })
+    await addFileEntry(p)
   }
 }
 
@@ -139,6 +140,12 @@ function formatSize(bytes: number): string {
 
 function getFileName(filePath: string): string {
   return filePath.split(/[/\\]/).pop() || filePath
+}
+
+
+function setVideoMeta(meta: VideoMeta): void {
+  videoMeta.value = meta
+  duration.value = meta.duration
 }
 
 async function cleanupPreviewTemp(): Promise<void> {
@@ -203,8 +210,7 @@ async function prepareDecryptPreview(): Promise<void> {
     try {
       const meta = await window.electronAPI.getVideoMeta(tempPath)
       if (files.value[0]?.path === firstFile.path) {
-        videoMeta.value = meta as VideoMeta
-        duration.value = meta.duration
+        setVideoMeta(meta as VideoMeta)
       }
     } catch (_e) {
       // ignore
@@ -220,8 +226,7 @@ async function loadVideoMeta(filePath: string): Promise<void> {
   try {
     const meta = await window.electronAPI.getVideoMeta(filePath)
     if (files.value.length === 0 || files.value[0]?.path !== filePath) { return }
-    videoMeta.value = meta as VideoMeta
-    duration.value = meta.duration
+    setVideoMeta(meta as VideoMeta)
     await nextTick()
     if (videoPlayer.value) {
       videoPlayer.value.load()
@@ -299,7 +304,7 @@ async function selectOutputDirForAll(): Promise<void> {
   const dir = await window.electronAPI.selectDirectory()
   if (!dir) { return }
   for (const entry of files.value) {
-    const name = entry.path.split(/[/\\]/).pop() || 'video'
+    const name = getFileName(entry.path)
     const ext = mode.value === 'encrypt' ? `${name}.enc` : name.replace('.enc', '')
     entry.outputPath = `${dir}/${ext}`
   }
@@ -307,23 +312,13 @@ async function selectOutputDirForAll(): Promise<void> {
 
 function canStart(): boolean {
   if (files.value.length === 0) { return false }
-  if (password.value.length === 0) { return false }
+  if (password.value.length < 4) { return false }
   if (mode.value === 'encrypt' && password.value !== confirmPassword.value) { return false }
   return true
 }
 
 async function startProcess(): Promise<void> {
   errorMsg.value = ''
-
-  if (mode.value === 'encrypt' && password.value !== confirmPassword.value) {
-    errorMsg.value = '两次输入的密码不一致'
-    return
-  }
-
-  if (password.value.length < 4) {
-    errorMsg.value = '密码至少需要 4 个字符'
-    return
-  }
 
   // Ensure output paths
   for (const entry of files.value) {
@@ -347,48 +342,19 @@ async function startProcess(): Promise<void> {
   settingsStore.setLastPassword(password.value)
 
   try {
-    if (files.value.length === 1) {
-      const f = files.value[0]
-      let result = false
-      if (mode.value === 'encrypt') {
-        result = await window.electronAPI.encryptFile({
-          input: f.path,
-          output: f.outputPath,
-          password: password.value
-        })
-      } else {
-        result = await window.electronAPI.decryptFile({
-          input: f.path,
-          output: f.outputPath,
-          password: password.value
-        })
-      }
-      if (result) {
-        progressStore.finish()
-      }
+    const batchFiles = files.value.map((f) => ({ input: f.path, output: f.outputPath }))
+    let result: { success: number; failed: string[] }
+    if (mode.value === 'encrypt') {
+      result = await window.electronAPI.batchEncrypt({ files: batchFiles, password: password.value })
     } else {
-      const batchFiles = files.value.map((f) => ({
-        input: f.path,
-        output: f.outputPath
-      }))
-      let result: { success: number; failed: string[] }
-      if (mode.value === 'encrypt') {
-        result = await window.electronAPI.batchEncrypt({
-          files: batchFiles,
-          password: password.value
-        })
-      } else {
-        result = await window.electronAPI.batchDecrypt({
-          files: batchFiles,
-          password: password.value
-        })
-      }
-      if (result.failed.length === 0) {
-        progressStore.finish()
-      } else {
-        errorMsg.value = `${result.failed.length} 个文件处理失败`
-        progressStore.reset()
-      }
+      result = await window.electronAPI.batchDecrypt({ files: batchFiles, password: password.value })
+    }
+
+    if (result.failed.length === 0) {
+      progressStore.finish()
+    } else {
+      errorMsg.value = `${result.failed.length} 个文件处理失败`
+      progressStore.reset()
     }
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
