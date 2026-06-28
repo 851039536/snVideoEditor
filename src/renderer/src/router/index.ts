@@ -31,6 +31,11 @@ const routes: RouteRecordRaw[] = [
     path: '/download',
     name: 'Download',
     component: () => import('@/views/Download/DownloadView.vue')
+  },
+  {
+    path: '/player',
+    name: 'Player',
+    component: () => import('@/views/Player/PlayerView.vue')
   }
 ]
 

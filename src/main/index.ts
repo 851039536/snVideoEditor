@@ -9,6 +9,7 @@ import { fetchPageM3u8ViaBrowser } from './modules/page-fetcher'
 import { DownloadQueueManager } from './modules/download-queue'
 import { acquireLock, releaseLock, getActiveOperationType } from './modules/lock'
 import { encryptFile, decryptFile, batchProcessFiles, cancelCryptoOperation } from './modules/crypto'
+import { decryptForPlayback } from './modules/player'
 import {
   selectVideoFiles,
   selectSingleVideoFile,
@@ -18,7 +19,9 @@ import {
   scanVideoFiles,
   generateCryptoOutputPath,
   formatFileSize,
-  formatDuration
+  formatDuration,
+  selectPlayerFiles,
+  scanPlayerFiles
 } from './modules/file'
 import type { ProgressInfo } from '../preload/index'
 
@@ -138,6 +141,14 @@ function registerFileHandlers(): void {
     return scanVideoFiles(dirPath)
   })
 
+  ipcMain.handle('file:selectPlayerFiles', async () => {
+    return selectPlayerFiles()
+  })
+
+  ipcMain.handle('file:scanPlayerFiles', async (_event, dirPath: string) => {
+    return scanPlayerFiles(dirPath)
+  })
+
   ipcMain.handle('file:generateCryptoOutputPath', async (_event, inputPath: string, isEncrypt: boolean) => {
     return generateCryptoOutputPath(inputPath, isEncrypt)
   })
@@ -229,6 +240,13 @@ function registerCryptoHandlers(): void {
   wrapOperation<{ files: { input: string; output: string }[]; password: string }>(
     'crypto:batchDecrypt', 'crypto', 'decrypt', (opts, onProgress) => batchProcessFiles(false, { ...opts, onProgress })
   )
+}
+
+// Player handlers (no lock — playback preview only)
+function registerPlayerHandlers(): void {
+  ipcMain.handle('video:decryptForPlayback', async (_event, input: string, password: string, tempDir: string) => {
+    return decryptForPlayback(input, password, tempDir)
+  })
 }
 
 // Download handlers (queue-based)
@@ -414,6 +432,7 @@ app.whenReady().then(() => {
   registerDownloadHandlers()
   registerCancelHandler()
   registerWindowHandlers()
+  registerPlayerHandlers()
 
   createWindow()
 

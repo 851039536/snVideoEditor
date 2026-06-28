@@ -4,8 +4,10 @@ import { ref, computed } from 'vue'
 
 const props = withDefaults(defineProps<{
   acceptedExtensions?: string[]
+  customSelectFunc?: (() => Promise<string[]>) | null
 }>(), {
-  acceptedExtensions: () => ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp']
+  acceptedExtensions: () => ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp'],
+  customSelectFunc: null
 })
 
 const emit = defineEmits<{
@@ -56,7 +58,12 @@ const acceptedExtsText = computed(() => {
 })
 
 async function handleClick(): Promise<void> {
-  const files = await window.electronAPI.selectVideoFiles()
+  let files: string[]
+  if (props.customSelectFunc) {
+    files = await props.customSelectFunc()
+  } else {
+    files = await window.electronAPI.selectVideoFiles()
+  }
   if (files.length > 0) {
     emit('filesSelected', files)
   }

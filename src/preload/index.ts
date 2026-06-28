@@ -42,6 +42,9 @@ const electronAPI = {
   selectDirectory: (): Promise<string | null> =>
     ipcRenderer.invoke('file:selectDirectory'),
 
+  selectPlayerFiles: (): Promise<string[]> =>
+    ipcRenderer.invoke('file:selectPlayerFiles'),
+
   selectSavePath: (defaultName: string, defaultExt: string): Promise<string | null> =>
     ipcRenderer.invoke('file:selectSavePath', defaultName, defaultExt),
 
@@ -50,6 +53,9 @@ const electronAPI = {
 
   scanVideoFiles: (dirPath: string): Promise<string[]> =>
     ipcRenderer.invoke('file:scanVideoFiles', dirPath),
+
+  scanPlayerFiles: (dirPath: string): Promise<string[]> =>
+    ipcRenderer.invoke('file:scanPlayerFiles', dirPath),
 
   generateCryptoOutputPath: (inputPath: string, isEncrypt: boolean): Promise<string> =>
     ipcRenderer.invoke('file:generateCryptoOutputPath', inputPath, isEncrypt),
@@ -144,6 +150,9 @@ const electronAPI = {
     password: string
   }): Promise<{ success: number; failed: string[] }> =>
     ipcRenderer.invoke('crypto:batchDecrypt', opts),
+
+  decryptForPlayback: (input: string, password: string, tempDir: string): Promise<string> =>
+    ipcRenderer.invoke('video:decryptForPlayback', input, password, tempDir),
 
   // Progress
   onProgress: (callback: (info: ProgressInfo) => void): void => {

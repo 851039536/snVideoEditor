@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { Scissors, FileVideo, Shield, Image, Globe, ArrowRight } from 'lucide-vue-next'
+import { Scissors, FileVideo, Shield, Image, Globe, Play, ArrowRight } from 'lucide-vue-next'
 
 const router = useRouter()
 
@@ -53,6 +53,14 @@ const cards: FeatureCard[] = [
     icon: Image,
     gradient: 'from-orange-500/20 to-yellow-500/20',
     features: ['双通道调色板生成', '帧率/分辨率调节', '起止时间截取', '批量转换支持']
+  },
+  {
+    title: '视频播放器',
+    description: '播放普通视频和加密视频，支持播放列表管理和密码解密播放。',
+    path: '/player',
+    icon: Play,
+    gradient: 'from-red-500/20 to-orange-500/20',
+    features: ['多格式视频播放', '加密视频解密播放', '播放列表管理', '文件夹扫描导入']
   }
 ]
 </script>

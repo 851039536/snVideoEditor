@@ -29,6 +29,17 @@ const ENCRYPTED_FILTER: FileFilter[] = [
   }
 ]
 
+const PLAYER_FILTERS: FileFilter[] = [
+  {
+    name: '视频文件（含加密）',
+    extensions: ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', 'm4v', '3gp', 'enc']
+  },
+  {
+    name: '所有文件',
+    extensions: ['*']
+  }
+]
+
 /**
  * Open native dialog to select video files
  */
@@ -63,6 +74,24 @@ export async function selectSingleVideoFile(): Promise<string | null> {
   })
 
   return result.canceled ? null : result.filePaths[0]
+}
+
+/**
+ * Open native dialog to select video + encrypted files for the player
+ */
+export async function selectPlayerFiles(): Promise<string[]> {
+  const window = BrowserWindow.getFocusedWindow()
+  if (!window) {
+    return []
+  }
+
+  const result = await dialog.showOpenDialog(window, {
+    title: '选择视频文件',
+    filters: PLAYER_FILTERS,
+    properties: ['openFile', 'multiSelections']
+  })
+
+  return result.canceled ? [] : result.filePaths
 }
 
 /**
@@ -136,6 +165,37 @@ export function scanVideoFiles(dirPath: string): string[] {
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase().slice(1)
         if (videoExts.has(ext)) {
+          results.push(fullPath)
+        }
+      }
+    }
+  }
+
+  scan(dirPath)
+  return results
+}
+
+/**
+ * Scan directory for video + encrypted files recursively (for player)
+ */
+export function scanPlayerFiles(dirPath: string): string[] {
+  const results: string[] = []
+  const playerExts = new Set(PLAYER_FILTERS[0].extensions)
+
+  function scan(currentPath: string): void {
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(currentPath, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(currentPath, entry.name)
+      if (entry.isDirectory()) {
+        scan(fullPath)
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase().slice(1)
+        if (playerExts.has(ext)) {
           results.push(fullPath)
         }
       }

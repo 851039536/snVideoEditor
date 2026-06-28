@@ -24,7 +24,8 @@ const navItems: NavItem[] = [
   { name: '视频压缩', path: '/compress', icon: FileVideo, color: '#7C5CFC' },
   { name: '视频下载', path: '/download', icon: Globe, color: '#22D3EE' },
   { name: '加密解密', path: '/encrypt', icon: Shield, color: '#A78BFA' },
-  { name: '视频转GIF', path: '/gif', icon: Image, color: '#F0A050' }
+  { name: '视频转GIF', path: '/gif', icon: Image, color: '#F0A050' },
+  { name: '视频播放', path: '/player', icon: Video, color: '#58A6FF' }
 ]
 
 const isActive = (path: string): boolean => {

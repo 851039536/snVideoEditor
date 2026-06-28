@@ -31,9 +31,11 @@ export interface ElectronAPI {
   selectVideoFiles: () => Promise<string[]>
   selectSingleVideoFile: () => Promise<string | null>
   selectDirectory: () => Promise<string | null>
+  selectPlayerFiles: () => Promise<string[]>
   selectSavePath: (defaultName: string, defaultExt: string) => Promise<string | null>
   getFileInfo: (filePath: string) => Promise<FileInfo>
   scanVideoFiles: (dirPath: string) => Promise<string[]>
+  scanPlayerFiles: (dirPath: string) => Promise<string[]>
   generateCryptoOutputPath: (inputPath: string, isEncrypt: boolean) => Promise<string>
   formatFileSize: (bytes: number) => Promise<string>
   formatDuration: (seconds: number) => Promise<string>
@@ -112,6 +114,8 @@ export interface ElectronAPI {
     files: { input: string; output: string }[]
     password: string
   }) => Promise<{ success: number; failed: string[] }>
+
+  decryptForPlayback: (input: string, password: string, tempDir: string) => Promise<string>
 
   // Progress
   onProgress: (callback: (info: ProgressInfo) => void) => void
