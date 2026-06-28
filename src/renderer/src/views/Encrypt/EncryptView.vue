@@ -19,7 +19,6 @@ const mode = ref<'encrypt' | 'decrypt'>('encrypt')
 interface CryptoEntry {
   path: string
   outputPath: string
-  name: string
 }
 
 const files = ref<CryptoEntry[]>([])
@@ -85,19 +84,14 @@ const passwordStrength = computed((): { label: string; color: string; width: str
 
 // ---- File helpers ----
 
-async function addFileEntry(p: string): Promise<void> {
-  if (files.value.some((f) => f.path === p)) { return }
-  const output = await window.electronAPI.generateCryptoOutputPath(p, mode.value === 'encrypt')
-  files.value.push({
-    path: p,
-    outputPath: output,
-    name: p.split(/[/\\]/).pop() || p
-  })
-}
-
 async function addFiles(paths: string[]): Promise<void> {
   for (const p of paths) {
-    await addFileEntry(p)
+    if (files.value.some((f) => f.path === p)) { continue }
+    const output = await window.electronAPI.generateCryptoOutputPath(p, mode.value === 'encrypt')
+    files.value.push({
+      path: p,
+      outputPath: output
+    })
   }
 }
 
@@ -111,9 +105,7 @@ async function selectDir(): Promise<void> {
     return
   }
 
-  for (const p of scannedFiles) {
-    await addFileEntry(p)
-  }
+  await addFiles(scannedFiles)
 }
 
 function removeFile(index: number): void {
@@ -124,11 +116,6 @@ function removeFile(index: number): void {
 }
 
 // ---- Video playback helpers ----
-
-function setVideoMeta(meta: VideoMeta): void {
-  videoMeta.value = meta
-  duration.value = meta.duration
-}
 
 async function cleanupPreviewTemp(): Promise<void> {
   if (previewTempPath.value) {
@@ -192,7 +179,8 @@ async function prepareDecryptPreview(): Promise<void> {
     try {
       const meta = await window.electronAPI.getVideoMeta(tempPath)
       if (files.value[0]?.path === firstFile.path) {
-        setVideoMeta(meta as VideoMeta)
+        videoMeta.value = meta as VideoMeta
+        duration.value = (meta as VideoMeta).duration
       }
     } catch (_e) {
       // ignore
@@ -208,7 +196,8 @@ async function loadVideoMeta(filePath: string): Promise<void> {
   try {
     const meta = await window.electronAPI.getVideoMeta(filePath)
     if (files.value.length === 0 || files.value[0]?.path !== filePath) { return }
-    setVideoMeta(meta as VideoMeta)
+    videoMeta.value = meta as VideoMeta
+    duration.value = (meta as VideoMeta).duration
     await nextTick()
     if (videoPlayer.value) {
       videoPlayer.value.load()
@@ -292,12 +281,12 @@ async function selectOutputDirForAll(): Promise<void> {
   }
 }
 
-function canStart(): boolean {
+const canStart = computed((): boolean => {
   if (files.value.length === 0) { return false }
   if (password.value.length < 4) { return false }
   if (mode.value === 'encrypt' && password.value !== confirmPassword.value) { return false }
   return true
-}
+})
 
 async function startProcess(): Promise<void> {
   errorMsg.value = ''
@@ -367,7 +356,7 @@ onUnmounted(() => {
         </div>
         <h1 class="text-2xl font-bold text-text-primary">视频加密与解密</h1>
       </div>
-      <p class="text-text-secondary text-sm">AES-256-CTR 军用级加密，流式处理大文件无压力</p>
+      <p class="text-text-secondary text-sm">AES-256-CTR 加密，流式处理大文件无压力</p>
     </header>
 
     <!-- Mode Tabs -->
@@ -471,7 +460,7 @@ onUnmounted(() => {
             class="flex items-center gap-2 p-2 rounded-lg bg-bg-tertiary/50 transition-colors group"
           >
             <FileVideo :size="16" class="text-accent-blue flex-shrink-0" />
-            <span class="text-sm text-text-primary truncate flex-1">{{ file.name }}</span>
+            <span class="text-sm text-text-primary truncate flex-1">{{ getFileName(file.path) }}</span>
             <button
               @click="removeFile(idx)"
               class="p-1 rounded"
@@ -577,9 +566,9 @@ onUnmounted(() => {
         <!-- Start -->
         <button
           @click="startProcess"
-          :disabled="!canStart() || progressStore.isProcessing"
+          :disabled="!canStart || progressStore.isProcessing"
           class="btn-primary"
-          :class="canStart() && !progressStore.isProcessing
+          :class="canStart && !progressStore.isProcessing
             ? 'bg-gradient-to-r from-emerald-500 to-teal-500'
             : 'bg-bg-tertiary text-text-muted'"
         >
