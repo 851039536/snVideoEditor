@@ -29,6 +29,9 @@ const electronAPI = {
   getTempDir: (): Promise<string> =>
     ipcRenderer.invoke('app:getTempDir'),
 
+  getCommonPaths: (): Promise<{ desktop: string; downloads: string }> =>
+    ipcRenderer.invoke('app:getCommonPaths'),
+
   // File operations
   selectVideoFiles: (): Promise<string[]> =>
     ipcRenderer.invoke('file:selectVideoFiles'),

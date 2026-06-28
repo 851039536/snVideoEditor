@@ -25,6 +25,7 @@ export interface FileInfo {
 export interface ElectronAPI {
   // App info
   getTempDir: () => Promise<string>
+  getCommonPaths: () => Promise<{ desktop: string; downloads: string }>
 
   // File operations
   selectVideoFiles: () => Promise<string[]>

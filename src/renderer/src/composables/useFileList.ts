@@ -27,13 +27,16 @@ export function useFileList() {
 
   async function selectOutputDir(suffix: string): Promise<void> {
     const dir = await window.electronAPI.selectDirectory()
-    if (!dir) { return }
+    setOutputDir(dir, suffix)
+  }
 
+  function setOutputDir(dir: string | null, suffix: string): void {
+    if (!dir) { return }
     for (const entry of files.value) {
       const name = entry.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'output'
-      entry.outputPath = `${dir}/${name}${suffix}`
+      entry.outputPath = `${dir.replace(/\\/g, '/').replace(/\/$/, '')}/${name}${suffix}`
     }
   }
 
-  return { files, addFiles, removeFile, selectOutputDir }
+  return { files, addFiles, removeFile, selectOutputDir, setOutputDir }
 }

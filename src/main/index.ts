@@ -250,6 +250,13 @@ function registerAppHandlers(): void {
     return getTempClipsDir()
   })
 
+  ipcMain.handle('app:getCommonPaths', async () => {
+    return {
+      desktop: app.getPath('desktop'),
+      downloads: app.getPath('downloads')
+    }
+  })
+
   ipcMain.handle('file:delete', async (_event, filePath: string) => {
     try {
       if (fs.existsSync(filePath)) {

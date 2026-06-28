@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { FileVideo, Folder, X, Zap } from 'lucide-vue-next'
+import { FileVideo, Folder, X, Zap, Monitor, Download, FolderOpen } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
@@ -11,8 +11,23 @@ import type { FileEntry } from '@/types/file'
 
 const progressStore = useProgressStore()
 
-const { files, addFiles, removeFile, selectOutputDir } = useFileList()
+const { files, addFiles, removeFile, selectOutputDir, setOutputDir } = useFileList()
 const errorMsg = ref('')
+
+// Common paths for quick output selection
+const commonPaths = ref<{ desktop: string; downloads: string }>({ desktop: '', downloads: '' })
+const sourceDir = computed(() => {
+  if (files.value.length === 0) { return '' }
+  return files.value[0].path.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+})
+
+function selectQuickDir(type: 'desktop' | 'downloads' | 'source'): void {
+  if (type === 'source') {
+    setOutputDir(sourceDir.value, '_compressed.mp4')
+  } else {
+    setOutputDir(commonPaths.value[type], '_compressed.mp4')
+  }
+}
 
 // Compression params
 const crfValue = ref(23)
@@ -27,6 +42,8 @@ const RESOLUTION_BITRATE: Record<string, string> = {
   '854:480': '300k',
   '640:360': '300k'
 }
+
+const crfActive = computed(() => !bitrate.value)
 
 watch(resolution, (res) => {
   bitrate.value = RESOLUTION_BITRATE[res] || ''
@@ -98,6 +115,9 @@ const canStart = computed((): boolean => {
 const availableEncoders = ref<string[]>([])
 
 onMounted(async () => {
+  try {
+    commonPaths.value = await window.electronAPI.getCommonPaths()
+  } catch (_e) { /* ignore */ }
   try {
     availableEncoders.value = await window.electronAPI.getAvailableEncoders()
   } catch (_e) {
@@ -187,24 +207,6 @@ onUnmounted(() => {
         <div class="glass-card p-4 space-y-3">
             <h3 class="text-base font-semibold text-text-primary">压缩参数</h3>
 
-            <!-- CRF Slider -->
-            <div>
-              <label class="text-sm text-text-secondary">CRF 质量 ({{ crfValue }})</label>
-              <input
-                v-model.number="crfValue"
-                type="range"
-                min="0"
-                max="51"
-                class="w-full mt-2 slider-base slider"
-              />
-              <div class="flex justify-between text-xs text-text-muted mt-1">
-                <span>无损</span>
-                <span>最佳</span>
-                <span>默认</span>
-                <span>低质量</span>
-              </div>
-            </div>
-
             <!-- Resolution -->
             <div>
               <label class="text-sm text-text-secondary mb-2 block">输出分辨率</label>
@@ -219,13 +221,34 @@ onUnmounted(() => {
 
             <!-- Bitrate -->
             <div>
-              <label class="text-sm text-text-secondary mb-2 block">视频码率限制 (留空为自动)</label>
+              <label class="text-sm text-text-secondary mb-2 block">视频码率限制</label>
               <select v-model="bitrate" class="select-input w-full">
-                <option value="">自动</option>
+                <option value="">自动 (CRF 模式)</option>
                 <option value="4000k">4 Mbps</option>
                 <option value="500k">500 Kbps</option>
                 <option value="300k">300 Kbps</option>
               </select>
+            </div>
+
+            <!-- CRF Slider -->
+            <div :class="{ 'opacity-40 pointer-events-none': !crfActive }">
+              <label class="text-sm text-text-secondary">
+                CRF 质量 ({{ crfValue }})
+                <span v-if="!crfActive" class="text-accent-yellow text-xs ml-1">(已被码率限制覆盖)</span>
+              </label>
+              <input
+                v-model.number="crfValue"
+                type="range"
+                min="0"
+                max="51"
+                class="w-full mt-2 slider-base slider"
+              />
+              <div class="flex justify-between text-xs text-text-muted mt-1">
+                <span>无损</span>
+                <span>最佳</span>
+                <span>默认</span>
+                <span>低质量</span>
+              </div>
             </div>
 
             <!-- Codec -->
@@ -264,13 +287,48 @@ onUnmounted(() => {
         <!-- Output -->
         <div class="glass-card">
           <h3 class="section-title">输出设置</h3>
-          <button
-            @click="selectOutputDir('_compressed.mp4')"
-            class="btn-secondary"
-          >
-            <Folder :size="16" />
-            选择输出目录
-          </button>
+
+          <!-- Quick select -->
+          <div class="flex gap-2 flex-wrap">
+            <button
+              @click="selectQuickDir('desktop')"
+              class="btn-secondary !px-3 !py-1.5 text-xs"
+              :disabled="!commonPaths.desktop"
+              :title="commonPaths.desktop || '加载中...'"
+            >
+              <Monitor :size="14" />
+              桌面
+            </button>
+            <button
+              @click="selectQuickDir('downloads')"
+              class="btn-secondary !px-3 !py-1.5 text-xs"
+              :disabled="!commonPaths.downloads"
+              :title="commonPaths.downloads || '加载中...'"
+            >
+              <Download :size="14" />
+              下载
+            </button>
+            <button
+              @click="selectQuickDir('source')"
+              class="btn-secondary !px-3 !py-1.5 text-xs"
+              :disabled="!sourceDir"
+              :title="sourceDir || '请先添加文件'"
+            >
+              <FolderOpen :size="14" />
+              源文件目录
+            </button>
+          </div>
+
+          <div class="mt-3 pt-3 border-t border-bg-tertiary">
+            <button
+              @click="selectOutputDir('_compressed.mp4')"
+              class="btn-secondary"
+            >
+              <Folder :size="16" />
+              自定义目录
+            </button>
+          </div>
+
           <p v-if="files.length > 0 && files[0].outputPath" class="text-xs text-accent-light mt-2 truncate">
             {{ getOutputDir(files[0].outputPath) }}
           </p>
