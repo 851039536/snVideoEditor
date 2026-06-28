@@ -262,6 +262,11 @@ function registerDownloadHandlers(): void {
     return { queueId: item.id }
   })
 
+  // Cancel a single queue item
+  ipcMain.handle('download:cancelItem', async (_event, id: string) => {
+    return queueManager.cancelItem(id)
+  })
+
   // Cancel all downloads and clear queue
   ipcMain.handle('download:cancelQueue', async () => {
     queueManager.cancelAll()

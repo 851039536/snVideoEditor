@@ -11,6 +11,7 @@ const store = useProgressStore()
 const emit = defineEmits<{
   retry: [id: string]
   remove: [id: string]
+  cancel: [id: string]
 }>()
 
 const STATUS_CONFIG = {
@@ -128,6 +129,14 @@ const statusCounts = computed(() => {
 
           <!-- Actions -->
           <div class="flex items-center gap-1 flex-shrink-0">
+            <button
+              v-if="item.status === 'downloading'"
+              @click="emit('cancel', item.id)"
+              class="p-1.5 rounded-md hover:bg-danger/20 text-text-muted hover:text-danger transition-colors"
+              title="取消下载"
+            >
+              <X :size="13" />
+            </button>
             <button
               v-if="item.status === 'failed'"
               @click="emit('retry', item.id)"

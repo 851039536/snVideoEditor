@@ -319,6 +319,10 @@ async function handleQueueRemove(id: string): Promise<void> {
   await window.electronAPI.removeQueueItem(id)
 }
 
+async function handleQueueCancel(id: string): Promise<void> {
+  await window.electronAPI.cancelQueueItem(id)
+}
+
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -588,6 +592,7 @@ onUnmounted(() => {
         <DownloadQueue
           @retry="handleQueueRetry"
           @remove="handleQueueRemove"
+          @cancel="handleQueueCancel"
         />
 
         <!-- Progress (for non-queue operations) -->

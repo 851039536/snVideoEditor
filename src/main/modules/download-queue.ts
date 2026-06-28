@@ -137,6 +137,42 @@ export class DownloadQueueManager {
     this.notifyStatus()
   }
 
+  /** Cancel a single queue item (pending → cancelled, downloading → kill proc + cancelled). */
+  cancelItem(id: string): boolean {
+    const item = this.items.find((i) => i.id === id)
+    if (!item) { return false }
+
+    if (item.status === 'pending') {
+      item.status = 'cancelled'
+      this.notifyStatus()
+      return true
+    }
+
+    if (item.status === 'downloading') {
+      // Mark cancelled first so .then/.catch guards won't overwrite
+      item.status = 'cancelled'
+      // Kill the ffmpeg process for this item
+      const proc = this.activeProcs.get(id)
+      if (proc) {
+        killFfmpegProc(proc)
+      }
+      this.activeIds.delete(id)
+      this.activeProcs.delete(id)
+      this.notifyStatus()
+
+      // Release the slot: try to start next pending task
+      this.scheduleTasks()
+
+      // If nothing active and nothing pending, mark idle
+      if (this.activeIds.size === 0 && !this.items.some((i) => i.status === 'pending')) {
+        this.isProcessing = false
+      }
+      return true
+    }
+
+    return false // can't cancel completed/failed/already-cancelled
+  }
+
   getStatus(): QueueStatus {
     return {
       items: [...this.items],

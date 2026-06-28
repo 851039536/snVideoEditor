@@ -228,6 +228,9 @@ const electronAPI = {
   cancelDownloadQueue: (): Promise<void> =>
     ipcRenderer.invoke('download:cancelQueue'),
 
+  cancelQueueItem: (id: string): Promise<boolean> =>
+    ipcRenderer.invoke('download:cancelItem', id),
+
   removeQueueItem: (id: string): Promise<boolean> =>
     ipcRenderer.invoke('download:removeQueueItem', id),
 

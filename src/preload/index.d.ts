@@ -163,6 +163,8 @@ export interface ElectronAPI {
 
   cancelDownloadQueue: () => Promise<void>
 
+  cancelQueueItem: (id: string) => Promise<boolean>
+
   removeQueueItem: (id: string) => Promise<boolean>
 
   retryQueueItem: (id: string) => Promise<boolean>
