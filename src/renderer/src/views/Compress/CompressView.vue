@@ -4,37 +4,22 @@ import { FileVideo, Folder, X, Zap } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
-import { useSettingsStore } from '@/stores/settings'
 import { formatDuration } from '@/utils/time'
 import { formatSize } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
 import type { FileEntry } from '@/types/file'
 
 const progressStore = useProgressStore()
-const settingsStore = useSettingsStore()
 
 const { files, addFiles, removeFile, selectOutputDir } = useFileList()
 const errorMsg = ref('')
 
 // Compression params
-const selectedPreset = ref('中等质量')
 const crfValue = ref(23)
 const resolution = ref('original')
 const bitrate = ref('')
 const codec = ref('libx264')
 const audioBitrate = ref('32k')
-const customMode = ref(false)
-
-const preset = computed(() => {
-  return settingsStore.compressPresets.find((p) => p.label === selectedPreset.value)
-})
-
-function selectPreset(label: string): void {
-  selectedPreset.value = label
-  if (preset.value) {
-    crfValue.value = preset.value.crf
-  }
-}
 
 const RESOLUTION_BITRATE: Record<string, string> = {
   '1920:1080': '4000k',
@@ -198,42 +183,9 @@ onUnmounted(() => {
 
       <!-- Right: Parameters -->
       <div class="space-y-3">
-        <!-- Compression Presets -->
-        <div class="glass-card">
-          <h3 class="section-title">压缩预设</h3>
-          <div class="grid grid-cols-2 gap-2">
-            <button
-              v-for="p in settingsStore.compressPresets"
-              :key="p.label"
-              @click="selectPreset(p.label); customMode = false"
-              class="preset-btn p-3 rounded-lg text-left transition-all duration-200"
-              :class="selectedPreset === p.label && !customMode
-                ? 'bg-accent-purple/10 border-accent-purple/50'
-                : 'bg-bg-tertiary/50 border-transparent'"
-              style="border-width: 1px; border-style: solid;"
-            >
-              <span class="text-sm font-medium text-text-primary block">{{ p.label }}</span>
-              <span class="text-xs text-text-muted">CRF {{ p.crf }}</span>
-            </button>
-          </div>
-
-          <!-- Custom Mode Toggle -->
-          <button
-            @click="customMode = !customMode; if (customMode) selectedPreset = '自定义'"
-            class="mt-3 w-full p-2 rounded-lg text-sm border transition-all"
-            :class="customMode
-              ? 'border-accent-purple/50 text-accent-purple bg-accent-purple/10'
-              : 'border-dashed border-bg-tertiary text-text-secondary'"
-          >
-            <Zap :size="14" class="inline mr-1 -mt-0.5" />
-            {{ customMode ? '自定义模式已启用' : '切换自定义参数' }}
-          </button>
-        </div>
-
-        <!-- Custom Parameters -->
-        <Transition name="fade">
-          <div v-if="customMode" class="glass-card p-4 space-y-3">
-            <h3 class="text-base font-semibold text-text-primary">自定义参数</h3>
+        <!-- Compression Parameters -->
+        <div class="glass-card p-4 space-y-3">
+            <h3 class="text-base font-semibold text-text-primary">压缩参数</h3>
 
             <!-- CRF Slider -->
             <div>
@@ -307,8 +259,7 @@ onUnmounted(() => {
                 <option value="192k">192 Kbps</option>
               </select>
             </div>
-          </div>
-        </Transition>
+        </div>
 
         <!-- Output -->
         <div class="glass-card">
@@ -358,17 +309,5 @@ onUnmounted(() => {
 .slider::-webkit-slider-thumb {
   border: 2px solid hsl(var(--primary));
   box-shadow: 0 0 8px rgba(123, 92, 252, 0.4);
-}
-
-/* Custom param panel transition */
-.fade-enter-active,
-.fade-leave-active {
-  transition: all 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
 }
 </style>
