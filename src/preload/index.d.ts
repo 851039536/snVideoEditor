@@ -167,6 +167,8 @@ export interface ElectronAPI {
 
   removeQueueItem: (id: string) => Promise<boolean>
 
+  clearQueueTerminal: () => Promise<number>
+
   retryQueueItem: (id: string) => Promise<boolean>
 
   getQueueStatus: () => Promise<{

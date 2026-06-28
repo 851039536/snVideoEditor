@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useProgressStore } from '@/stores/progress'
 import {
-  Download, Check, X, AlertTriangle, Clock, Trash2, RotateCcw, ListOrdered, ListChecks
+  Download, Check, X, AlertTriangle, Clock, Trash2, RotateCcw, ListOrdered, ListChecks, Eraser
 } from 'lucide-vue-next'
 import { truncateUrl } from '@/utils/format'
 
@@ -12,6 +12,7 @@ const emit = defineEmits<{
   retry: [id: string]
   remove: [id: string]
   cancel: [id: string]
+  clearTerminal: []
 }>()
 
 const STATUS_CONFIG = {
@@ -31,6 +32,13 @@ const statusCounts = computed(() => {
     else if (s === 'failed') { counts.failed++ }
   }
   return counts
+})
+
+// Whether any terminal items (completed/failed/cancelled) exist for batch clearing
+const hasTerminalItems = computed((): boolean => {
+  return store.queueItems.some(
+    (i) => i.status === 'completed' || i.status === 'failed' || i.status === 'cancelled'
+  )
 })
 </script>
 
@@ -58,7 +66,17 @@ const statusCounts = computed(() => {
           </span>
         </div>
       </div>
-      <ListChecks v-if="statusCounts.pending === 0 && store.queueItems.length > 0" :size="14" class="text-success" />
+      <div class="flex items-center gap-2">
+        <button
+          v-if="hasTerminalItems"
+          @click="emit('clearTerminal')"
+          class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1"
+          title="清空所有已完成/失败/已取消项"
+        >
+          <Eraser :size="12" /> 清空已完成
+        </button>
+        <ListChecks v-if="statusCounts.pending === 0 && store.queueItems.length > 0" :size="14" class="text-success" />
+      </div>
     </div>
 
     <!-- Queue Items -->
@@ -146,10 +164,10 @@ const statusCounts = computed(() => {
               <RotateCcw :size="13" />
             </button>
             <button
-              v-if="item.status === 'pending'"
+              v-if="item.status !== 'downloading'"
               @click="emit('remove', item.id)"
               class="p-1.5 rounded-md hover:bg-danger/20 text-text-muted hover:text-danger transition-colors"
-              title="移除"
+              :title="item.status === 'pending' ? '移除' : '从队列移除'"
             >
               <Trash2 :size="13" />
             </button>

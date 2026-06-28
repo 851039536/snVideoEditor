@@ -277,6 +277,11 @@ function registerDownloadHandlers(): void {
     return queueManager.removeItem(id)
   })
 
+  // Batch-clear all terminal (completed/failed/cancelled) items
+  ipcMain.handle('download:clearTerminal', async () => {
+    return queueManager.clearTerminal()
+  })
+
   // Retry a failed item
   ipcMain.handle('download:retryQueueItem', async (_event, id: string) => {
     return queueManager.retryItem(id)

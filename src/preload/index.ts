@@ -234,6 +234,9 @@ const electronAPI = {
   removeQueueItem: (id: string): Promise<boolean> =>
     ipcRenderer.invoke('download:removeQueueItem', id),
 
+  clearQueueTerminal: (): Promise<number> =>
+    ipcRenderer.invoke('download:clearTerminal'),
+
   retryQueueItem: (id: string): Promise<boolean> =>
     ipcRenderer.invoke('download:retryQueueItem', id),
 

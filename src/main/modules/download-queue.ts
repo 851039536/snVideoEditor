@@ -92,10 +92,24 @@ export class DownloadQueueManager {
     const idx = this.items.findIndex((i) => i.id === id)
     if (idx < 0) { return false }
     const item = this.items[idx]
-    if (item.status !== 'pending') { return false }
+    // Only forbid removing active items; allow pending + terminal states
+    if (item.status === 'downloading') { return false }
     this.items.splice(idx, 1)
     this.notifyStatus()
     return true
+  }
+
+  /** Batch-remove all terminal items (completed / failed / cancelled). Returns count removed. */
+  clearTerminal(): number {
+    const before = this.items.length
+    this.items = this.items.filter(
+      (i) => i.status === 'pending' || i.status === 'downloading'
+    )
+    const removed = before - this.items.length
+    if (removed > 0) {
+      this.notifyStatus()
+    }
+    return removed
   }
 
   retryItem(id: string): boolean {

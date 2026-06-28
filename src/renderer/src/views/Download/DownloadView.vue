@@ -260,13 +260,11 @@ async function fetchM3u8FromPage(): Promise<void> {
   }
 }
 
-/** When user selects an m3u8 URL from fetched list, also fetch its quality variants */
+/** When user selects an m3u8 URL from fetched list, the watch on m3u8Url will auto-fetch variants */
 async function selectFetchedUrl(url: string): Promise<void> {
   m3u8Url.value = url
   showFetchedUrls.value = false
   hintMsg.value = ''
-  // Fetch quality variants for this URL
-  await fetchQualityVariants()
 }
 
 // ─── Download Queue ──────────────────────────────────────────────────────────
@@ -284,12 +282,13 @@ async function enqueueDownload(): Promise<void> {
     errorMsg.value = '请输入有效的 URL 地址'
     return
   }
-  if (looksLikeWebPage(url)) {
-    hintMsg.value = '⚠ 当前输入看起来像网页地址而非 m3u8 流地址，建议先点击"从网页提取"获取真实播放链接。'
-  }
   if (!outputPath.value) {
     errorMsg.value = '请选择输出目录并输入文件名'
     return
+  }
+  // Only set hint after all early-return checks, so it won't be cleared by next call
+  if (looksLikeWebPage(url)) {
+    hintMsg.value = '⚠ 当前输入看起来像网页地址而非 m3u8 流地址，建议先点击"从网页提取"获取真实播放链接。'
   }
 
   try {
@@ -320,7 +319,20 @@ async function handleQueueRemove(id: string): Promise<void> {
 }
 
 async function handleQueueCancel(id: string): Promise<void> {
-  await window.electronAPI.cancelQueueItem(id)
+  const ok = await window.electronAPI.cancelQueueItem(id)
+  if (!ok) {
+    // Item already changed to terminal state between click and IPC; resync state
+    try {
+      const status = await window.electronAPI.getQueueStatus()
+      progressStore.updateQueueItems(status.items)
+      progressStore.queueActiveIds = status.activeIds
+      progressStore.queueIsProcessing = status.isProcessing
+    } catch { /* ignore */ }
+  }
+}
+
+async function handleClearTerminal(): Promise<void> {
+  await window.electronAPI.clearQueueTerminal()
 }
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
@@ -593,6 +605,7 @@ onUnmounted(() => {
           @retry="handleQueueRetry"
           @remove="handleQueueRemove"
           @cancel="handleQueueCancel"
+          @clear-terminal="handleClearTerminal"
         />
 
         <!-- Progress (for non-queue operations) -->
