@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { FileVideo, Folder, X, Zap } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
@@ -38,6 +38,17 @@ function selectPreset(label: string): void {
     crfValue.value = preset.value.crf
   }
 }
+
+const RESOLUTION_BITRATE: Record<string, string> = {
+  '1920:1080': '4000k',
+  '1280:720': '500k',
+  '854:480': '300k',
+  '640:360': '300k'
+}
+
+watch(resolution, (res) => {
+  bitrate.value = RESOLUTION_BITRATE[res] || ''
+})
 
 async function addFiles(paths: string[]): Promise<void> {
   for (const p of paths) {
@@ -290,11 +301,9 @@ onUnmounted(() => {
               <label class="text-sm text-text-secondary mb-2 block">视频码率限制 (留空为自动)</label>
               <select v-model="bitrate" class="select-input w-full">
                 <option value="">自动</option>
-                <option value="5000k">5 Mbps</option>
-                <option value="3000k">3 Mbps</option>
-                <option value="2000k">2 Mbps</option>
-                <option value="1000k">1 Mbps</option>
+                <option value="4000k">4 Mbps</option>
                 <option value="500k">500 Kbps</option>
+                <option value="300k">300 Kbps</option>
               </select>
             </div>
 

@@ -591,6 +591,7 @@ export async function batchCompress(opts: BatchCompressOptions): Promise<{ succe
   const failed: string[] = []
 
   for (let i = 0; i < opts.files.length; i++) {
+    if (isCancelled) { break }
     const file = opts.files[i]
     try {
       await compressVideo({
@@ -607,6 +608,7 @@ export async function batchCompress(opts: BatchCompressOptions): Promise<{ succe
       })
       success++
     } catch (e) {
+      if (isCancelled) { break }
       failed.push(file.input)
     }
   }
@@ -773,6 +775,7 @@ export async function batchConvertToGif(opts: BatchGifOptions): Promise<{ succes
   const failed: string[] = []
 
   for (let i = 0; i < opts.files.length; i++) {
+    if (isCancelled) { break }
     const file = opts.files[i]
     try {
       await convertToGif({
@@ -789,6 +792,7 @@ export async function batchConvertToGif(opts: BatchGifOptions): Promise<{ succes
       })
       success++
     } catch (e) {
+      if (isCancelled) { break }
       failed.push(file.input)
     }
   }

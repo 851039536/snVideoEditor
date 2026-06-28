@@ -274,6 +274,7 @@ export async function batchProcessFiles(
   const processFn = isEncrypt ? encryptFile : decryptFile
 
   for (let i = 0; i < opts.files.length; i++) {
+    if (isCancelled) { break }
     const file = opts.files[i]
     try {
       await processFn({
@@ -292,6 +293,7 @@ export async function batchProcessFiles(
       })
       success++
     } catch (e) {
+      if (isCancelled) { break }
       failed.push(file.input)
     }
   }
