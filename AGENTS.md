@@ -21,7 +21,7 @@ npm run build # 构建（勿私自执行，太慢）
 ```
 src/
 ├── main/                     # Electron 主进程
-│   ├── index.ts              # 入口：创建窗口 + 注册 IPC handlers
+│   ├── index.ts              # 入口：创建窗口 + 注册 IPC handlers（使用 wrapOperation 统一模式）
 │   └── modules/              # ffmpeg.ts / crypto.ts / file.ts
 ├── preload/                  # contextBridge 安全 API
 │   ├── index.ts              # electronAPI 定义（类型 + 桥接实现）
@@ -31,6 +31,7 @@ src/
     │   ├── SplitMerge/       # 视频分割与合并（SplitMergeView + ClipList）
     │   ├── Compress/         # 视频压缩（CompressView）
     │   ├── Encrypt/          # 加密解密（EncryptView）
+    │   ├── Gif/              # GIF 转换（GifConvertView）
     │   └── Home/             # 首页导航（HomeView）
     ├── components/           # 跨功能通用组件
     │   ├── SideNav.vue       # 侧边导航（含主题切换）
@@ -38,9 +39,17 @@ src/
     │   ├── ProgressPanel.vue # 进度面板
     │   ├── VideoPreview.vue  # 视频预览缩略图
     │   └── TitleBar.vue      # 自定义窗口标题栏（最大/最小/关闭）
+    ├── composables/          # 组合式函数
+    │   └── useFileList.ts    # 文件列表管理逻辑
     ├── stores/               # Pinia 状态管理
     │   ├── progress.ts       # 操作进度状态（含计时器）
     │   └── settings.ts       # 设置（主题、压缩预设、密码记忆）
+    ├── types/                # 共享类型定义
+    │   └── file.ts           # ClipItem / VideoMeta（重新导出 preload 中的 VideoMeta）
+    ├── utils/                # 共享工具函数（禁止在视图组件中内联定义）
+    │   ├── time.ts           # secondsToHMS / hmsToSeconds / formatDuration
+    │   ├── math.ts           # clamp
+    │   └── format.ts         # formatSize / getFileName
     ├── router/
     │   └── index.ts          # Hash 路由（createWebHashHistory）
     └── assets/
@@ -55,6 +64,20 @@ src/
 2. **进度推送**：主进程通过 `event.sender.send('operation:progress', data)` 推送进度 → 渲染进程 `ipcRenderer.on` 监听。进度在调用 operation 前注册回调，完成后需 `removeProgressListener()` 清理。
 
 取消操作：`operation:cancel` 同时清除 ffmpeg 子进程（`SIGTERM`）和 crypto 流（`destroy()`），取消后各模块 resolve(false) 而非 reject。
+
+### IPC Handler 注册模式
+
+所有操作类 IPC handler 统一使用 `wrapOperation` 高阶函数注册，禁止手写 `acquireLock`/`try-finally`/`releaseLock`/`sendProgress` 样板代码：
+
+```ts
+wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
+  return actualHandler({ ...opts, onProgress })
+})
+```
+
+- `lockType`：操作锁标识（如 `'split'`、`'compress'`、`'crypto'`），同一时刻只允许一个操作
+- `progressType`：进度事件中的 `type` 字段（如 `'split'`、`'encrypt'`），用于前端区分操作类型
+- 新增操作 handler 时必须在函数体内调用 wrapOperation，不得复制粘贴旧的 try-finally 模式
 
 ## FFmpeg 二进制解析策略（ffmpeg.ts）
 
@@ -97,6 +120,8 @@ src/
 - **views 子目录规则**：完整功能模块放在 `views/<功能名>/` 子目录下，主页面命名为 `<功能名>View.vue`，子组件放同目录
   - 示例：SplitMerge 功能 → `views/SplitMerge/SplitMergeView.vue` + `views/SplitMerge/ClipList.vue`
 - **components 目录**：仅放跨模块共享的通用组件
+- **utils 目录**：共享工具函数，视图组件禁止内联重复定义 `formatSize` / `getFileName` / `secondsToHMS` / `hmsToSeconds` / `clamp`，必须从 utils 导入
+- **types 目录**：共享类型/接口定义。`ClipItem` 和 `VideoMeta` 统一从 `@/types/file` 导入，禁止在各视图内重复声明
 - 新增功能页面时同步更新 `router/index.ts`、HomeView 入口卡片
 
 ## 设计风格
