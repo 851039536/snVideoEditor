@@ -1,17 +1,7 @@
 <script setup lang="ts">
 import { X, ArrowUp, ArrowDown } from 'lucide-vue-next'
-import { secondsToHMS } from '@/lib/time'
-
-interface ClipItem {
-  id: string
-  sourceFile: string
-  sourceFileName: string
-  startSec: number
-  endSec: number
-  duration: number
-  outputFile: string
-  selected: boolean
-}
+import { secondsToHMS } from '@/utils/time'
+import type { ClipItem } from '@/types/file'
 
 const props = withDefaults(defineProps<{
   clips: ClipItem[]

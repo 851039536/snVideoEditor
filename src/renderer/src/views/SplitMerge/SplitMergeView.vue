@@ -9,27 +9,10 @@ import VideoPreview from '@/components/VideoPreview.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import ClipList from './ClipList.vue'
 import { useProgressStore } from '@/stores/progress'
-import { secondsToHMS } from '@/lib/time'
-
-interface VideoMeta {
-  duration: number
-  width: number
-  height: number
-  bitrate: number
-  codec: string
-  size: number
-}
-
-interface ClipItem {
-  id: string
-  sourceFile: string
-  sourceFileName: string
-  startSec: number
-  endSec: number
-  duration: number
-  outputFile: string
-  selected: boolean
-}
+import { secondsToHMS, hmsToSeconds } from '@/utils/time'
+import { formatSize, getFileName } from '@/utils/format'
+import { clamp } from '@/utils/math'
+import type { VideoMeta, ClipItem } from '@/types/file'
 
 const store = useProgressStore()
 
@@ -137,14 +120,6 @@ const playheadInSelectionPercent = computed((): number => {
 })
 
 // ---- Helpers ----
-
-function hmsToSeconds(h: string, m: string, s: string): number {
-  return parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s)
-}
-
-function clamp(val: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, val))
-}
 
 function seekVideoPlayer(t: number): void {
   if (videoPlayer.value) {
@@ -593,18 +568,6 @@ async function validateOutput(): Promise<boolean> {
   return true
 }
 
-function getFileName(filePath: string): string {
-  return filePath.split(/[/\\]/).pop() || filePath
-}
-
-function getSizeStr(bytes: number): string {
-  if (!bytes || bytes === 0) { return '' }
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
-}
-
 // ---- Lifecycle ----
 
 if (typeof window !== 'undefined') {
@@ -707,7 +670,7 @@ onUnmounted(() => {
             <!-- File info -->
             <div class="flex items-center gap-3 text-xs text-text-muted">
               <span v-if="videoMeta">{{ videoMeta.width }}×{{ videoMeta.height }}</span>
-              <span v-if="videoMeta">{{ getSizeStr(videoMeta.size) }}</span>
+              <span v-if="videoMeta">{{ formatSize(videoMeta.size) }}</span>
               <span class="text-accent-blue font-mono">{{ getFileName(files[0]) }}</span>
               <button
                 @click="removeFile(0)"

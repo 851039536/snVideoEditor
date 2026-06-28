@@ -6,6 +6,7 @@ import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
 import { formatDuration } from '@/utils/time'
+import { formatSize } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
 import type { FileEntry } from '@/types/file'
 
@@ -99,14 +100,6 @@ async function startCompress(): Promise<void> {
     errorMsg.value = e instanceof Error ? e.message : String(e)
     progressStore.reset()
   }
-}
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) { return '0 B' }
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
 }
 
 function getOutputDir(path: string): string {

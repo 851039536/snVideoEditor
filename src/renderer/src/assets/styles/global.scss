@@ -127,25 +127,6 @@
     background-clip: text;
   }
 
-  .gradient-border {
-    position: relative;
-    border: 1px solid transparent;
-    background-clip: padding-box;
-  }
-
-  .gradient-border::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    padding: 1px;
-    background: linear-gradient(135deg, #5B8DEF, #7C5CFC);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-  }
-
   // .glow-hover class removed (no more hover animation)
 
   .select-input {
@@ -224,18 +205,6 @@
     color: hsl(var(--muted-foreground));
     font-size: 0.875rem;
     border: 1px solid transparent;
-  }
-
-  /* ---- File list item ---- */
-
-  .file-item {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem;
-    border-radius: var(--radius-md, 8px);
-    background: hsl(var(--muted) / 0.5);
-    transition: colors 0.15s;
   }
 
   /* ---- Shared form elements ---- */

@@ -13,7 +13,6 @@ const emit = defineEmits<{
 }>()
 
 const isDragging = ref(false)
-const isProcessing = ref(false)
 
 async function handleDrop(event: DragEvent): Promise<void> {
   isDragging.value = false

@@ -5,6 +5,9 @@ import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
+import { formatSize, getFileName } from '@/utils/format'
+import { secondsToHMS } from '@/utils/time'
+import type { VideoMeta } from '@/types/file'
 
 const progressStore = useProgressStore()
 const settingsStore = useSettingsStore()
@@ -27,7 +30,6 @@ const videoPlayer = ref<HTMLVideoElement | null>(null)
 const isPlaying = ref(false)
 const currentTime = ref(0)
 const duration = ref(0)
-interface VideoMeta { duration: number; width: number; height: number; bitrate: number; codec: string; size: number }
 const videoMeta = ref<VideoMeta | null>(null)
 const previewTempPath = ref('')
 const previewPreparing = ref(false)
@@ -122,26 +124,6 @@ function removeFile(index: number): void {
 }
 
 // ---- Video playback helpers ----
-
-function secondsToHMS(totalSec: number): string {
-  const h = Math.floor(totalSec / 3600)
-  const m = Math.floor((totalSec % 3600) / 60)
-  const s = Math.floor(totalSec % 60)
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) { return '0 B' }
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
-}
-
-function getFileName(filePath: string): string {
-  return filePath.split(/[/\\]/).pop() || filePath
-}
-
 
 function setVideoMeta(meta: VideoMeta): void {
   videoMeta.value = meta

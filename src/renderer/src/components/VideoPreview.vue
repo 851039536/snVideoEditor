@@ -1,17 +1,16 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { Play, Clock, FileVideo } from 'lucide-vue-next'
+import { computed } from 'vue'
+import { Play, FileVideo } from 'lucide-vue-next'
 import type { FileInfo } from '../../../preload/index'
+import { formatSize, getFileName } from '@/utils/format'
 
 const props = defineProps<{
   filePath: string
   fileInfo?: FileInfo | null
 }>()
 
-const isDetailOpen = ref(false)
-
 const fileName = computed((): string => {
-  return props.filePath.split(/[/\\]/).pop() || props.filePath
+  return getFileName(props.filePath)
 })
 
 const fileSizeStr = computed((): string => {
@@ -24,14 +23,6 @@ const fileSizeStr = computed((): string => {
 const fileExt = computed((): string => {
   return props.fileInfo?.ext?.toUpperCase() || fileName.value.split('.').pop()?.toUpperCase() || ''
 })
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) { return '0 B' }
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
-}
 </script>
 
 <template>
