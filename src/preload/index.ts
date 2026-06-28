@@ -247,8 +247,12 @@ const electronAPI = {
       fileName: string
     }[]
     isProcessing: boolean
-    activeId: string | null
+    activeIds: string[]
+    concurrency: number
   }> => ipcRenderer.invoke('download:getStatus'),
+
+  setDownloadConcurrency: (n: number): Promise<void> =>
+    ipcRenderer.invoke('download:setConcurrency', n),
 
   onQueueProgress: (callback: (data: {
     queueId: string
@@ -275,7 +279,8 @@ const electronAPI = {
       fileName: string
     }[]
     isProcessing: boolean
-    activeId: string | null
+    activeIds: string[]
+    concurrency: number
   }) => void): void => {
     ipcRenderer.removeAllListeners('download:queue-update')
     ipcRenderer.on('download:queue-update', (_event, data) => {

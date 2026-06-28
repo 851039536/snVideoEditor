@@ -180,8 +180,11 @@ export interface ElectronAPI {
       fileName: string
     }[]
     isProcessing: boolean
-    activeId: string | null
+    activeIds: string[]
+    concurrency: number
   }>
+
+  setDownloadConcurrency: (n: number) => Promise<void>
 
   onQueueProgress: (callback: (data: {
     queueId: string
@@ -203,7 +206,8 @@ export interface ElectronAPI {
       fileName: string
     }[]
     isProcessing: boolean
-    activeId: string | null
+    activeIds: string[]
+    concurrency: number
   }) => void) => void
 
   removeQueueListeners: () => void

@@ -24,8 +24,9 @@ export const useProgressStore = defineStore('progress', () => {
 
   // ─── Download queue state ──────────────────────────────────────────────────
   const queueItems = ref<QueueItem[]>([])
-  const queueActiveId = ref<string | null>(null)
+  const queueActiveIds = ref<string[]>([])
   const queueIsProcessing = ref(false)
+  const queueConcurrency = ref(2)
 
   function updateQueueItems(items: QueueItem[]): void {
     queueItems.value = items
@@ -141,8 +142,9 @@ export const useProgressStore = defineStore('progress', () => {
     cancel,
     // Queue
     queueItems,
-    queueActiveId,
+    queueActiveIds,
     queueIsProcessing,
+    queueConcurrency,
     updateQueueItems,
     updateQueueItemProgress,
     queueHasPending

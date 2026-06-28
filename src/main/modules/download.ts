@@ -21,6 +21,8 @@ export interface DownloadOptions {
     speed: string
     eta: string
   }) => void
+  /** Callback with the spawned ffmpeg process, so the caller can cancel it. */
+  onProcCreated?: (proc: import('child_process').ChildProcess) => void
 }
 
 export interface PageFetchResult {
@@ -156,6 +158,9 @@ export function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
 
     const proc = spawn(getFfmpegPath(), args)
     setFfmpegProc(proc)
+    if (opts.onProcCreated) {
+      opts.onProcCreated(proc)
+    }
 
     const stderrLines: string[] = []
     let durationSec = 0

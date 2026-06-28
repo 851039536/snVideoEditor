@@ -282,6 +282,11 @@ function registerDownloadHandlers(): void {
     return queueManager.getStatus()
   })
 
+  // Set concurrency
+  ipcMain.handle('download:setConcurrency', async (_event, n: number) => {
+    queueManager.setConcurrency(n)
+  })
+
   // Original single-download channel: redirect to queue (backward compat)
   wrapOperation<{
     url: string

@@ -167,12 +167,19 @@ let isCancelled = false
 export function cancelFfmpegOperation(): void {
   isCancelled = true
   if (currentProc) {
-    if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', String(currentProc.pid), '/t', '/f'])
-    } else {
-      currentProc.kill('SIGTERM')
-    }
+    killFfmpegProc(currentProc)
     currentProc = null
+  }
+}
+
+/**
+ * Kill a specific ffmpeg child process (with all children on Windows).
+ */
+export function killFfmpegProc(proc: ChildProcess): void {
+  if (process.platform === 'win32' && proc.pid) {
+    spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'])
+  } else {
+    proc.kill('SIGTERM')
   }
 }
 

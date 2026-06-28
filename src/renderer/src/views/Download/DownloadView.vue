@@ -182,6 +182,15 @@ const hasActiveQueue = computed((): boolean => {
   )
 })
 
+const downloadingCount = computed((): number => {
+  return progressStore.queueItems.filter((i) => i.status === 'downloading').length
+})
+
+function setConcurrency(n: number): void {
+  progressStore.queueConcurrency = n
+  window.electronAPI.setDownloadConcurrency(n)
+}
+
 function isValidUrl(url: string): boolean {
   try { new URL(url); return true }
   catch { return false }
@@ -319,15 +328,17 @@ onMounted(async () => {
   try {
     const status = await window.electronAPI.getQueueStatus()
     progressStore.updateQueueItems(status.items)
-    progressStore.queueActiveId = status.activeId
+    progressStore.queueActiveIds = status.activeIds
     progressStore.queueIsProcessing = status.isProcessing
+    progressStore.queueConcurrency = status.concurrency
   } catch { /* backend may not be ready yet */ }
 
   // Listen to queue status updates from backend
   window.electronAPI.onQueueUpdate((status) => {
     progressStore.updateQueueItems(status.items)
-    progressStore.queueActiveId = status.activeId
+    progressStore.queueActiveIds = status.activeIds
     progressStore.queueIsProcessing = status.isProcessing
+    progressStore.queueConcurrency = status.concurrency
   })
 
   // Listen to download progress for the active queue item
@@ -507,6 +518,29 @@ onUnmounted(() => {
             <label class="text-xs text-text-secondary mb-1 block">文件名</label>
             <input v-model="fileName" type="text" :placeholder="autoFileName" class="input-base w-full text-sm" />
             <p v-if="outputPath" class="text-xs text-text-muted mt-1 truncate">将保存至: {{ outputPath }}</p>
+          </div>
+        </div>
+
+        <!-- Concurrency Control -->
+        <div class="glass-card p-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-semibold text-text-primary">同时下载数</h3>
+              <p class="text-xs text-text-muted mt-0.5">
+                当前 {{ downloadingCount }} 个进行中
+              </p>
+            </div>
+            <div class="flex items-center gap-1">
+              <button
+                v-for="n in [1, 2, 3, 4]"
+                :key="n"
+                @click="setConcurrency(n)"
+                class="w-8 h-8 text-xs rounded-md transition-colors font-medium"
+                :class="progressStore.queueConcurrency === n
+                  ? 'bg-accent-blue text-white'
+                  : 'bg-bg-tertiary text-text-secondary hover:bg-accent-blue/20'"
+              >{{ n }}</button>
+            </div>
           </div>
         </div>
 

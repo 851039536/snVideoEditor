@@ -1,6 +1,6 @@
 import { downloadM3u8, type DownloadOptions } from './download'
-import { acquireLock, releaseLock } from './lock'
-import { cancelFfmpegOperation } from './ffmpeg'
+import { killFfmpegProc } from './ffmpeg'
+import type { ChildProcess } from 'child_process'
 
 export interface QueueItem {
   id: string
@@ -17,7 +17,8 @@ export interface QueueItem {
 export interface QueueStatus {
   items: QueueItem[]
   isProcessing: boolean
-  activeId: string | null
+  activeIds: string[]
+  concurrency: number
 }
 
 export type QueueProgressCallback = (
@@ -32,8 +33,9 @@ let instance: DownloadQueueManager | null = null
 export class DownloadQueueManager {
   private items: QueueItem[] = []
   private isProcessing = false
-  private activeId: string | null = null
-  private cancelled = false
+  private activeIds = new Set<string>()
+  private activeProcs = new Map<string, ChildProcess>()
+  private concurrency = 2
   private progressCb: QueueProgressCallback | null = null
   private statusCb: QueueStatusCallback | null = null
 
@@ -52,8 +54,14 @@ export class DownloadQueueManager {
     this.statusCb = cb
   }
 
+  /** Set max concurrent downloads (clamped 1–8). */
+  setConcurrency(n: number): void {
+    this.concurrency = Math.max(1, Math.min(8, Math.round(n)))
+    // If we have spare slots, try to dispatch
+    this.scheduleTasks()
+  }
+
   enqueue(opts: DownloadOptions & { fileName?: string }): QueueItem {
-    // Extract filename from output path
     let fileName = opts.fileName || ''
     if (!fileName) {
       const parts = opts.output.replace(/\\/g, '/').split('/')
@@ -74,8 +82,8 @@ export class DownloadQueueManager {
     this.items.push(item)
     this.notifyStatus()
 
-    // Trigger processing loop (non-blocking)
-    this.processLoop()
+    // Trigger scheduling (non-blocking)
+    this.scheduleTasks()
 
     return item
   }
@@ -98,34 +106,33 @@ export class DownloadQueueManager {
     item.progress = { percent: 0, speed: '', eta: '' }
     item.error = undefined
     this.notifyStatus()
-    this.processLoop()
+    this.scheduleTasks()
     return true
   }
 
   cancelAll(): void {
-    this.cancelled = true
-
-    // Kill current ffmpeg process
-    if (this.activeId) {
-      cancelFfmpegOperation()
+    // Kill all active download processes first
+    for (const proc of this.activeProcs.values()) {
+      killFfmpegProc(proc)
     }
 
-    // Mark pending items as cancelled
+    // Mark all active items as cancelled BEFORE the Promise callbacks fire
+    for (const id of this.activeIds) {
+      const item = this.items.find((i) => i.id === id)
+      if (item && item.status === 'downloading') {
+        item.status = 'cancelled'
+      }
+    }
+    this.activeProcs.clear()
+    this.activeIds.clear()
+
+    // Mark all pending items as cancelled
     for (const item of this.items) {
       if (item.status === 'pending') {
         item.status = 'cancelled'
       }
     }
 
-    // Mark active item as cancelled
-    if (this.activeId) {
-      const active = this.items.find((i) => i.id === this.activeId)
-      if (active && active.status === 'downloading') {
-        active.status = 'cancelled'
-      }
-    }
-
-    this.activeId = null
     this.isProcessing = false
     this.notifyStatus()
   }
@@ -134,13 +141,16 @@ export class DownloadQueueManager {
     return {
       items: [...this.items],
       isProcessing: this.isProcessing,
-      activeId: this.activeId
+      activeIds: [...this.activeIds],
+      concurrency: this.concurrency
     }
   }
 
   hasActiveDownload(): boolean {
-    return this.activeId !== null
+    return this.activeIds.size > 0
   }
+
+  // ─── Private ──────────────────────────────────────────────────────────────
 
   private notifyStatus(): void {
     if (this.statusCb) {
@@ -157,76 +167,78 @@ export class DownloadQueueManager {
     }
   }
 
-  private async processLoop(): Promise<void> {
-    if (this.isProcessing) { return }
-    if (this.cancelled) {
-      this.cancelled = false
-      return
-    }
+  /**
+   * Try to fill available concurrency slots with pending items.
+   * This is called whenever a slot opens up (download finishes/fails/cancels)
+   * or when new items are enqueued.
+   */
+  private scheduleTasks(): void {
+    const activeCount = this.activeIds.size
+    const slots = this.concurrency - activeCount
+    if (slots <= 0) { return }
+
+    // Find all pending items
+    const pending = this.items.filter((i) => i.status === 'pending')
+    if (pending.length === 0) { return }
 
     this.isProcessing = true
 
-    while (true) {
-      // Respect cancel flag
-      if (this.cancelled) {
-        this.cancelled = false
-        this.isProcessing = false
-        return
+    // Start up to `slots` downloads concurrently
+    const toStart = pending.slice(0, slots)
+    for (const item of toStart) {
+      this.startDownload(item)
+    }
+  }
+
+  private startDownload(item: QueueItem): void {
+    item.status = 'downloading'
+    this.activeIds.add(item.id)
+    this.notifyStatus()
+
+    downloadM3u8({
+      url: item.url,
+      output: item.output,
+      headers: item.headers,
+      onProgress: (data) => {
+        item.progress = {
+          percent: data.percent,
+          speed: data.speed,
+          eta: data.eta
+        }
+        this.notifyProgress(item.id, item.progress)
+      },
+      onProcCreated: (proc) => {
+        this.activeProcs.set(item.id, proc)
       }
-
-      const idx = this.items.findIndex((i) => i.status === 'pending')
-      if (idx < 0) { break }
-
-      const item = this.items[idx]
-
-      // Wait for global lock (other operations like compress/split may be running)
-      while (!acquireLock('download')) {
-        await new Promise((r) => setTimeout(r, 500))
-        if (this.cancelled) { break }
-      }
-
-      if (this.cancelled) {
-        releaseLock()
-        break
-      }
-
-      item.status = 'downloading'
-      this.activeId = item.id
-      this.notifyStatus()
-
-      try {
-        await downloadM3u8({
-          url: item.url,
-          output: item.output,
-          headers: item.headers,
-          onProgress: (data) => {
-            item.progress = {
-              percent: data.percent,
-              speed: data.speed,
-              eta: data.eta
-            }
-            this.notifyProgress(item.id, item.progress)
-          }
-        })
-        item.status = 'completed'
-        item.progress = { percent: 100, speed: '完成', eta: '0:00' }
-      } catch (e) {
-        if (this.cancelled) {
-          item.status = 'cancelled'
-        } else {
+    })
+      .then(() => {
+        // Guard: don't overwrite if cancelAll() already marked this item
+        if (item.status === 'downloading') {
+          item.status = 'completed'
+          item.progress = { percent: 100, speed: '完成', eta: '0:00' }
+        }
+      })
+      .catch((e) => {
+        // Guard: don't overwrite if cancelAll() already marked this item
+        if (item.status === 'downloading') {
           item.status = 'failed'
           item.error = cleanError(e)
         }
-      } finally {
-        releaseLock()
-        this.activeId = null
-      }
+      })
+      .finally(() => {
+        this.activeIds.delete(item.id)
+        this.activeProcs.delete(item.id)
+        this.notifyProgress(item.id, item.progress)
+        this.notifyStatus()
 
-      this.notifyProgress(item.id, item.progress)
-      this.notifyStatus()
-    }
+        // Release slot: try to dispatch next pending item
+        this.scheduleTasks()
 
-    this.isProcessing = false
+        // If no active downloads and nothing pending, mark idle
+        if (this.activeIds.size === 0 && !this.items.some((i) => i.status === 'pending')) {
+          this.isProcessing = false
+        }
+      })
   }
 }
 
