@@ -16,18 +16,63 @@ const errorMsg = ref('')
 
 // Common paths for quick output selection
 const commonPaths = ref<{ desktop: string; downloads: string }>({ desktop: '', downloads: '' })
+const selectedOutputDir = ref('')
+const loadingPath = ref('')
 const sourceDir = computed(() => {
   if (files.value.length === 0) { return '' }
   return files.value[0].path.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
 })
 
-function selectQuickDir(type: 'desktop' | 'downloads' | 'source'): void {
-  if (type === 'source') {
-    setOutputDir(sourceDir.value, '_compressed.mp4')
-  } else {
-    setOutputDir(commonPaths.value[type], '_compressed.mp4')
+async function fetchCommonPaths(): Promise<boolean> {
+  try {
+    commonPaths.value = await window.electronAPI.getCommonPaths()
+    return true
+  } catch (_e) {
+    return false
   }
 }
+
+async function selectQuickDir(type: 'desktop' | 'downloads' | 'source'): Promise<void> {
+  let dir: string | null = null
+
+  if (type === 'source') {
+    dir = sourceDir.value
+  } else {
+    loadingPath.value = type
+    // Use cached path if available, otherwise fetch
+    if (!commonPaths.value.desktop) {
+      await fetchCommonPaths()
+    }
+    dir = commonPaths.value[type]
+    loadingPath.value = ''
+  }
+
+  if (!dir) {
+    if (type !== 'source') {
+      errorMsg.value = '无法获取系统路径，请使用自定义目录'
+    }
+    return
+  }
+  selectedOutputDir.value = dir
+  setOutputDir(dir, '_compressed.mp4')
+}
+
+// Sync selectedOutputDir when first file's outputPath changes (e.g. custom dir picker)
+watch(() => files.value[0]?.outputPath, (path) => {
+  if (path) {
+    selectedOutputDir.value = getOutputDir(path)
+  }
+})
+
+// Pre-fetch common paths on mount for snappier first click
+onMounted(async () => {
+  fetchCommonPaths()
+  try {
+    availableEncoders.value = await window.electronAPI.getAvailableEncoders()
+  } catch (_e) {
+    // leave empty
+  }
+})
 
 // Compression params
 const crfValue = ref(23)
@@ -113,17 +158,6 @@ const canStart = computed((): boolean => {
 })
 
 const availableEncoders = ref<string[]>([])
-
-onMounted(async () => {
-  try {
-    commonPaths.value = await window.electronAPI.getCommonPaths()
-  } catch (_e) { /* ignore */ }
-  try {
-    availableEncoders.value = await window.electronAPI.getAvailableEncoders()
-  } catch (_e) {
-    // leave empty
-  }
-})
 
 const hasNvidiaEncoders = computed((): boolean => {
   return availableEncoders.value.some((e) => e.includes('nvenc'))
@@ -293,20 +327,18 @@ onUnmounted(() => {
             <button
               @click="selectQuickDir('desktop')"
               class="btn-secondary !px-3 !py-1.5 text-xs"
-              :disabled="!commonPaths.desktop"
-              :title="commonPaths.desktop || '加载中...'"
+              :disabled="loadingPath === 'desktop'"
             >
               <Monitor :size="14" />
-              桌面
+              {{ loadingPath === 'desktop' ? '加载中...' : '桌面' }}
             </button>
             <button
               @click="selectQuickDir('downloads')"
               class="btn-secondary !px-3 !py-1.5 text-xs"
-              :disabled="!commonPaths.downloads"
-              :title="commonPaths.downloads || '加载中...'"
+              :disabled="loadingPath === 'downloads'"
             >
               <Download :size="14" />
-              下载
+              {{ loadingPath === 'downloads' ? '加载中...' : '下载' }}
             </button>
             <button
               @click="selectQuickDir('source')"
@@ -319,6 +351,11 @@ onUnmounted(() => {
             </button>
           </div>
 
+          <!-- Current output dir -->
+          <p v-if="selectedOutputDir" class="text-xs text-accent-light mt-2 truncate">
+            {{ selectedOutputDir }}
+          </p>
+
           <div class="mt-3 pt-3 border-t border-bg-tertiary">
             <button
               @click="selectOutputDir('_compressed.mp4')"
@@ -328,10 +365,6 @@ onUnmounted(() => {
               自定义目录
             </button>
           </div>
-
-          <p v-if="files.length > 0 && files[0].outputPath" class="text-xs text-accent-light mt-2 truncate">
-            {{ getOutputDir(files[0].outputPath) }}
-          </p>
         </div>
 
         <!-- Error -->

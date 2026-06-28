@@ -205,6 +205,12 @@
     color: hsl(var(--muted-foreground));
     font-size: 0.875rem;
     border: 1px solid transparent;
+    transition: opacity 0.15s;
+  }
+
+  .btn-secondary:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
   }
 
   /* ---- Shared form elements ---- */

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import * as fs from 'fs'
+import * as os from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, convertToGif, batchConvertToGif, cancelFfmpegOperation, getAvailableEncoders } from './modules/ffmpeg'
 import { encryptFile, decryptFile, batchProcessFiles, cancelCryptoOperation } from './modules/crypto'
@@ -250,10 +251,11 @@ function registerAppHandlers(): void {
     return getTempClipsDir()
   })
 
-  ipcMain.handle('app:getCommonPaths', async () => {
+  ipcMain.handle('app:getCommonPaths', () => {
+    const home = os.homedir()
     return {
-      desktop: app.getPath('desktop'),
-      downloads: app.getPath('downloads')
+      desktop: join(home, 'Desktop'),
+      downloads: join(home, 'Downloads')
     }
   })
 
