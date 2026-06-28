@@ -620,7 +620,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="max-w-6xl mx-auto animate-slide-up">
+  <div class="page-container">
     <!-- Header -->
     <header class="mb-4">
       <div class="flex items-center gap-3 mb-1">
@@ -721,7 +721,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Timeline Bar -->
-        <div class="glass-card p-4" style="overflow: visible;">
+        <div class="glass-card" style="overflow: visible;">
           <div class="flex items-center justify-between mb-3 gap-2">
             <div class="flex items-center gap-2 flex-wrap">
               <h3 class="text-sm font-semibold text-text-primary">裁剪时间轴</h3>
@@ -872,8 +872,8 @@ onUnmounted(() => {
         />
 
         <!-- Error -->
-        <div v-if="errorMsg" class="p-3 rounded-lg bg-danger/10 border border-danger/30">
-          <p class="text-sm text-danger">{{ errorMsg }}</p>
+        <div v-if="errorMsg" class="alert-danger">
+          <p>{{ errorMsg }}</p>
         </div>
 
         <!-- Progress -->
@@ -893,14 +893,14 @@ onUnmounted(() => {
         @remove="removeClip"
         @move="moveClip"
       />
-      <p v-else class="text-xs text-text-muted text-center py-4 glass-card p-4">
+      <p v-else class="text-xs text-text-muted text-center py-4 glass-card">
         暂无片段，请先在裁剪模式下添加
       </p>
 
       <!-- External files -->
       <FileDropZone @files-selected="addFiles" />
 
-      <div v-if="files.length > 0" class="glass-card p-4 space-y-2 max-h-48 overflow-y-auto">
+      <div v-if="files.length > 0" class="glass-card space-y-2 max-h-48 overflow-y-auto">
         <h3 class="text-sm font-semibold text-text-primary mb-2">外部文件（{{ files.length }} 个）</h3>
         <div
           v-for="(file, idx) in files"
@@ -934,12 +934,12 @@ onUnmounted(() => {
       </div>
 
       <!-- Output settings -->
-      <div class="glass-card p-4">
+      <div class="glass-card">
         <h3 class="text-sm font-semibold text-text-primary mb-2">输出设置</h3>
         <div class="flex items-center gap-3">
           <button
             @click="selectOutputPath"
-            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary text-text-secondary text-sm border border-transparent"
+            class="btn-secondary"
           >
             <Folder :size="16" />
             选择输出位置
@@ -951,7 +951,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Summary -->
-      <div v-if="selectedClipCount > 0 || files.length > 0" class="glass-card p-4">
+      <div v-if="selectedClipCount > 0 || files.length > 0" class="glass-card">
         <p class="text-sm text-text-secondary">
           将合并
           <span v-if="selectedClipCount > 0" class="text-accent-blue font-semibold">{{ selectedClipCount }}</span>
@@ -965,14 +965,14 @@ onUnmounted(() => {
         </p>
       </div>
 
-      <div v-if="errorMsg" class="p-3 rounded-lg bg-danger/10 border border-danger/30">
-        <p class="text-sm text-danger">{{ errorMsg }}</p>
+      <div v-if="errorMsg" class="alert-danger">
+        <p>{{ errorMsg }}</p>
       </div>
 
       <button
         @click="startProcess"
         :disabled="!canStart || store.isProcessing"
-        class="w-full py-3 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
+        class="btn-primary"
         :class="canStart && !store.isProcessing
           ? 'bg-gradient-to-r from-accent-blue to-accent-purple'
           : 'bg-bg-tertiary text-text-muted'"
@@ -992,11 +992,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* ---- Video Player ---- */
-.video-player-container {
-  overflow: hidden;
-}
-
 .player-btn {
   cursor: pointer;
 }
@@ -1044,62 +1039,6 @@ onUnmounted(() => {
 
 .timeline-playhead.dragging {
   transition: none;
-}
-
-/* ---- Trim Handles ---- */
-.trim-handle {
-  position: absolute;
-  top: -4px;
-  width: 16px;
-  height: calc(100% + 8px);
-  cursor: ew-resize;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  touch-action: none;
-  user-select: none;
-}
-
-.trim-handle-start {
-  left: -8px;
-  border-radius: 2px 0 0 2px;
-}
-
-.trim-handle-end {
-  right: -8px;
-  border-radius: 0 2px 2px 0;
-}
-
-.trim-handle::after {
-  content: '';
-  position: absolute;
-  width: 3px;
-  height: 60%;
-  border-radius: 2px;
-  background: hsl(var(--foreground));
-  opacity: 0.8;
-}
-
-.trim-handle-start::before,
-.trim-handle-end::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-}
-
-/* ---- Time Input ---- */
-.time-input {
-  width: 2rem;
-  padding: 3px 4px;
-  text-align: center;
-  font-size: 0.6875rem;
-  font-family: monospace;
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-base, 6px);
-  color: hsl(var(--foreground));
-  outline: none;
 }
 
 /* ---- Responsive ---- */

@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import * as fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, convertToGif, batchConvertToGif, cancelFfmpegOperation } from './modules/ffmpeg'
+import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, convertToGif, batchConvertToGif, cancelFfmpegOperation, getAvailableEncoders } from './modules/ffmpeg'
 import { encryptFile, decryptFile, batchProcessFiles, cancelCryptoOperation } from './modules/crypto'
 import {
   selectVideoFiles,
@@ -295,6 +295,10 @@ function registerCancelHandler(): void {
     cancelFfmpegOperation()
     cancelCryptoOperation()
     return true
+  })
+
+  ipcMain.handle('ffmpeg:getAvailableEncoders', async () => {
+    return getAvailableEncoders()
   })
 }
 

@@ -117,6 +117,7 @@
     backdrop-filter: blur(16px);
     border: 1px solid hsl(var(--border) / 0.6);
     border-radius: var(--radius-lg, 12px);
+    padding: 1rem;
   }
 
   .gradient-text {
@@ -160,6 +161,154 @@
     background-position: right 8px center;
     background-size: 20px;
     padding-right: 32px;
+  }
+
+  /* ---- Shared layout components ---- */
+
+  .page-container {
+    max-width: 72rem;
+    margin-left: auto;
+    margin-right: auto;
+    animation: slideUp 0.4s ease-out;
+  }
+
+  .section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: hsl(var(--foreground));
+    margin-bottom: 0.75rem;
+  }
+
+  /* ---- Notification blocks ---- */
+
+  .alert-danger {
+    padding: 0.75rem;
+    border-radius: var(--radius-md, 8px);
+    background: hsl(0 70% 50% / 0.1);
+    border: 1px solid hsl(0 70% 50% / 0.3);
+  }
+
+  .alert-danger p {
+    font-size: 0.875rem;
+    color: hsl(0 70% 50%);
+  }
+
+  /* ---- Buttons ---- */
+
+  .btn-primary {
+    width: 100%;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+    border-radius: var(--radius-lg, 12px);
+    font-weight: 600;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: all 0.3s;
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .btn-secondary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-md, 8px);
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    font-size: 0.875rem;
+    border: 1px solid transparent;
+  }
+
+  /* ---- File list item ---- */
+
+  .file-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    border-radius: var(--radius-md, 8px);
+    background: hsl(var(--muted) / 0.5);
+    transition: colors 0.15s;
+  }
+
+  /* ---- Shared form elements ---- */
+
+  .time-input {
+    width: 2rem;
+    padding: 3px 4px;
+    text-align: center;
+    font-size: 0.6875rem;
+    font-family: monospace;
+    background: hsl(var(--muted));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius-base, 6px);
+    color: hsl(var(--foreground));
+    outline: none;
+  }
+
+  .video-player-container {
+    overflow: hidden;
+  }
+
+  /* ---- Slider base (colors set by scoped overrides) ---- */
+
+  .slider-base {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 3px;
+    outline: none;
+  }
+
+  .slider-base::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: hsl(var(--foreground));
+    cursor: pointer;
+  }
+
+  /* ---- Timeline handles (shared structure) ---- */
+
+  .trim-handle {
+    position: absolute;
+    top: -4px;
+    width: 16px;
+    height: calc(100% + 8px);
+    cursor: ew-resize;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .trim-handle-start {
+    left: -8px;
+    border-radius: 2px 0 0 2px;
+  }
+
+  .trim-handle-end {
+    right: -8px;
+    border-radius: 0 2px 2px 0;
+  }
+
+  .trim-handle::after {
+    content: '';
+    position: absolute;
+    width: 3px;
+    height: 60%;
+    border-radius: 2px;
+    background: hsl(var(--foreground));
+    opacity: 0.8;
   }
 }
 

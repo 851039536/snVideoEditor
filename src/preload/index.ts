@@ -186,7 +186,10 @@ const electronAPI = {
 
   // File deletion
   deleteFile: (filePath: string): Promise<boolean> =>
-    ipcRenderer.invoke('file:delete', filePath)
+    ipcRenderer.invoke('file:delete', filePath),
+
+  getAvailableEncoders: (): Promise<string[]> =>
+    ipcRenderer.invoke('ffmpeg:getAvailableEncoders')
 }
 
 if (process.contextIsolated) {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { FileVideo, Folder, X, Zap } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
@@ -117,13 +117,31 @@ const canStart = computed((): boolean => {
   return files.value.length > 0 && !progressStore.isProcessing
 })
 
+const availableEncoders = ref<string[]>([])
+
+onMounted(async () => {
+  try {
+    availableEncoders.value = await window.electronAPI.getAvailableEncoders()
+  } catch (_e) {
+    // leave empty
+  }
+})
+
+const hasNvidiaEncoders = computed((): boolean => {
+  return availableEncoders.value.some((e) => e.includes('nvenc'))
+})
+
+const hasQsvEncoders = computed((): boolean => {
+  return availableEncoders.value.some((e) => e.includes('qsv'))
+})
+
 onUnmounted(() => {
   window.electronAPI?.removeProgressListener()
 })
 </script>
 
 <template>
-  <div class="max-w-6xl mx-auto animate-slide-up">
+  <div class="page-container">
     <!-- Header -->
     <header class="mb-6">
       <div class="flex items-center gap-3 mb-2">
@@ -188,8 +206,8 @@ onUnmounted(() => {
       <!-- Right: Parameters -->
       <div class="space-y-3">
         <!-- Compression Presets -->
-        <div class="glass-card p-4">
-          <h3 class="text-base font-semibold text-text-primary mb-3">压缩预设</h3>
+        <div class="glass-card">
+          <h3 class="section-title">压缩预设</h3>
           <div class="grid grid-cols-2 gap-2">
             <button
               v-for="p in settingsStore.compressPresets"
@@ -232,7 +250,7 @@ onUnmounted(() => {
                 type="range"
                 min="0"
                 max="51"
-                class="w-full mt-2 slider"
+                class="w-full mt-2 slider-base slider"
               />
               <div class="flex justify-between text-xs text-text-muted mt-1">
                 <span>无损</span>
@@ -274,11 +292,11 @@ onUnmounted(() => {
                   <option value="libx265">H.265 / HEVC (更高压缩比)</option>
                   <option value="libvpx-vp9">VP9 (Web优化)</option>
                 </optgroup>
-                <optgroup label="NVIDIA GPU (NVENC)">
+                <optgroup v-if="hasNvidiaEncoders" label="NVIDIA GPU (NVENC)">
                   <option value="h264_nvenc">H.264 NVENC</option>
                   <option value="hevc_nvenc">HEVC NVENC</option>
                 </optgroup>
-                <optgroup label="Intel GPU (QuickSync)">
+                <optgroup v-if="hasQsvEncoders" label="Intel GPU (QuickSync)">
                   <option value="h264_qsv">H.264 QSV</option>
                   <option value="hevc_qsv">HEVC QSV</option>
                 </optgroup>
@@ -300,11 +318,11 @@ onUnmounted(() => {
         </Transition>
 
         <!-- Output -->
-        <div class="glass-card p-4">
-          <h3 class="text-base font-semibold text-text-primary mb-3">输出设置</h3>
+        <div class="glass-card">
+          <h3 class="section-title">输出设置</h3>
           <button
             @click="selectOutputDir('_compressed.mp4')"
-            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary text-text-secondary text-sm border border-transparent"
+            class="btn-secondary"
           >
             <Folder :size="16" />
             选择输出目录
@@ -315,15 +333,15 @@ onUnmounted(() => {
         </div>
 
         <!-- Error -->
-        <div v-if="errorMsg" class="p-3 rounded-lg bg-danger/10 border border-danger/30">
-          <p class="text-sm text-danger">{{ errorMsg }}</p>
+        <div v-if="errorMsg" class="alert-danger">
+          <p>{{ errorMsg }}</p>
         </div>
 
         <!-- Start -->
         <button
           @click="startCompress"
           :disabled="!canStart"
-          class="w-full py-3 rounded-xl font-semibold text-white transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+          class="btn-primary"
           :class="canStart
             ? 'bg-gradient-to-r from-accent-purple to-pink-500'
             : 'bg-bg-tertiary text-text-muted'"
@@ -339,27 +357,17 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* Slider color theme (structure from global slider-base) */
 .slider {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 6px;
   background: linear-gradient(to right, #3FB950, #D29922, #F85149);
-  border-radius: 3px;
-  outline: none;
 }
 
 .slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: hsl(var(--foreground));
   border: 2px solid hsl(var(--primary));
-  cursor: pointer;
   box-shadow: 0 0 8px rgba(123, 92, 252, 0.4);
 }
 
+/* Custom param panel transition */
 .fade-enter-active,
 .fade-leave-active {
   transition: all 0.2s ease;

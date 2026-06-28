@@ -503,11 +503,8 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
   const isGpu = (opts.codec || '').includes('nvenc') || (opts.codec || '').includes('qsv')
   if (opts.bitrate) {
     args.push('-b:v', opts.bitrate)
-    if (opts.codec?.includes('nvenc')) {
-      args.push('-rc', 'vbr')
-    }
   } else if (opts.codec?.includes('nvenc')) {
-    args.push('-rc', 'vbr', '-cq', String(opts.crf || 23), '-b:v', '0')
+    args.push('-rc', 'vbr', '-cq', String(opts.crf || 23))
   } else if (opts.codec?.includes('qsv')) {
     args.push('-global_quality', String(opts.crf || 23))
   } else {
@@ -627,6 +624,25 @@ export async function batchCompress(opts: BatchCompressOptions): Promise<{ succe
   }
 
   return { success, failed }
+}
+
+/**
+ * Detect encoders available in the current ffmpeg build
+ */
+export function getAvailableEncoders(): Promise<string[]> {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegPath, ['-encoders'])
+    let stdout = ''
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+    proc.on('close', () => {
+      const encoders = stdout
+        .split('\n')
+        .filter((l) => /^\s+V.....\s+\S/.test(l))
+        .map((l) => l.trim().split(/\s+/)[1])
+      resolve(encoders)
+    })
+    proc.on('error', () => { resolve([]) })
+  })
 }
 
 /**

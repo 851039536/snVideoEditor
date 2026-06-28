@@ -129,6 +129,8 @@ export interface ElectronAPI {
 
   // File deletion
   deleteFile: (filePath: string) => Promise<boolean>
+
+  getAvailableEncoders: () => Promise<string[]>
 }
 
 declare global {

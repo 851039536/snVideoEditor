@@ -376,7 +376,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="max-w-6xl mx-auto animate-slide-up">
+  <div class="page-container">
     <!-- Header -->
     <header class="mb-6">
       <div class="flex items-center gap-3 mb-2">
@@ -482,7 +482,7 @@ onUnmounted(() => {
         </div>
 
         <!-- File List -->
-        <div v-if="files.length > 0" class="glass-card p-4 space-y-2 max-h-72 overflow-y-auto">
+        <div v-if="files.length > 0" class="glass-card space-y-2 max-h-72 overflow-y-auto">
           <div
             v-for="(file, idx) in files"
             :key="file.path"
@@ -503,8 +503,8 @@ onUnmounted(() => {
       <!-- Right: Parameters -->
       <div class="space-y-3">
         <!-- Password -->
-        <div class="glass-card p-4">
-          <h3 class="text-base font-semibold text-text-primary mb-3">
+        <div class="glass-card">
+          <h3 class="section-title">
             {{ mode === 'encrypt' ? '设置密码' : '输入密码' }}
           </h3>
 
@@ -558,11 +558,11 @@ onUnmounted(() => {
         </div>
 
         <!-- Output -->
-        <div class="glass-card p-4">
-          <h3 class="text-base font-semibold text-text-primary mb-3">输出设置</h3>
+        <div class="glass-card">
+          <h3 class="section-title">输出设置</h3>
           <button
             @click="selectOutputDirForAll"
-            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary text-text-secondary text-sm border border-transparent"
+            class="btn-secondary"
           >
             <Folder :size="16" />
             选择输出目录
@@ -570,7 +570,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Info Card -->
-        <div class="glass-card p-4 border border-accent-blue/20 bg-accent-blue/5">
+        <div class="glass-card border border-accent-blue/20 bg-accent-blue/5">
           <div class="flex items-start gap-2">
             <Shield :size="16" class="text-accent-blue mt-0.5 flex-shrink-0" />
             <div class="text-xs text-text-secondary leading-relaxed">
@@ -588,15 +588,15 @@ onUnmounted(() => {
         </div>
 
         <!-- Error -->
-        <div v-if="errorMsg" class="p-3 rounded-lg bg-danger/10 border border-danger/30">
-          <p class="text-sm text-danger">{{ errorMsg }}</p>
+        <div v-if="errorMsg" class="alert-danger">
+          <p>{{ errorMsg }}</p>
         </div>
 
         <!-- Start -->
         <button
           @click="startProcess"
           :disabled="!canStart() || progressStore.isProcessing"
-          class="w-full py-3 rounded-xl font-semibold text-white transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+          class="btn-primary"
           :class="canStart() && !progressStore.isProcessing
             ? 'bg-gradient-to-r from-emerald-500 to-teal-500'
             : 'bg-bg-tertiary text-text-muted'"
@@ -613,10 +613,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.video-player-container {
-  overflow: hidden;
-}
-
 .input-field {
   padding: 10px 14px;
   background: hsl(var(--muted));

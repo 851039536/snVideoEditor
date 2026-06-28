@@ -334,7 +334,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="max-w-6xl mx-auto animate-slide-up">
+  <div class="page-container">
     <!-- Header -->
     <header class="mb-6">
       <div class="flex items-center gap-3 mb-2">
@@ -398,7 +398,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Segment Trimming — Timeline + Time Inputs -->
-        <div v-if="files.length > 0" class="glass-card p-4">
+        <div v-if="files.length > 0" class="glass-card">
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
               <Clock :size="16" class="text-text-secondary" />
@@ -514,8 +514,8 @@ onUnmounted(() => {
       <!-- Right: Parameters -->
       <div class="space-y-3">
         <!-- Quality Presets -->
-        <div class="glass-card p-4">
-          <h3 class="text-base font-semibold text-text-primary mb-3">质量预设</h3>
+        <div class="glass-card">
+          <h3 class="section-title">质量预设</h3>
           <div class="grid grid-cols-3 gap-2">
             <button
               v-for="p in qualityPresets"
@@ -534,15 +534,15 @@ onUnmounted(() => {
         </div>
 
         <!-- FPS Slider -->
-        <div class="glass-card p-4">
-          <h3 class="text-base font-semibold text-text-primary mb-3">帧率: {{ fps }} FPS</h3>
+        <div class="glass-card">
+          <h3 class="section-title">帧率: {{ fps }} FPS</h3>
           <input
             v-model.number="fps"
             type="range"
             min="5"
             max="30"
             step="1"
-            class="w-full slider"
+            class="w-full slider-base slider"
           />
           <div class="flex justify-between text-xs text-text-muted mt-1">
             <span>5</span>
@@ -555,8 +555,8 @@ onUnmounted(() => {
         </div>
 
         <!-- Width Selector -->
-        <div class="glass-card p-4">
-          <h3 class="text-base font-semibold text-text-primary mb-3">输出分辨率</h3>
+        <div class="glass-card">
+          <h3 class="section-title">输出分辨率</h3>
           <select v-model="selectedWidth" class="select-input w-full">
             <option
               v-for="opt in widthOptions"
@@ -569,8 +569,8 @@ onUnmounted(() => {
         </div>
 
         <!-- Loop Setting -->
-        <div class="glass-card p-4">
-          <h3 class="text-base font-semibold text-text-primary mb-3">循环设置</h3>
+        <div class="glass-card">
+          <h3 class="section-title">循环设置</h3>
           <div class="flex gap-2">
             <button
               v-for="opt in [{ label: '无限', val: 0 }, { label: '1次', val: 1 }, { label: '3次', val: 3 }, { label: '5次', val: 5 }]"
@@ -587,11 +587,11 @@ onUnmounted(() => {
         </div>
 
         <!-- Output Settings -->
-        <div class="glass-card p-4">
-          <h3 class="text-base font-semibold text-text-primary mb-3">输出设置</h3>
+        <div class="glass-card">
+          <h3 class="section-title">输出设置</h3>
           <button
             @click="selectOutputDir('.gif')"
-            class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary text-text-secondary text-sm border border-transparent"
+            class="btn-secondary"
           >
             <Folder :size="16" />
             选择输出目录
@@ -602,15 +602,15 @@ onUnmounted(() => {
         </div>
 
         <!-- Error -->
-        <div v-if="errorMsg" class="p-3 rounded-lg bg-danger/10 border border-danger/30">
-          <p class="text-sm text-danger">{{ errorMsg }}</p>
+        <div v-if="errorMsg" class="alert-danger">
+          <p>{{ errorMsg }}</p>
         </div>
 
         <!-- Start Button -->
         <button
           @click="startConvert"
           :disabled="!canStart"
-          class="w-full py-3 rounded-xl font-semibold text-white transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+          class="btn-primary"
           :class="canStart
             ? 'bg-gradient-to-r from-orange-500 to-yellow-500'
             : 'bg-bg-tertiary text-text-muted'"
@@ -626,42 +626,14 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.video-player-container {
-  overflow: hidden;
-}
-
+/* Slider color theme (structure from global slider-base) */
 .slider {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 6px;
   background: linear-gradient(to right, #F0A050, #D29922);
-  border-radius: 3px;
-  outline: none;
 }
 
 .slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: hsl(var(--foreground));
   border: 2px solid #F0A050;
-  cursor: pointer;
   box-shadow: 0 0 8px rgba(240, 160, 80, 0.4);
-}
-
-.time-input {
-  width: 2rem;
-  padding: 3px 4px;
-  text-align: center;
-  font-size: 0.6875rem;
-  font-family: monospace;
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-base, 6px);
-  color: hsl(var(--foreground));
-  outline: none;
 }
 
 /* ---- Timeline ---- */
@@ -703,39 +675,6 @@ onUnmounted(() => {
   z-index: 5;
   transition: left 0.1s linear;
   pointer-events: none;
-}
-
-/* ---- Trim Handles ---- */
-.trim-handle {
-  position: absolute;
-  top: -4px;
-  width: 16px;
-  height: calc(100% + 8px);
-  cursor: ew-resize;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.trim-handle-start {
-  left: -8px;
-  border-radius: 2px 0 0 2px;
-}
-
-.trim-handle-end {
-  right: -8px;
-  border-radius: 0 2px 2px 0;
-}
-
-.trim-handle::after {
-  content: '';
-  position: absolute;
-  width: 3px;
-  height: 60%;
-  border-radius: 2px;
-  background: hsl(var(--foreground));
-  opacity: 0.8;
 }
 
 @media (max-width: 768px) {
