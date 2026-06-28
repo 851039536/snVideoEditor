@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Globe, Download, Folder, FolderOpen, Monitor, Plus, X, Trash2, Search, Link, AlertTriangle, MonitorPlay } from 'lucide-vue-next'
+import { Globe, Download, Folder, FolderOpen, Monitor, Plus, X, Trash2, Search, Link, AlertTriangle, MonitorPlay, Check } from 'lucide-vue-next'
 import ProgressPanel from '@/components/ProgressPanel.vue'
+import DownloadQueue from '@/views/Download/DownloadQueue.vue'
 import { useProgressStore } from '@/stores/progress'
 
 const progressStore = useProgressStore()
@@ -198,8 +199,14 @@ const canStart = computed((): boolean => {
   return (
     effectiveUrl.value.length > 0 &&
     outputDir.value.length > 0 &&
-    fileName.value.trim().length > 0 &&
-    !progressStore.isProcessing
+    fileName.value.trim().length > 0
+  )
+})
+
+// Whether the queue has any active items (pending or downloading)
+const hasActiveQueue = computed((): boolean => {
+  return progressStore.queueItems.some(
+    (i) => i.status === 'pending' || i.status === 'downloading'
   )
 })
 
@@ -284,9 +291,11 @@ async function selectFetchedUrl(url: string): Promise<void> {
   await fetchQualityVariants()
 }
 
-// ─── Download ────────────────────────────────────────────────────────────────
+// ─── Download Queue ──────────────────────────────────────────────────────────
 
-async function startDownload(): Promise<void> {
+const justEnqueued = ref(false)
+
+async function enqueueDownload(): Promise<void> {
   errorMsg.value = ''
   hintMsg.value = ''
 
@@ -304,36 +313,66 @@ async function startDownload(): Promise<void> {
     return
   }
 
-  progressStore.start('download')
-  window.electronAPI.onProgress((info) => {
-    progressStore.update(info)
-  })
-
   try {
-    const success = await window.electronAPI.downloadVideo({
+    await window.electronAPI.enqueueDownload({
       url,
       output: outputPath.value,
-      headers: buildHeaders()
+      headers: buildHeaders(),
+      fileName: fileName.value
     })
-    if (success) { progressStore.finish() }
-    else {
-      errorMsg.value = '下载已取消'
-      progressStore.reset()
-    }
+    justEnqueued.value = true
+    setTimeout(() => { justEnqueued.value = false }, 1800)
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
-    progressStore.reset()
   }
 }
 
-function cancelDownload(): void {
-  progressStore.cancel()
+async function cancelAllDownloads(): Promise<void> {
+  await window.electronAPI.cancelDownloadQueue()
+}
+
+async function handleQueueRetry(id: string): Promise<void> {
+  await window.electronAPI.retryQueueItem(id)
+}
+
+async function handleQueueRemove(id: string): Promise<void> {
+  await window.electronAPI.removeQueueItem(id)
 }
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
-onMounted(() => { fetchCommonPaths() })
-onUnmounted(() => { window.electronAPI?.removeProgressListener() })
+onMounted(async () => {
+  fetchCommonPaths()
+
+  // Fetch initial queue status (items may exist from before navigation)
+  try {
+    const status = await window.electronAPI.getQueueStatus()
+    progressStore.updateQueueItems(status.items)
+    progressStore.queueActiveId = status.activeId
+    progressStore.queueIsProcessing = status.isProcessing
+  } catch { /* backend may not be ready yet */ }
+
+  // Listen to queue status updates from backend
+  window.electronAPI.onQueueUpdate((status) => {
+    progressStore.updateQueueItems(status.items)
+    progressStore.queueActiveId = status.activeId
+    progressStore.queueIsProcessing = status.isProcessing
+  })
+
+  // Listen to download progress for the active queue item
+  window.electronAPI.onQueueProgress((data) => {
+    progressStore.updateQueueItemProgress(data.queueId, {
+      percent: data.percent,
+      speed: data.speed,
+      eta: data.eta
+    })
+  })
+})
+
+onUnmounted(() => {
+  window.electronAPI?.removeProgressListener()
+  window.electronAPI?.removeQueueListeners()
+})
 </script>
 
 <template>
@@ -368,7 +407,7 @@ onUnmounted(() => { window.electronAPI?.removeProgressListener() })
             </div>
             <button
               @click="fetchM3u8FromPage"
-              :disabled="!isValidUrl(m3u8Url) || isFetching || progressStore.isProcessing"
+              :disabled="!isValidUrl(m3u8Url) || isFetching"
               class="btn-secondary !px-3 !py-2 text-sm flex items-center gap-1.5 flex-shrink-0"
             >
               <Search v-if="!isFetching" :size="14" />
@@ -506,25 +545,47 @@ onUnmounted(() => { window.electronAPI?.removeProgressListener() })
 
         <!-- Actions -->
         <div class="space-y-2">
+          <!-- Enqueue / Start Download -->
           <button
-            v-if="!progressStore.isProcessing"
-            @click="startDownload"
-            :disabled="!canStart"
-            class="btn-primary w-full py-3 text-base"
+            @click="enqueueDownload"
+            :disabled="!canStart || justEnqueued"
+            class="btn-primary w-full py-3 text-base transition-all duration-200"
             :class="canStart
               ? 'bg-gradient-to-r from-accent-blue to-accent-purple'
               : 'bg-bg-tertiary text-text-muted cursor-not-allowed'"
           >
-            <Download :size="18" />
-            开始下载{{ selectedVariantIndex >= 0 && variants.length > 0 ? ` (${variants[selectedVariantIndex].label})` : '' }}
+            <template v-if="justEnqueued">
+              <Check :size="18" />
+              已加入队列
+            </template>
+            <template v-else-if="hasActiveQueue">
+              <Download :size="18" />
+              加入下载队列{{ selectedVariantIndex >= 0 && variants.length > 0 ? ` (${variants[selectedVariantIndex].label})` : '' }}
+            </template>
+            <template v-else>
+              <Download :size="18" />
+              开始下载{{ selectedVariantIndex >= 0 && variants.length > 0 ? ` (${variants[selectedVariantIndex].label})` : '' }}
+            </template>
           </button>
-          <button v-else @click="cancelDownload" class="btn-danger w-full py-3 text-base">
-            <X :size="18" /> 取消下载
+
+          <!-- Cancel All -->
+          <button
+            v-if="hasActiveQueue"
+            @click="cancelAllDownloads"
+            class="bg-danger/10 border border-danger/30 text-danger hover:bg-danger/20 w-full py-2.5 text-sm rounded-lg font-medium flex items-center justify-center gap-2 transition-colors"
+          >
+            <X :size="16" /> 取消全部下载
           </button>
         </div>
 
-        <!-- Progress -->
-        <ProgressPanel />
+        <!-- Download Queue -->
+        <DownloadQueue
+          @retry="handleQueueRetry"
+          @remove="handleQueueRemove"
+        />
+
+        <!-- Progress (for non-queue operations) -->
+        <ProgressPanel v-if="progressStore.isProcessing && progressStore.operationType !== 'download'" />
       </div>
     </div>
   </div>

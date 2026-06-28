@@ -1,6 +1,18 @@
 import { defineStore } from 'pinia'
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import type { ProgressInfo } from '../../../preload/index'
+
+export interface QueueItem {
+  id: string
+  url: string
+  output: string
+  headers?: Record<string, string>
+  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+  progress: { percent: number; speed: string; eta: string }
+  error?: string
+  addedAt: number
+  fileName: string
+}
 
 export const useProgressStore = defineStore('progress', () => {
   const isProcessing = ref(false)
@@ -9,6 +21,31 @@ export const useProgressStore = defineStore('progress', () => {
   const startTime = ref<number>(0)
   const elapsedSeconds = ref(0)
   let timer: ReturnType<typeof setInterval> | null = null
+
+  // ─── Download queue state ──────────────────────────────────────────────────
+  const queueItems = ref<QueueItem[]>([])
+  const queueActiveId = ref<string | null>(null)
+  const queueIsProcessing = ref(false)
+
+  function updateQueueItems(items: QueueItem[]): void {
+    queueItems.value = items
+  }
+
+  function updateQueueItemProgress(
+    id: string,
+    data: { percent: number; speed: string; eta: string }
+  ): void {
+    const item = queueItems.value.find((i) => i.id === id)
+    if (item) {
+      item.progress = data
+    }
+  }
+
+  function queueHasPending(): boolean {
+    return queueItems.value.some((i) => i.status === 'pending')
+  }
+
+  // ─── Timer ─────────────────────────────────────────────────────────────────
 
   const elapsed = computed((): string => {
     if (elapsedSeconds.value === 0) {
@@ -101,6 +138,13 @@ export const useProgressStore = defineStore('progress', () => {
     update,
     finish,
     reset,
-    cancel
+    cancel,
+    // Queue
+    queueItems,
+    queueActiveId,
+    queueIsProcessing,
+    updateQueueItems,
+    updateQueueItemProgress,
+    queueHasPending
   }
 })

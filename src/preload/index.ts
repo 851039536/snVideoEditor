@@ -214,7 +214,79 @@ const electronAPI = {
     headers?: Record<string, string>
   ): Promise<
     { url: string; resolution: string; height: number; label: string; bandwidth?: number }[]
-  > => ipcRenderer.invoke('video:fetchM3u8Variants', m3u8Url, headers)
+  > => ipcRenderer.invoke('video:fetchM3u8Variants', m3u8Url, headers),
+
+  // Download queue
+  enqueueDownload: (opts: {
+    url: string
+    output: string
+    headers?: Record<string, string>
+    fileName?: string
+  }): Promise<{ queueId: string }> =>
+    ipcRenderer.invoke('download:enqueue', opts),
+
+  cancelDownloadQueue: (): Promise<void> =>
+    ipcRenderer.invoke('download:cancelQueue'),
+
+  removeQueueItem: (id: string): Promise<boolean> =>
+    ipcRenderer.invoke('download:removeQueueItem', id),
+
+  retryQueueItem: (id: string): Promise<boolean> =>
+    ipcRenderer.invoke('download:retryQueueItem', id),
+
+  getQueueStatus: (): Promise<{
+    items: {
+      id: string
+      url: string
+      output: string
+      headers?: Record<string, string>
+      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+      progress: { percent: number; speed: string; eta: string }
+      error?: string
+      addedAt: number
+      fileName: string
+    }[]
+    isProcessing: boolean
+    activeId: string | null
+  }> => ipcRenderer.invoke('download:getStatus'),
+
+  onQueueProgress: (callback: (data: {
+    queueId: string
+    percent: number
+    speed: string
+    eta: string
+  }) => void): void => {
+    ipcRenderer.removeAllListeners('download:queue-progress')
+    ipcRenderer.on('download:queue-progress', (_event, data) => {
+      callback(data)
+    })
+  },
+
+  onQueueUpdate: (callback: (status: {
+    items: {
+      id: string
+      url: string
+      output: string
+      headers?: Record<string, string>
+      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+      progress: { percent: number; speed: string; eta: string }
+      error?: string
+      addedAt: number
+      fileName: string
+    }[]
+    isProcessing: boolean
+    activeId: string | null
+  }) => void): void => {
+    ipcRenderer.removeAllListeners('download:queue-update')
+    ipcRenderer.on('download:queue-update', (_event, data) => {
+      callback(data)
+    })
+  },
+
+  removeQueueListeners: (): void => {
+    ipcRenderer.removeAllListeners('download:queue-progress')
+    ipcRenderer.removeAllListeners('download:queue-update')
+  }
 }
 
 if (process.contextIsolated) {

@@ -152,6 +152,61 @@ export interface ElectronAPI {
   ) => Promise<
     { url: string; resolution: string; height: number; label: string; bandwidth?: number }[]
   >
+
+  // Download queue
+  enqueueDownload: (opts: {
+    url: string
+    output: string
+    headers?: Record<string, string>
+    fileName?: string
+  }) => Promise<{ queueId: string }>
+
+  cancelDownloadQueue: () => Promise<void>
+
+  removeQueueItem: (id: string) => Promise<boolean>
+
+  retryQueueItem: (id: string) => Promise<boolean>
+
+  getQueueStatus: () => Promise<{
+    items: {
+      id: string
+      url: string
+      output: string
+      headers?: Record<string, string>
+      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+      progress: { percent: number; speed: string; eta: string }
+      error?: string
+      addedAt: number
+      fileName: string
+    }[]
+    isProcessing: boolean
+    activeId: string | null
+  }>
+
+  onQueueProgress: (callback: (data: {
+    queueId: string
+    percent: number
+    speed: string
+    eta: string
+  }) => void) => void
+
+  onQueueUpdate: (callback: (status: {
+    items: {
+      id: string
+      url: string
+      output: string
+      headers?: Record<string, string>
+      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+      progress: { percent: number; speed: string; eta: string }
+      error?: string
+      addedAt: number
+      fileName: string
+    }[]
+    isProcessing: boolean
+    activeId: string | null
+  }) => void) => void
+
+  removeQueueListeners: () => void
 }
 
 declare global {

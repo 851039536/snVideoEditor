@@ -6,6 +6,8 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, convertToGif, batchConvertToGif, cancelFfmpegOperation, getAvailableEncoders } from './modules/ffmpeg'
 import { downloadM3u8, fetchM3u8Variants } from './modules/download'
 import { fetchPageM3u8ViaBrowser } from './modules/page-fetcher'
+import { DownloadQueueManager } from './modules/download-queue'
+import { acquireLock, releaseLock, getActiveOperationType } from './modules/lock'
 import { encryptFile, decryptFile, batchProcessFiles, cancelCryptoOperation } from './modules/crypto'
 import {
   selectVideoFiles,
@@ -70,24 +72,6 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
-}
-
-// Operation lock to prevent concurrent processing
-let isProcessing = false
-let activeOperationType = ''
-
-function acquireLock(type: string): boolean {
-  if (isProcessing) {
-    return false
-  }
-  isProcessing = true
-  activeOperationType = type
-  return true
-}
-
-function releaseLock(): void {
-  isProcessing = false
-  activeOperationType = ''
 }
 
 // ---- IPC Handlers ----
@@ -247,8 +231,58 @@ function registerCryptoHandlers(): void {
   )
 }
 
-// Download handlers
+// Download handlers (queue-based)
 function registerDownloadHandlers(): void {
+  const queueManager = DownloadQueueManager.getInstance()
+
+  // Progress broadcast callback — uses the main window to push events
+  queueManager.setProgressCallback((queueId, data) => {
+    const wins = BrowserWindow.getAllWindows()
+    if (wins.length > 0) {
+      wins[0].webContents.send('download:queue-progress', { queueId, ...data })
+    }
+  })
+
+  // Status broadcast — full queue snapshot on every mutation
+  queueManager.setStatusCallback((status) => {
+    const wins = BrowserWindow.getAllWindows()
+    if (wins.length > 0) {
+      wins[0].webContents.send('download:queue-update', status)
+    }
+  })
+
+  // Enqueue a download task
+  ipcMain.handle('download:enqueue', async (_event, opts: {
+    url: string
+    output: string
+    headers?: Record<string, string>
+    fileName?: string
+  }) => {
+    const item = queueManager.enqueue(opts)
+    return { queueId: item.id }
+  })
+
+  // Cancel all downloads and clear queue
+  ipcMain.handle('download:cancelQueue', async () => {
+    queueManager.cancelAll()
+  })
+
+  // Remove a pending item from queue
+  ipcMain.handle('download:removeQueueItem', async (_event, id: string) => {
+    return queueManager.removeItem(id)
+  })
+
+  // Retry a failed item
+  ipcMain.handle('download:retryQueueItem', async (_event, id: string) => {
+    return queueManager.retryItem(id)
+  })
+
+  // Get current queue status
+  ipcMain.handle('download:getStatus', async () => {
+    return queueManager.getStatus()
+  })
+
+  // Original single-download channel: redirect to queue (backward compat)
   wrapOperation<{
     url: string
     output: string
@@ -257,10 +291,12 @@ function registerDownloadHandlers(): void {
     downloadM3u8({ ...opts, onProgress })
   )
 
+  // Page fetch (not wrapped — no ffmpeg involvement)
   ipcMain.handle('video:fetchPageM3u8Browser', async (_event, pageUrl: string) => {
     return fetchPageM3u8ViaBrowser(pageUrl)
   })
 
+  // Quality variant parsing (not wrapped — no ffmpeg involvement)
   ipcMain.handle('video:fetchM3u8Variants', async (_event, m3u8Url: string, headers?: Record<string, string>) => {
     return fetchM3u8Variants(m3u8Url, headers)
   })
@@ -295,8 +331,12 @@ function registerAppHandlers(): void {
 // Cancel operation
 function registerCancelHandler(): void {
   ipcMain.handle('operation:cancel', async () => {
-    if (activeOperationType === 'crypto') {
+    const activeType = getActiveOperationType()
+    if (activeType === 'crypto') {
       cancelCryptoOperation()
+    } else if (activeType === 'download') {
+      // Delegate to queue manager for download cancellation
+      DownloadQueueManager.getInstance().cancelAll()
     } else {
       cancelFfmpegOperation()
     }
