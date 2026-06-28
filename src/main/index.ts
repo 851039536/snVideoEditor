@@ -69,6 +69,24 @@ function createWindow(): void {
   }
 }
 
+// Operation lock to prevent concurrent processing
+let isProcessing = false
+let activeOperationType = ''
+
+function acquireLock(type: string): boolean {
+  if (isProcessing) {
+    return false
+  }
+  isProcessing = true
+  activeOperationType = type
+  return true
+}
+
+function releaseLock(): void {
+  isProcessing = false
+  activeOperationType = ''
+}
+
 // ---- IPC Handlers ----
 
 function sendProgress(event: Electron.IpcMainInvokeEvent, data: ProgressInfo): void {
@@ -122,24 +140,38 @@ function registerSplitMergeHandlers(): void {
     startTime: string
     duration: string
   }) => {
-    return splitVideo({
-      ...opts,
-      onProgress: (data) => {
-        sendProgress(event, { ...data, type: 'split' })
-      }
-    })
+    if (!acquireLock('split')) {
+      throw new Error('有操作正在进行中，请等待完成后再试')
+    }
+    try {
+      return splitVideo({
+        ...opts,
+        onProgress: (data) => {
+          sendProgress(event, { ...data, type: 'split' })
+        }
+      })
+    } finally {
+      releaseLock()
+    }
   })
 
   ipcMain.handle('video:merge', async (event, opts: {
     inputs: string[]
     output: string
   }) => {
-    return mergeVideos({
-      ...opts,
-      onProgress: (data) => {
-        sendProgress(event, { ...data, type: 'merge' })
-      }
-    })
+    if (!acquireLock('merge')) {
+      throw new Error('有操作正在进行中，请等待完成后再试')
+    }
+    try {
+      return mergeVideos({
+        ...opts,
+        onProgress: (data) => {
+          sendProgress(event, { ...data, type: 'merge' })
+        }
+      })
+    } finally {
+      releaseLock()
+    }
   })
 }
 
@@ -157,23 +189,37 @@ function registerCompressHandlers(): void {
     bitrate: string
     codec: string
   }) => {
-    return compressVideo({
-      ...opts,
-      onProgress: (data) => {
-        sendProgress(event, { ...data, type: 'compress' })
-      }
-    })
+    if (!acquireLock('compress')) {
+      throw new Error('有操作正在进行中，请等待完成后再试')
+    }
+    try {
+      return compressVideo({
+        ...opts,
+        onProgress: (data) => {
+          sendProgress(event, { ...data, type: 'compress' })
+        }
+      })
+    } finally {
+      releaseLock()
+    }
   })
 
   ipcMain.handle('video:batchCompress', async (event, opts: {
     files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string }[]
   }) => {
-    return batchCompress({
-      ...opts,
-      onProgress: (data) => {
-        sendProgress(event, { ...data, type: 'compress' })
-      }
-    })
+    if (!acquireLock('compress')) {
+      throw new Error('有操作正在进行中，请等待完成后再试')
+    }
+    try {
+      return batchCompress({
+        ...opts,
+        onProgress: (data) => {
+          sendProgress(event, { ...data, type: 'compress' })
+        }
+      })
+    } finally {
+      releaseLock()
+    }
   })
 }
 
@@ -189,12 +235,19 @@ function registerGifHandlers(): void {
     duration?: number
     loop: number
   }) => {
-    return convertToGif({
-      ...opts,
-      onProgress: (data) => {
-        sendProgress(event, { ...data, type: 'gif' })
-      }
-    })
+    if (!acquireLock('gif')) {
+      throw new Error('有操作正在进行中，请等待完成后再试')
+    }
+    try {
+      return convertToGif({
+        ...opts,
+        onProgress: (data) => {
+          sendProgress(event, { ...data, type: 'gif' })
+        }
+      })
+    } finally {
+      releaseLock()
+    }
   })
 
   ipcMain.handle('video:batchConvertToGif', async (event, opts: {
@@ -209,12 +262,19 @@ function registerGifHandlers(): void {
       loop: number
     }[]
   }) => {
-    return batchConvertToGif({
-      ...opts,
-      onProgress: (data) => {
-        sendProgress(event, { ...data, type: 'gif' })
-      }
-    })
+    if (!acquireLock('gif')) {
+      throw new Error('有操作正在进行中，请等待完成后再试')
+    }
+    try {
+      return batchConvertToGif({
+        ...opts,
+        onProgress: (data) => {
+          sendProgress(event, { ...data, type: 'gif' })
+        }
+      })
+    } finally {
+      releaseLock()
+    }
   })
 }
 
@@ -225,12 +285,19 @@ function registerCryptoHandlers(): void {
     output: string
     password: string
   }) => {
-    return encryptFile({
-      ...opts,
-      onProgress: (data) => {
-        sendProgress(event, { ...data, type: 'encrypt' })
-      }
-    })
+    if (!acquireLock('crypto')) {
+      throw new Error('有操作正在进行中，请等待完成后再试')
+    }
+    try {
+      return encryptFile({
+        ...opts,
+        onProgress: (data) => {
+          sendProgress(event, { ...data, type: 'encrypt' })
+        }
+      })
+    } finally {
+      releaseLock()
+    }
   })
 
   ipcMain.handle('crypto:decrypt', async (event, opts: {
@@ -238,36 +305,57 @@ function registerCryptoHandlers(): void {
     output: string
     password: string
   }) => {
-    return decryptFile({
-      ...opts,
-      onProgress: (data) => {
-        sendProgress(event, { ...data, type: 'decrypt' })
-      }
-    })
+    if (!acquireLock('crypto')) {
+      throw new Error('有操作正在进行中，请等待完成后再试')
+    }
+    try {
+      return decryptFile({
+        ...opts,
+        onProgress: (data) => {
+          sendProgress(event, { ...data, type: 'decrypt' })
+        }
+      })
+    } finally {
+      releaseLock()
+    }
   })
 
   ipcMain.handle('crypto:batchEncrypt', async (event, opts: {
     files: { input: string; output: string }[]
     password: string
   }) => {
-    return batchProcessFiles(true, {
-      ...opts,
-      onProgress: (data) => {
-        sendProgress(event, { ...data, type: 'encrypt' })
-      }
-    })
+    if (!acquireLock('crypto')) {
+      throw new Error('有操作正在进行中，请等待完成后再试')
+    }
+    try {
+      return batchProcessFiles(true, {
+        ...opts,
+        onProgress: (data) => {
+          sendProgress(event, { ...data, type: 'encrypt' })
+        }
+      })
+    } finally {
+      releaseLock()
+    }
   })
 
   ipcMain.handle('crypto:batchDecrypt', async (event, opts: {
     files: { input: string; output: string }[]
     password: string
   }) => {
-    return batchProcessFiles(false, {
-      ...opts,
-      onProgress: (data) => {
-        sendProgress(event, { ...data, type: 'decrypt' })
-      }
-    })
+    if (!acquireLock('crypto')) {
+      throw new Error('有操作正在进行中，请等待完成后再试')
+    }
+    try {
+      return batchProcessFiles(false, {
+        ...opts,
+        onProgress: (data) => {
+          sendProgress(event, { ...data, type: 'decrypt' })
+        }
+      })
+    } finally {
+      releaseLock()
+    }
   })
 }
 
@@ -292,8 +380,11 @@ function registerAppHandlers(): void {
 // Cancel operation
 function registerCancelHandler(): void {
   ipcMain.handle('operation:cancel', async () => {
-    cancelFfmpegOperation()
-    cancelCryptoOperation()
+    if (activeOperationType === 'crypto') {
+      cancelCryptoOperation()
+    } else {
+      cancelFfmpegOperation()
+    }
     return true
   })
 

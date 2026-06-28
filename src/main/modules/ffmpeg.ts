@@ -143,8 +143,22 @@ function resolveFfprobePath(): string {
   )
 }
 
-const ffmpegPath: string = resolveFfmpegPath()
-const ffprobePath: string = resolveFfprobePath()
+let _ffmpegPath: string | null = null
+let _ffprobePath: string | null = null
+
+function getFfmpegPath(): string {
+  if (!_ffmpegPath) {
+    _ffmpegPath = resolveFfmpegPath()
+  }
+  return _ffmpegPath
+}
+
+function getFfprobePath(): string {
+  if (!_ffprobePath) {
+    _ffprobePath = resolveFfprobePath()
+  }
+  return _ffprobePath
+}
 
 // ---- Cancellation support ----
 let currentProc: ChildProcess | null = null
@@ -281,13 +295,13 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
       opts.output
     ]
 
-    const proc = spawn(ffmpegPath, args)
+    const proc = spawn(getFfmpegPath(), args)
     currentProc = proc
-    let stderr = ''
+    const stderrLines: string[] = []
 
     proc.stderr.on('data', (data: Buffer) => {
       const chunk = data.toString()
-      stderr += chunk
+      stderrLines.push(chunk)
       const parsed = parseProgressLine(chunk)
       if (parsed && opts.onProgress) {
         const current = timeToSeconds(parsed.time)
@@ -321,13 +335,13 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
         }
         resolve(true)
       } else {
-        reject(new Error(`FFmpeg 分割失败 (code: ${code}): ${stderr.slice(-500)}`))
+        reject(new Error(`FFmpeg 分割失败 (code: ${code}): ${stderrLines.join('').slice(-500)}`))
       }
     })
 
     proc.on('error', (err: Error) => {
       currentProc = null
-      reject(new Error(`启动 FFmpeg 失败 (${ffmpegPath}): ${err.message}`))
+      reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
     })
   })
 }
@@ -346,7 +360,7 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
 
     // Create temporary concat list file
     const concatDir = path.dirname(opts.output)
-    const concatListPath = path.join(concatDir, `_concat_list_${Date.now()}.txt`)
+    const concatListPath = path.join(concatDir, `_concat_list_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`)
 
     const fileListContent = opts.inputs
       .map((f) => {
@@ -366,13 +380,13 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
       opts.output
     ]
 
-    const proc = spawn(ffmpegPath, args)
+    const proc = spawn(getFfmpegPath(), args)
     currentProc = proc
-    let stderr = ''
+    const stderrLines: string[] = []
 
     proc.stderr.on('data', (data: Buffer) => {
       const chunk = data.toString()
-      stderr += chunk
+      stderrLines.push(chunk)
       const parsed = parseProgressLine(chunk)
       if (parsed && opts.onProgress) {
         const totalFrames = opts.inputs.length * 100
@@ -411,7 +425,7 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
         }
         resolve(true)
       } else {
-        reject(new Error(`FFmpeg 合并失败 (code: ${code}): ${stderr.slice(-500)}`))
+        reject(new Error(`FFmpeg 合并失败 (code: ${code}): ${stderrLines.join('').slice(-500)}`))
       }
     })
 
@@ -420,7 +434,7 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
       if (fs.existsSync(concatListPath)) {
         fs.unlinkSync(concatListPath)
       }
-      reject(new Error(`启动 FFmpeg 失败 (${ffmpegPath}): ${err.message}`))
+      reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
     })
   })
 }
@@ -430,13 +444,14 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
  */
 export function getVideoMeta(filePath: string): Promise<VideoMeta> {
   return new Promise((resolve, reject) => {
-    const ffprobeProcess = spawn(ffprobePath, [
+    const ffprobeProcess = spawn(getFfprobePath(), [
       '-v', 'quiet',
       '-print_format', 'json',
       '-show_format',
       '-show_streams',
       filePath
     ])
+    currentProc = ffprobeProcess
 
     let stdout = ''
     let stderr = ''
@@ -450,6 +465,7 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
     })
 
     ffprobeProcess.on('close', (code: number | null) => {
+      currentProc = null
       if (code !== 0) {
         reject(new Error(`ffprobe 执行失败: ${stderr}`))
         return
@@ -479,7 +495,8 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
     })
 
     ffprobeProcess.on('error', (err: Error) => {
-      reject(new Error(`启动 ffprobe 失败 (${ffprobePath}): ${err.message}`))
+      currentProc = null
+      reject(new Error(`启动 ffprobe 失败 (${getFfprobePath()}): ${err.message}`))
     })
   })
 }
@@ -487,12 +504,14 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
 /**
  * Compress a single video file
  */
-export function compressVideo(opts: CompressOptions): Promise<boolean> {
+export function   compressVideo(opts: CompressOptions): Promise<boolean> {
   return new Promise((resolve, reject) => {
     if (!fs.existsSync(opts.input)) {
       reject(new Error(`输入文件不存在: ${opts.input}`))
       return
     }
+
+    isCancelled = false
 
   const args: string[] = [
     '-i', opts.input,
@@ -526,14 +545,14 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
   args.push('-y')
   args.push(opts.output)
 
-    const proc = spawn(ffmpegPath, args)
+    const proc = spawn(getFfmpegPath(), args)
     currentProc = proc
-    let stderr = ''
+    const stderrLines: string[] = []
     let meta: VideoMeta | null = null
 
     proc.stderr.on('data', (data: Buffer) => {
       const chunk = data.toString()
-      stderr += chunk
+      stderrLines.push(chunk)
 
       // Try to extract duration from first lines
       if (!meta) {
@@ -582,13 +601,13 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
         }
         resolve(true)
       } else {
-        reject(new Error(`FFmpeg 压缩失败 (code: ${code}): ${stderr.slice(-500)}`))
+        reject(new Error(`FFmpeg 压缩失败 (code: ${code}): ${stderrLines.join('').slice(-500)}`))
       }
     })
 
     proc.on('error', (err: Error) => {
       currentProc = null
-      reject(new Error(`启动 FFmpeg 失败 (${ffmpegPath}): ${err.message}`))
+      reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
     })
   })
 }
@@ -599,6 +618,8 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
 export async function batchCompress(opts: BatchCompressOptions): Promise<{ success: number; failed: string[] }> {
   let success = 0
   const failed: string[] = []
+
+  isCancelled = false
 
   for (let i = 0; i < opts.files.length; i++) {
     if (isCancelled) { break }
@@ -631,29 +652,33 @@ export async function batchCompress(opts: BatchCompressOptions): Promise<{ succe
  */
 export function getAvailableEncoders(): Promise<string[]> {
   return new Promise((resolve) => {
-    const proc = spawn(ffmpegPath, ['-encoders'])
+    const proc = spawn(getFfmpegPath(), ['-encoders'])
+    currentProc = proc
     let stdout = ''
     proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
     proc.on('close', () => {
+      currentProc = null
       const encoders = stdout
         .split('\n')
         .filter((l) => /^\s+V.....\s+\S/.test(l))
         .map((l) => l.trim().split(/\s+/)[1])
       resolve(encoders)
     })
-    proc.on('error', () => { resolve([]) })
+    proc.on('error', () => { currentProc = null; resolve([]) })
   })
 }
 
 /**
  * Convert a video file to GIF using two-pass palette optimization
  */
-export function convertToGif(opts: GifOptions): Promise<boolean> {
+export function   convertToGif(opts: GifOptions): Promise<boolean> {
   return new Promise((resolve, reject) => {
     if (!fs.existsSync(opts.input)) {
       reject(new Error(`输入文件不存在: ${opts.input}`))
       return
     }
+
+    isCancelled = false
 
     const qualityMap = {
       high: { statsMode: 'diff', dither: 'bayer:bayer_scale=5' },
@@ -689,7 +714,8 @@ export function convertToGif(opts: GifOptions): Promise<boolean> {
       palettePath
     ]
 
-    const paletteProc = spawn(ffmpegPath, paletteArgs)
+    const paletteProc = spawn(getFfmpegPath(), paletteArgs)
+    currentProc = paletteProc
 
     paletteProc.on('close', (code: number | null) => {
       if (isCancelled) {
@@ -721,14 +747,14 @@ export function convertToGif(opts: GifOptions): Promise<boolean> {
         opts.output
       ]
 
-      const gifProc = spawn(ffmpegPath, gifArgs)
+      const gifProc = spawn(getFfmpegPath(), gifArgs)
       currentProc = gifProc
       let stderr = ''
       let gifMeta: { duration: number } | null = null
 
       gifProc.stderr.on('data', (data: Buffer) => {
         const chunk = data.toString()
-        stderr += chunk
+        stderrLines.push(chunk)
 
         if (!gifMeta) {
           const durMatch = chunk.match(/Duration: (\d{2}:\d{2}:\d{2}\.\d{2})/)
@@ -770,20 +796,20 @@ export function convertToGif(opts: GifOptions): Promise<boolean> {
           }
           resolve(true)
         } else {
-          reject(new Error(`FFmpeg GIF生成失败 (code: ${code}): ${stderr.slice(-500)}`))
+          reject(new Error(`FFmpeg GIF生成失败 (code: ${code}): ${stderrLines.join('').slice(-500)}`))
         }
       })
 
       gifProc.on('error', (err: Error) => {
         currentProc = null
         cleanup()
-        reject(new Error(`启动 FFmpeg 失败 (${ffmpegPath}): ${err.message}`))
+        reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
       })
     })
 
     paletteProc.on('error', (err: Error) => {
       currentProc = null
-      reject(new Error(`启动 FFmpeg 失败 (${ffmpegPath}): ${err.message}`))
+      reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
     })
 
     function cleanup(): void {
@@ -800,6 +826,8 @@ export function convertToGif(opts: GifOptions): Promise<boolean> {
 export async function batchConvertToGif(opts: BatchGifOptions): Promise<{ success: number; failed: string[] }> {
   let success = 0
   const failed: string[] = []
+
+  isCancelled = false
 
   for (let i = 0; i < opts.files.length; i++) {
     if (isCancelled) { break }
