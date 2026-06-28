@@ -468,12 +468,16 @@ onUnmounted(() => {
               </div>
 
               <!-- Remove -->
-              <button
+              <span
+                role="button"
+                tabindex="0"
                 @click.stop="removeFile(idx)"
-                class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-danger/10 transition-all flex-shrink-0"
+                @keydown.enter.prevent="removeFile(idx)"
+                @keydown.space.prevent="removeFile(idx)"
+                class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-danger/10 transition-all flex-shrink-0 cursor-pointer"
               >
                 <X :size="14" class="text-danger" />
-              </button>
+              </span>
             </button>
           </div>
         </div>
