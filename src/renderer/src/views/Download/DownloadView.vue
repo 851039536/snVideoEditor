@@ -169,6 +169,18 @@ async function selectCustomDir(): Promise<void> {
 }
 
 const autoFileName = computed((): string => {
+  // Priority 1: use page title if available (from "从网页提取")
+  if (fetchedTitle.value) {
+    const safe = fetchedTitle.value
+      .replace(/[\\/:*?"<>|]/g, '')   // remove illegal filename chars
+      .replace(/\s+/g, '_')            // replace whitespace with underscore
+      .replace(/_+/g, '_')             // collapse multiple underscores
+      .replace(/^_|_$/g, '')           // trim leading/trailing underscores
+      .slice(0, 80)                    // limit length
+    const ts = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    return `${safe || 'video'}_${ts}.mp4`
+  }
+  // Priority 2: derive from URL path
   try {
     const urlPath = new URL(m3u8Url.value).pathname
     const segments = urlPath.split('/').filter(Boolean)
@@ -182,10 +194,8 @@ const autoFileName = computed((): string => {
 })
 
 // Auto-fill filename from URL
-watch(m3u8Url, (url) => {
-  if (!fileName.value || fileName.value === autoFileName.value) {
-    fileName.value = autoFileName.value
-  }
+watch(m3u8Url, () => {
+  fileName.value = autoFileName.value
 })
 
 const outputPath = computed((): string => {
