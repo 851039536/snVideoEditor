@@ -12,14 +12,14 @@ import type { FileEntry } from '@/types/file'
 const progressStore = useProgressStore()
 const { files, addFiles, removeFile, selectOutputDir } = useFileList()
 
-// Quality presets
+// Quality presets (module-level constants)
 interface QualityPreset {
   value: 'high' | 'medium' | 'low'
   label: string
   description: string
 }
 
-const qualityPresets: QualityPreset[] = [
+const QUALITY_PRESETS: QualityPreset[] = [
   { value: 'high', label: '高质量', description: '最佳画质，文件较大' },
   { value: 'medium', label: '中等质量', description: '画质与大小平衡' },
   { value: 'low', label: '低质量', description: '最小文件，快速生成' }
@@ -29,7 +29,7 @@ const selectedQuality = ref<'high' | 'medium' | 'low'>('medium')
 // Parameters
 const fps = ref(10)
 const selectedWidth = ref('480')
-const widthOptions = [
+const WIDTH_OPTIONS = [
   { label: '原始尺寸', value: '0' },
   { label: '320px', value: '320' },
   { label: '480px (推荐)', value: '480' },
@@ -211,18 +211,23 @@ function onTimelineMove(e: PointerEvent): void {
   if (!dragging.value) { return }
   const t = getTimelineTime(e.clientX)
   if (dragging.value === 'start') {
-    trimStartSec.value = clamp(t, 0, trimEndSec.value - MIN_TRIM_GAP)
-    seekVideoPlayer(trimStartSec.value)
+    const clamped = clamp(t, 0, trimEndSec.value - MIN_TRIM_GAP)
+    if (trimStartSec.value !== clamped) {
+      trimStartSec.value = clamped
+      seekVideoPlayer(clamped)
+    }
   } else {
-    trimEndSec.value = clamp(t, trimStartSec.value + MIN_TRIM_GAP, maxDuration.value)
-    seekVideoPlayer(trimEndSec.value)
+    const clamped = clamp(t, trimStartSec.value + MIN_TRIM_GAP, maxDuration.value)
+    if (trimEndSec.value !== clamped) {
+      trimEndSec.value = clamped
+      seekVideoPlayer(clamped)
+    }
   }
 }
 
 function onGlobalPointerMove(e: PointerEvent): void { onTimelineMove(e) }
-function onGlobalPointerUp(e: PointerEvent): void {
+function onGlobalPointerUp(_e: PointerEvent): void {
   if (!dragging.value) { return }
-  (e.target as HTMLElement)?.releasePointerCapture?.(e.pointerId)
   dragging.value = null
 }
 
@@ -246,7 +251,7 @@ function estimateOutputSize(entry: FileEntry): string {
   const pixels = w * (w * 9 / 16)
   const frames = duration * fps.value
   const qualityFactors: Record<string, number> = { high: 0.6, medium: 0.4, low: 0.2 }
-  const factor = qualityFactors[selectedQuality.value] || 0.4
+  const factor = qualityFactors[selectedQuality.value]
   const estBytes = frames * pixels * factor * 0.3
   const estMB = estBytes / (1024 * 1024)
   if (estMB < 0.1) { return '< 0.1 MB' }
@@ -404,12 +409,12 @@ onUnmounted(() => {
                 ? 'border-warning/50 text-warning bg-warning/10'
                 : 'border-bg-tertiary text-text-secondary'"
             >
-              {{ enableTrim ? '已启用' : '关闭' }}
+              {{ enableTrim ? '已启用' : '启用截取' }}
             </button>
           </div>
 
           <p v-if="!enableTrim" class="text-xs text-text-muted mb-3">
-            拖拽下方摇杆选取范围，点击「关闭」按钮启用截取
+            拖拽下方摇杆选取范围，点击「启用截取」按钮启用截取
           </p>
 
           <!-- Timeline Bar with Drag Handles -->
@@ -511,7 +516,7 @@ onUnmounted(() => {
           <h3 class="section-title">质量预设</h3>
           <div class="grid grid-cols-3 gap-2">
             <button
-              v-for="p in qualityPresets"
+              v-for="p in QUALITY_PRESETS"
               :key="p.value"
               @click="selectedQuality = p.value"
               class="preset-btn p-3 rounded-lg text-left transition-all duration-200"
@@ -552,7 +557,7 @@ onUnmounted(() => {
           <h3 class="section-title">输出分辨率</h3>
           <select v-model="selectedWidth" class="select-input w-full">
             <option
-              v-for="opt in widthOptions"
+              v-for="opt in WIDTH_OPTIONS"
               :key="opt.value"
               :value="opt.value"
             >
