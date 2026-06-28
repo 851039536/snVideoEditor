@@ -153,7 +153,11 @@ let isCancelled = false
 export function cancelFfmpegOperation(): void {
   isCancelled = true
   if (currentProc) {
-    currentProc.kill('SIGTERM')
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(currentProc.pid), '/t', '/f'])
+    } else {
+      currentProc.kill('SIGTERM')
+    }
     currentProc = null
   }
 }
@@ -490,8 +494,6 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
       return
     }
 
-    isCancelled = false
-
   const args: string[] = [
     '-i', opts.input,
     '-c:v', opts.codec || 'libx264'
@@ -501,8 +503,11 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
   const isGpu = (opts.codec || '').includes('nvenc') || (opts.codec || '').includes('qsv')
   if (opts.bitrate) {
     args.push('-b:v', opts.bitrate)
+    if (opts.codec?.includes('nvenc')) {
+      args.push('-rc', 'vbr')
+    }
   } else if (opts.codec?.includes('nvenc')) {
-    args.push('-cq', String(opts.crf || 23))
+    args.push('-rc', 'vbr', '-cq', String(opts.crf || 23), '-b:v', '0')
   } else if (opts.codec?.includes('qsv')) {
     args.push('-global_quality', String(opts.crf || 23))
   } else {
@@ -633,8 +638,6 @@ export function convertToGif(opts: GifOptions): Promise<boolean> {
       reject(new Error(`输入文件不存在: ${opts.input}`))
       return
     }
-
-    isCancelled = false
 
     const qualityMap = {
       high: { statsMode: 'diff', dither: 'bayer:bayer_scale=5' },
