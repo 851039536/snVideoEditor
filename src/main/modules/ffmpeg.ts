@@ -492,30 +492,37 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
 
     isCancelled = false
 
-    const args: string[] = [
-      '-i', opts.input,
-      '-c:v', opts.codec || 'libx264',
-      '-crf', String(opts.crf || 23)
-    ]
+  const args: string[] = [
+    '-i', opts.input,
+    '-c:v', opts.codec || 'libx264'
+  ]
 
-    // Resolution scaling
+  // Quality / bitrate (mutually exclusive: bitrate wins)
+  const isGpu = (opts.codec || '').includes('nvenc') || (opts.codec || '').includes('qsv')
+  if (opts.bitrate) {
+    args.push('-b:v', opts.bitrate)
+  } else if (opts.codec?.includes('nvenc')) {
+    args.push('-cq', String(opts.crf || 23))
+  } else if (opts.codec?.includes('qsv')) {
+    args.push('-global_quality', String(opts.crf || 23))
+  } else {
+    args.push('-crf', String(opts.crf || 23))
+  }
+
+  // Resolution scaling
     if (opts.resolution && opts.resolution !== 'original') {
       args.push('-vf', `scale=${opts.resolution}`)
     }
 
-    // Bitrate limit
-    if (opts.bitrate) {
-      args.push('-b:v', opts.bitrate)
-    }
+  // Audio: copy stream
+  args.push('-c:a', 'aac', '-b:a', opts.audioBitrate || '32k')
 
-    // Audio: copy stream
-    args.push('-c:a', 'aac', '-b:a', opts.audioBitrate || '32k')
-
-    // Fast encode preset
+  if (!isGpu) {
     args.push('-preset', 'fast')
-    args.push('-movflags', '+faststart')
-    args.push('-y')
-    args.push(opts.output)
+  }
+  args.push('-movflags', '+faststart')
+  args.push('-y')
+  args.push(opts.output)
 
     const proc = spawn(ffmpegPath, args)
     currentProc = proc

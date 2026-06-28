@@ -5,19 +5,14 @@ import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
-import type { VideoMeta } from '../../../preload/index'
+import { formatDuration } from '@/utils/time'
+import { useFileList } from '@/composables/useFileList'
+import type { FileEntry } from '@/types/file'
 
 const progressStore = useProgressStore()
 const settingsStore = useSettingsStore()
 
-// Files
-interface FileEntry {
-  path: string
-  outputPath: string
-  meta: VideoMeta | null
-}
-
-const files = ref<FileEntry[]>([])
+const { files, addFiles, removeFile, selectOutputDir } = useFileList()
 const errorMsg = ref('')
 
 // Compression params
@@ -51,38 +46,6 @@ watch(resolution, (res) => {
   bitrate.value = RESOLUTION_BITRATE[res] || ''
 })
 
-async function addFiles(paths: string[]): Promise<void> {
-  for (const p of paths) {
-    if (files.value.some((f) => f.path === p)) { continue }
-    const entry: FileEntry = { path: p, outputPath: '', meta: null }
-    files.value.push(entry)
-    // Load metadata async
-    getMeta(entry)
-  }
-}
-
-async function getMeta(entry: FileEntry): Promise<void> {
-  try {
-    entry.meta = await window.electronAPI.getVideoMeta(entry.path)
-  } catch (e) {
-    console.error('Failed to get meta:', e)
-  }
-}
-
-function removeFile(index: number): void {
-  files.value.splice(index, 1)
-}
-
-async function selectOutputDir(): Promise<void> {
-  const dir = await window.electronAPI.selectDirectory()
-  if (!dir) { return }
-
-  for (const entry of files.value) {
-    const name = entry.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'output'
-    entry.outputPath = `${dir}/${name}_compressed.mp4`
-  }
-}
-
 function estimateOutputSize(entry: FileEntry): string {
   if (!entry.meta || entry.meta.size === 0) { return '未知' }
   const originalMB = entry.meta.size / (1024 * 1024)
@@ -99,7 +62,7 @@ async function startCompress(): Promise<void> {
 
   for (const entry of files.value) {
     if (!entry.outputPath) {
-      await selectOutputDir()
+      await selectOutputDir('_compressed.mp4')
       break
     }
   }
@@ -145,13 +108,6 @@ function formatSize(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
 }
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
-}
-
 
 function getOutputDir(path: string): string {
   return path.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
@@ -313,9 +269,19 @@ onUnmounted(() => {
             <div>
               <label class="text-sm text-text-secondary mb-2 block">编码格式</label>
               <select v-model="codec" class="select-input w-full">
-                <option value="libx264">H.264 (兼容性最好)</option>
-                <option value="libx265">H.265 / HEVC (更高压缩比)</option>
-                <option value="libvpx-vp9">VP9 (Web优化)</option>
+                <optgroup label="CPU 软编码">
+                  <option value="libx264">H.264 (兼容性最好)</option>
+                  <option value="libx265">H.265 / HEVC (更高压缩比)</option>
+                  <option value="libvpx-vp9">VP9 (Web优化)</option>
+                </optgroup>
+                <optgroup label="NVIDIA GPU (NVENC)">
+                  <option value="h264_nvenc">H.264 NVENC</option>
+                  <option value="hevc_nvenc">HEVC NVENC</option>
+                </optgroup>
+                <optgroup label="Intel GPU (QuickSync)">
+                  <option value="h264_qsv">H.264 QSV</option>
+                  <option value="hevc_qsv">HEVC QSV</option>
+                </optgroup>
               </select>
             </div>
 
@@ -337,7 +303,7 @@ onUnmounted(() => {
         <div class="glass-card p-4">
           <h3 class="text-base font-semibold text-text-primary mb-3">输出设置</h3>
           <button
-            @click="selectOutputDir"
+            @click="selectOutputDir('_compressed.mp4')"
             class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary text-text-secondary text-sm border border-transparent"
           >
             <Folder :size="16" />
@@ -373,25 +339,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.preset-btn {
-  /* hover animation removed */
-}
-
-.select-input {
-  padding: 8px 12px;
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-md, 8px);
-  color: hsl(var(--foreground));
-  outline: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%238B949E' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  background-size: 20px;
-  padding-right: 32px;
-}
-
 .slider {
   -webkit-appearance: none;
   appearance: none;

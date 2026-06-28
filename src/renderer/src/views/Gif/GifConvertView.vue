@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Image, Folder, X, Zap, Clock } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
-import type { VideoMeta } from '../../../preload/index'
+import { secondsToHMS, hmsToSeconds, formatDuration } from '@/utils/time'
+import { clamp } from '@/utils/math'
+import { useFileList } from '@/composables/useFileList'
+import type { FileEntry } from '@/types/file'
 
 const progressStore = useProgressStore()
+const { files, addFiles, removeFile, selectOutputDir } = useFileList()
 
 // Quality presets
 interface QualityPreset {
@@ -64,40 +68,29 @@ const trimDurationStr = computed((): string => {
   return secondsToHMS(trimDuration.value)
 })
 
-function secondsToHMS(totalSec: number): string {
-  const h = Math.floor(totalSec / 3600)
-  const m = Math.floor((totalSec % 3600) / 60)
-  const s = Math.floor(totalSec % 60)
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
-
-function hmsToSeconds(h: string, m: string, s: string): number {
-  return parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s)
-}
-
-function clamp(val: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, val))
-}
-
+const MIN_TRIM_GAP = 0.1
 let syncing = false
 
 function syncTrimFromInputs(): void {
   if (syncing) { return }
   syncing = true
-  const s = hmsToSeconds(startHour.value, startMin.value, startSec.value)
-  const e = hmsToSeconds(endHour.value, endMin.value, endSec.value)
-  const max = maxDuration.value || 99999
-  const clampedStart = clamp(s, 0, max)
-  const clampedEnd = clamp(e, clampedStart + 0.5, max)
-  if (clampedStart !== s) {
-    const hms = secondsToHMS(clampedStart).split(':')
-    startHour.value = hms[0]; startMin.value = hms[1]; startSec.value = hms[2]
+  try {
+    const s = hmsToSeconds(startHour.value, startMin.value, startSec.value)
+    const e = hmsToSeconds(endHour.value, endMin.value, endSec.value)
+    const max = maxDuration.value || 99999
+    const clampedStart = clamp(s, 0, max)
+    const clampedEnd = clamp(e, clampedStart + MIN_TRIM_GAP, max)
+    if (clampedStart !== s) {
+      const hms = secondsToHMS(clampedStart).split(':')
+      startHour.value = hms[0]; startMin.value = hms[1]; startSec.value = hms[2]
+    }
+    if (clampedEnd !== e) {
+      const hms = secondsToHMS(clampedEnd).split(':')
+      endHour.value = hms[0]; endMin.value = hms[1]; endSec.value = hms[2]
+    }
+  } finally {
+    syncing = false
   }
-  if (clampedEnd !== e) {
-    const hms = secondsToHMS(clampedEnd).split(':')
-    endHour.value = hms[0]; endMin.value = hms[1]; endSec.value = hms[2]
-  }
-  syncing = false
 }
 
 watch([startHour, startMin, startSec, endHour, endMin, endSec], () => {
@@ -106,15 +99,6 @@ watch([startHour, startMin, startSec, endHour, endMin, endSec], () => {
 
 // Loop
 const loopCount = ref(0)
-
-// Files
-interface FileEntry {
-  path: string
-  outputPath: string
-  meta: VideoMeta | null
-}
-
-const files = ref<FileEntry[]>([])
 
 // Auto-set end time when first file metadata loads
 watch(() => files.value[0]?.meta, (meta) => {
@@ -229,7 +213,7 @@ function onTimelineMove(e: MouseEvent): void {
   if (!dragging.value) { return }
   const t = getTimelineTime(e.clientX)
   if (dragging.value === 'start') {
-    const clamped = clamp(t, 0, trimEndSec.value - 0.1)
+    const clamped = clamp(t, 0, trimEndSec.value - MIN_TRIM_GAP)
     const hms = secondsToHMS(clamped).split(':')
     startHour.value = hms[0]; startMin.value = hms[1]; startSec.value = hms[2]
     if (videoPlayer.value) {
@@ -237,7 +221,7 @@ function onTimelineMove(e: MouseEvent): void {
       currentTime.value = clamped
     }
   } else {
-    const clamped = clamp(t, trimStartSec.value + 0.1, maxDuration.value)
+    const clamped = clamp(t, trimStartSec.value + MIN_TRIM_GAP, maxDuration.value)
     const hms = secondsToHMS(clamped).split(':')
     endHour.value = hms[0]; endMin.value = hms[1]; endSec.value = hms[2]
   }
@@ -246,10 +230,10 @@ function onTimelineMove(e: MouseEvent): void {
 function onGlobalMouseMove(e: MouseEvent): void { onTimelineMove(e) }
 function onGlobalMouseUp(): void { dragging.value = null }
 
-if (typeof window !== 'undefined') {
+onMounted(() => {
   document.addEventListener('mousemove', onGlobalMouseMove)
   document.addEventListener('mouseup', onGlobalMouseUp)
-}
+})
 
 onUnmounted(() => {
   document.removeEventListener('mousemove', onGlobalMouseMove)
@@ -263,37 +247,6 @@ const computedWidth = computed((): number => {
 const canStart = computed((): boolean => {
   return files.value.length > 0 && !progressStore.isProcessing
 })
-
-async function addFiles(paths: string[]): Promise<void> {
-  for (const p of paths) {
-    if (files.value.some((f) => f.path === p)) { continue }
-    const entry: FileEntry = { path: p, outputPath: '', meta: null }
-    files.value.push(entry)
-    getMeta(entry)
-  }
-}
-
-async function getMeta(entry: FileEntry): Promise<void> {
-  try {
-    entry.meta = await window.electronAPI.getVideoMeta(entry.path)
-  } catch (e) {
-    console.error('Failed to get meta:', e)
-  }
-}
-
-function removeFile(index: number): void {
-  files.value.splice(index, 1)
-}
-
-async function selectOutputDir(): Promise<void> {
-  const dir = await window.electronAPI.selectDirectory()
-  if (!dir) { return }
-
-  for (const entry of files.value) {
-    const name = entry.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'output'
-    entry.outputPath = `${dir}/${name}.gif`
-  }
-}
 
 function estimateOutputSize(entry: FileEntry): string {
   if (!entry.meta || entry.meta.duration === 0) { return '未知' }
@@ -309,19 +262,13 @@ function estimateOutputSize(entry: FileEntry): string {
   return `~${estMB.toFixed(1)} MB`
 }
 
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
-}
-
 async function startConvert(): Promise<void> {
   errorMsg.value = ''
   if (files.value.length === 0) { return }
 
   for (const entry of files.value) {
     if (!entry.outputPath) {
-      await selectOutputDir()
+      await selectOutputDir('.gif')
       break
     }
   }
@@ -643,7 +590,7 @@ onUnmounted(() => {
         <div class="glass-card p-4">
           <h3 class="text-base font-semibold text-text-primary mb-3">输出设置</h3>
           <button
-            @click="selectOutputDir"
+            @click="selectOutputDir('.gif')"
             class="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-tertiary text-text-secondary text-sm border border-transparent"
           >
             <Folder :size="16" />
@@ -683,25 +630,6 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.preset-btn {
-  /* no hover animation */
-}
-
-.select-input {
-  padding: 8px 12px;
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-md, 8px);
-  color: hsl(var(--foreground));
-  outline: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%238B949E' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  background-size: 20px;
-  padding-right: 32px;
-}
-
 .slider {
   -webkit-appearance: none;
   appearance: none;
@@ -721,19 +649,6 @@ onUnmounted(() => {
   border: 2px solid #F0A050;
   cursor: pointer;
   box-shadow: 0 0 8px rgba(240, 160, 80, 0.4);
-}
-
-.input-field {
-  padding: 10px 14px;
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-md, 8px);
-  color: hsl(var(--foreground));
-  outline: none;
-}
-
-.input-field::placeholder {
-  color: hsl(var(--muted-foreground));
 }
 
 .time-input {
@@ -821,17 +736,6 @@ onUnmounted(() => {
   border-radius: 2px;
   background: hsl(var(--foreground));
   opacity: 0.8;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: all 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
 }
 
 @media (max-width: 768px) {
