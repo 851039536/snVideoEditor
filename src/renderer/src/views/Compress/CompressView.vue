@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from 'vue'
-import { FileVideo, Folder, Play, X, Info, Zap } from 'lucide-vue-next'
+import { FileVideo, Folder, X, Zap } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
@@ -34,11 +34,9 @@ const preset = computed(() => {
 
 function selectPreset(label: string): void {
   selectedPreset.value = label
-  const p = settingsStore.getPresetByLabel(label)
-  if (p) {
-    crfValue.value = p.crf
+  if (preset.value) {
+    crfValue.value = preset.value.crf
   }
-  customMode.value = label === '自定义'
 }
 
 async function addFiles(paths: string[]): Promise<void> {
@@ -106,35 +104,20 @@ async function startCompress(): Promise<void> {
   })
 
   try {
-    if (files.value.length === 1) {
-      const f = files.value[0]
-      const result = await window.electronAPI.compressVideo({
-        input: f.path,
-        output: f.outputPath,
-        crf: crfValue.value,
-        resolution: resolution.value,
-        bitrate: bitrate.value,
-        codec: codec.value
-      })
-      if (result) {
-        progressStore.finish()
-      }
+    const batchFiles = files.value.map((f) => ({
+      input: f.path,
+      output: f.outputPath,
+      crf: crfValue.value,
+      resolution: resolution.value,
+      bitrate: bitrate.value,
+      codec: codec.value
+    }))
+    const result = await window.electronAPI.batchCompress({ files: batchFiles })
+    if (result.failed.length === 0) {
+      progressStore.finish()
     } else {
-      const batchFiles = files.value.map((f) => ({
-        input: f.path,
-        output: f.outputPath,
-        crf: crfValue.value,
-        resolution: resolution.value,
-        bitrate: bitrate.value,
-        codec: codec.value
-      }))
-      const result = await window.electronAPI.batchCompress({ files: batchFiles })
-      if (result.failed.length === 0) {
-        progressStore.finish()
-      } else {
-        errorMsg.value = `${result.failed.length} 个文件压缩失败`
-        progressStore.reset()
-      }
+      errorMsg.value = `${result.failed.length} 个文件压缩失败`
+      progressStore.reset()
     }
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
@@ -154,6 +137,11 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+
+function getOutputDir(path: string): string {
+  return path.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
 }
 
 const canStart = computed((): boolean => {
@@ -333,7 +321,7 @@ onUnmounted(() => {
             选择输出目录
           </button>
           <p v-if="files.length > 0 && files[0].outputPath" class="text-xs text-accent-light mt-2 truncate">
-            {{ files[0].outputPath.split('/').slice(0, -1).join('/') }}
+            {{ getOutputDir(files[0].outputPath) }}
           </p>
         </div>
 
