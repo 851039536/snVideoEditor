@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onUnmounted } from 'vue'
 import { Play, Lock, LockKeyholeOpen, FileVideo } from 'lucide-vue-next'
+// @ts-ignore - Plyr ESM default export
+import Plyr from 'plyr'
+import 'plyr/dist/plyr.css'
 import { formatSize, getFileName } from '@/utils/format'
 import { secondsToHMS } from '@/utils/time'
 import type { VideoMeta } from '@/types/file'
@@ -12,6 +15,7 @@ import PlaylistPanel from './PlaylistPanel.vue'
 const files = ref<PlayerEntry[]>([])
 const currentIndex = ref(-1)
 const videoPlayer = ref<HTMLVideoElement | null>(null)
+const isPlaying = ref(false)
 
 // Password modal for encrypted files
 const showPasswordModal = ref(false)
@@ -179,10 +183,8 @@ async function playFile(index: number): Promise<void> {
 }
 
 // ---- Plyr ----
-import Plyr from 'plyr'
-import 'plyr/dist/plyr.css'
-
-let player: Plyr | null = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let player: any = null
 
 function initAndPlay(): void {
   const el = videoPlayer.value
@@ -213,13 +215,23 @@ function initAndPlay(): void {
     resetOnEnd: false
   })
 
+  player.on('play', () => {
+    isPlaying.value = true
+  })
+
+  player.on('pause', () => {
+    isPlaying.value = false
+  })
+
   player.on('ended', () => {
+    isPlaying.value = false
     if (hasNext.value) {
       playFile(currentIndex.value + 1)
     }
   })
 
   player.on('error', () => {
+    isPlaying.value = false
     errorMsg.value = '视频加载失败'
   })
 
@@ -362,7 +374,7 @@ onUnmounted(() => {
         <PlaylistPanel
           :files="files"
           :current-index="currentIndex"
-          :is-playing="false"
+          :is-playing="isPlaying"
           @select-file="playFile"
           @remove-file="removeFile"
           @add-files="addFilesAndLoadMeta"
@@ -483,6 +495,31 @@ onUnmounted(() => {
     </Teleport>
   </div>
 </template>
+
+<style>
+/* Plyr CSS variables — must be unscoped to affect Plyr's global DOM */
+:root {
+  --plyr-color-main: hsl(220, 70%, 55%);
+  --plyr-video-background: #000;
+  --plyr-menu-background: hsl(var(--card));
+  --plyr-menu-color: hsl(var(--foreground));
+  --plyr-menu-border-color: hsl(var(--border));
+  --plyr-tooltip-background: hsl(var(--card));
+  --plyr-tooltip-color: hsl(var(--foreground));
+  --plyr-badge-background: hsl(var(--muted));
+  --plyr-badge-text-color: hsl(var(--foreground));
+  --plyr-range-fill-background: var(--plyr-color-main);
+  --plyr-range-track-background: hsl(var(--border));
+  --plyr-control-radius: var(--radius-base, 6px);
+  --plyr-control-icon-size: 18px;
+  --plyr-font-size-large: 22px;
+  --plyr-font-size-xlarge: 26px;
+  --plyr-font-size-time: 13px;
+  --plyr-font-size-menu: 14px;
+  --plyr-font-size-badge: 11px;
+  --plyr-font-family: var(--font-sans);
+}
+</style>
 
 <style scoped>
 @use "./_player";

@@ -4,27 +4,6 @@
 // ============================================================
 
 // ---- Plyr Dark Tech Theme Overrides ----
-:root {
-  --plyr-color-main: hsl(220, 70%, 55%);
-  --plyr-video-background: #000;
-  --plyr-menu-background: hsl(var(--card));
-  --plyr-menu-color: hsl(var(--foreground));
-  --plyr-menu-border-color: hsl(var(--border));
-  --plyr-tooltip-background: hsl(var(--card));
-  --plyr-tooltip-color: hsl(var(--foreground));
-  --plyr-badge-background: hsl(var(--muted));
-  --plyr-badge-text-color: hsl(var(--foreground));
-  --plyr-range-fill-background: var(--plyr-color-main);
-  --plyr-range-track-background: hsl(var(--border));
-  --plyr-control-radius: var(--radius-base, 6px);
-  --plyr-control-icon-size: 18px;
-  --plyr-font-size-large: 22px;
-  --plyr-font-size-xlarge: 26px;
-  --plyr-font-size-time: 13px;
-  --plyr-font-size-menu: 14px;
-  --plyr-font-size-badge: 11px;
-  --plyr-font-family: var(--font-sans);
-}
 
 // Make Plyr controls bar background match dark theme
 .plyr--video .plyr__controls {
