@@ -4,7 +4,7 @@
 
 @layer base {
   html {
-    font-size: 14px;
+    font-size: var(--font-size-base, 14px);
   }
 
   :root {
@@ -30,12 +30,14 @@
     --color-accent-blue: #5B8DEF;
     --color-accent-purple: #7C5CFC;
     --color-accent-light: #A78BFA;
+    --color-playhead: #FF6B6B;
     --color-success: #3FB950;
     --color-danger: #F85149;
     --color-warning: #D29922;
     --color-info: #58A6FF;
 
     /* Design tokens */
+    --font-size-base: 14px;
     --radius-sm: 4px;
     --radius-base: 6px;
     --radius-md: 8px;
@@ -64,10 +66,13 @@
     --color-accent-blue: #3B71D0;
     --color-accent-purple: #6C4CD0;
     --color-accent-light: #8B6CE0;
+    --color-playhead: #CF222E;
     --color-success: #2DA44E;
     --color-danger: #CF222E;
     --color-warning: #BF8700;
     --color-info: #0969DA;
+
+    --font-size-base: 14px;
   }
 
   * {
@@ -95,7 +100,7 @@
 
   ::-webkit-scrollbar-thumb {
     background: hsl(var(--muted));
-    border-radius: 3px;
+    border-radius: var(--radius-sm, 4px);
   }
 
   ::-webkit-scrollbar-thumb:hover {
@@ -130,14 +135,14 @@
   // .glow-hover class removed (no more hover animation)
 
   .input-base {
-    padding: 8px 12px;
+    padding: 0.5rem 0.75rem;
     background: hsl(var(--muted));
     border: 1px solid hsl(var(--border));
     border-radius: var(--radius-md, 8px);
     color: hsl(var(--foreground));
     outline: none;
     font-size: 0.875rem;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition: border-color 0.12s, box-shadow 0.12s;
   }
 
   .input-base::placeholder {
@@ -155,7 +160,7 @@
   }
 
   .select-input {
-    padding: 8px 12px;
+    padding: 0.5rem 0.75rem;
     background: hsl(var(--muted));
     border: 1px solid hsl(var(--border));
     border-radius: var(--radius-md, 8px);
@@ -164,9 +169,9 @@
     appearance: none;
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%238B949E' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
     background-repeat: no-repeat;
-    background-position: right 8px center;
-    background-size: 20px;
-    padding-right: 32px;
+    background-position: right 0.5rem center;
+    background-size: 1.25rem;
+    padding-right: 2rem;
   }
 
   /* ---- Shared layout components ---- */
@@ -212,7 +217,7 @@
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    transition: all 0.3s;
+    transition: all 0.12s;
   }
 
   .btn-primary:disabled {
@@ -230,7 +235,7 @@
     color: hsl(var(--muted-foreground));
     font-size: 0.875rem;
     border: 1px solid transparent;
-    transition: opacity 0.15s;
+    transition: opacity 0.12s;
   }
 
   .btn-secondary:disabled {
@@ -242,7 +247,7 @@
 
   .time-input {
     width: 2rem;
-    padding: 3px 4px;
+    padding: 0.1875rem 0.25rem;
     text-align: center;
     font-size: 0.6875rem;
     font-family: monospace;
@@ -262,16 +267,16 @@
   .slider-base {
     -webkit-appearance: none;
     appearance: none;
-    height: 6px;
-    border-radius: 3px;
+    height: 0.375rem;
+    border-radius: var(--radius-sm, 4px);
     outline: none;
   }
 
   .slider-base::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 18px;
-    height: 18px;
+    width: 1.125rem;
+    height: 1.125rem;
     border-radius: 50%;
     background: hsl(var(--foreground));
     cursor: pointer;
@@ -281,9 +286,9 @@
 
   .trim-handle {
     position: absolute;
-    top: -4px;
-    width: 16px;
-    height: calc(100% + 8px);
+    top: -0.25rem;
+    width: 1rem;
+    height: calc(100% + 0.5rem);
     cursor: ew-resize;
     z-index: 10;
     display: flex;
@@ -292,21 +297,21 @@
   }
 
   .trim-handle-start {
-    left: -8px;
-    border-radius: 2px 0 0 2px;
+    left: -0.5rem;
+    border-radius: var(--radius-sm, 4px) 0 0 var(--radius-sm, 4px);
   }
 
   .trim-handle-end {
-    right: -8px;
-    border-radius: 0 2px 2px 0;
+    right: -0.5rem;
+    border-radius: 0 var(--radius-sm, 4px) var(--radius-sm, 4px) 0;
   }
 
   .trim-handle::after {
     content: '';
     position: absolute;
-    width: 3px;
+    width: 0.1875rem;
     height: 60%;
-    border-radius: 2px;
+    border-radius: var(--radius-sm, 4px);
     background: hsl(var(--foreground));
     opacity: 0.8;
   }

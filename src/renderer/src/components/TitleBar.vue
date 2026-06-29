@@ -75,6 +75,6 @@ onUnmounted(() => {
 }
 
 .window-btn--close:hover {
-  background-color: #E81123;
+  background-color: var(--color-danger);
 }
 </style>

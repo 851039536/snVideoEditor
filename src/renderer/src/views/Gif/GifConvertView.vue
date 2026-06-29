@@ -355,8 +355,7 @@ onUnmounted(() => {
             v-if="videoSrc"
             ref="videoPlayer"
             :src="videoSrc"
-            class="w-full"
-            style="max-height: 260px; background: #000;"
+            class="w-full max-h-[260px] bg-black"
             preload="auto"
             @timeupdate="onTimeUpdate"
             @play="onVideoPlay"
@@ -626,11 +625,11 @@ onUnmounted(() => {
 <style scoped>
 /* Slider color theme (structure from global slider-base) */
 .slider {
-  background: linear-gradient(to right, #F0A050, #D29922);
+  background: linear-gradient(to right, var(--color-warning), var(--color-accent-light));
 }
 
 .slider::-webkit-slider-thumb {
-  border: 2px solid #F0A050;
+  border: 2px solid var(--color-warning);
   box-shadow: 0 0 8px rgba(240, 160, 80, 0.4);
 }
 
@@ -650,7 +649,7 @@ onUnmounted(() => {
 .timeline-dimmed-l,
 .timeline-dimmed-r {
   height: 100%;
-  background: rgba(22, 27, 34, 0.8);
+  background: hsl(var(--background) / 0.8);
   flex-shrink: 0;
   pointer-events: none;
 }
@@ -659,8 +658,8 @@ onUnmounted(() => {
   position: relative;
   height: 100%;
   background: linear-gradient(90deg, rgba(240, 160, 80, 0.3), rgba(210, 153, 34, 0.35));
-  border-left: 2px solid #F0A050;
-  border-right: 2px solid #D29922;
+  border-left: 2px solid var(--color-warning);
+  border-right: 2px solid var(--color-accent-light);
   flex-shrink: 0;
 }
 
@@ -669,7 +668,7 @@ onUnmounted(() => {
   top: 0;
   width: 2px;
   height: 100%;
-  background: #FF6B6B;
+  background: var(--color-playhead);
   outline: 1px solid rgba(255, 107, 107, 0.3);
   z-index: 5;
   transition: left 0.1s linear;

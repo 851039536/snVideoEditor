@@ -19,13 +19,13 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { name: '首页', path: '/', icon: Home, color: '#E6EDF3' },
-  { name: '分割合并', path: '/split-merge', icon: Scissors, color: '#5B8DEF' },
-  { name: '视频压缩', path: '/compress', icon: FileVideo, color: '#7C5CFC' },
-  { name: '视频下载', path: '/download', icon: Globe, color: '#22D3EE' },
-  { name: '加密解密', path: '/encrypt', icon: Shield, color: '#A78BFA' },
-  { name: '视频转GIF', path: '/gif', icon: Image, color: '#F0A050' },
-  { name: '视频播放', path: '/player', icon: Video, color: '#58A6FF' }
+  { name: '首页', path: '/', icon: Home, color: 'var(--color-text-primary)' },
+  { name: '分割合并', path: '/split-merge', icon: Scissors, color: 'var(--color-accent-blue)' },
+  { name: '视频压缩', path: '/compress', icon: FileVideo, color: 'var(--color-accent-purple)' },
+  { name: '视频下载', path: '/download', icon: Globe, color: 'var(--color-info)' },
+  { name: '加密解密', path: '/encrypt', icon: Shield, color: 'var(--color-accent-light)' },
+  { name: '视频转GIF', path: '/gif', icon: Image, color: 'var(--color-warning)' },
+  { name: '视频播放', path: '/player', icon: Video, color: 'var(--color-info)' }
 ]
 
 const isActive = (path: string): boolean => {

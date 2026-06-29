@@ -65,10 +65,10 @@ const passwordStrength = computed((): { label: string; color: string; width: str
     return { label: '', color: '', width: '0%' }
   }
   if (pwd.length < 6) {
-    return { label: '弱', color: '#F85149', width: '25%' }
+    return { label: '弱', color: 'var(--color-danger)', width: '25%' }
   }
   if (pwd.length < 10) {
-    return { label: '中等', color: '#D29922', width: '50%' }
+    return { label: '中等', color: 'var(--color-warning)', width: '50%' }
   }
   const hasUpper = /[A-Z]/.test(pwd)
   const hasLower = /[a-z]/.test(pwd)
@@ -76,9 +76,9 @@ const passwordStrength = computed((): { label: string; color: string; width: str
   const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(pwd)
   const score = [hasUpper, hasLower, hasNum, hasSpecial].filter(Boolean).length
   if (score >= 3 && pwd.length >= 12) {
-    return { label: '强', color: '#3FB950', width: '100%' }
+    return { label: '强', color: 'var(--color-success)', width: '100%' }
   }
-  return { label: '较强', color: '#58A6FF', width: '75%' }
+  return { label: '较强', color: 'var(--color-info)', width: '75%' }
 })
 
 
@@ -414,8 +414,7 @@ onUnmounted(() => {
             v-else-if="videoSrc"
             ref="videoPlayer"
             :src="videoSrc"
-            class="w-full rounded-t-xl"
-            style="max-height: 280px; background: #000;"
+            class="w-full rounded-t-xl max-h-[280px] bg-black"
             preload="auto"
             @timeupdate="onTimeUpdate"
             @play="onVideoPlay"
@@ -585,7 +584,7 @@ onUnmounted(() => {
 
 <style scoped>
 .input-field {
-  padding: 10px 14px;
+  padding: 0.625rem 0.875rem;
   background: hsl(var(--muted));
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius-md, 8px);
@@ -599,8 +598,8 @@ onUnmounted(() => {
 
 code {
   background: hsl(var(--primary) / 0.1);
-  padding: 1px 4px;
+  padding: 0.0625rem 0.25rem;
   border-radius: calc(var(--radius-sm, 4px) - 1px);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 </style>

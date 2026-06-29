@@ -617,8 +617,7 @@ onUnmounted(() => {
             v-if="videoSrc"
             ref="videoPlayer"
             :src="videoSrc"
-            class="w-full rounded-t-xl"
-            style="max-height: 360px; background: #000;"
+            class="w-full rounded-t-xl max-h-[360px] bg-black"
             preload="auto"
             @timeupdate="onTimeUpdate"
             @play="onVideoPlay"
@@ -967,7 +966,7 @@ onUnmounted(() => {
 .timeline-dimmed-l,
 .timeline-dimmed-r {
   height: 100%;
-  background: rgba(22, 27, 34, 0.8);
+  background: hsl(var(--background) / 0.8);
   flex-shrink: 0;
 }
 
@@ -976,7 +975,7 @@ onUnmounted(() => {
   height: 100%;
   background: linear-gradient(90deg, rgba(91, 141, 239, 0.3), rgba(167, 139, 250, 0.35));
   border-left: 2px solid hsl(var(--primary));
-  border-right: 2px solid #A78BFA;
+  border-right: 2px solid var(--color-accent-light);
   flex-shrink: 0;
 }
 
@@ -985,7 +984,7 @@ onUnmounted(() => {
   top: 0;
   width: 2px;
   height: 100%;
-  background: #FF6B6B;
+  background: var(--color-playhead);
   outline: 1px solid rgba(255, 107, 107, 0.3);
   z-index: 5;
   transition: left 0.1s linear;

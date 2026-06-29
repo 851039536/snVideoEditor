@@ -23,7 +23,7 @@ import TitleBar from './components/TitleBar.vue'
 <style>
 .page-enter-active,
 .page-leave-active {
-  transition: all 0.3s ease;
+  transition: all 0.12s ease;
 }
 
 .page-enter-from {

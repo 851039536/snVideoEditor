@@ -689,7 +689,7 @@ onUnmounted(() => {
 
 <style scoped>
 .input-field {
-  padding: 10px 14px;
+  padding: 0.625rem 0.875rem;
   background: hsl(var(--muted));
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius-md, 8px);
@@ -703,14 +703,14 @@ onUnmounted(() => {
 
 input[type="range"] {
   -webkit-appearance: none;
-  height: 6px;
+  height: 0.375rem;
   cursor: pointer;
 }
 
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 0.875rem;
+  height: 0.875rem;
   border-radius: 50%;
   background: var(--accent-blue);
   cursor: pointer;
