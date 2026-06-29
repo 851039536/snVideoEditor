@@ -1,6 +1,7 @@
 {
   "name": "sn-video-editor",
   "version": "1.0.0",
+  "author": "SN Video Editor",
   "description": "SN Video Editor - 模块化视频编辑桌面工具",
   "main": "./out/main/index.js",
   "scripts": {
