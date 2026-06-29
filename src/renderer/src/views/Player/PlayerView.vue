@@ -393,7 +393,26 @@ onUnmounted(() => {
         </div>
 
         <!-- Player Area -->
-        <div v-else class="video-player-wrapper glass-card overflow-hidden">
+        <div v-else>
+          <!-- Single-line info bar above video -->
+          <div
+            v-if="currentFile?.meta"
+            class="flex items-center gap-3 px-3 py-1.5 mb-1 rounded-lg text-xs text-text-muted bg-bg-tertiary/40 border border-bg-tertiary"
+          >
+            <span class="truncate max-w-[200px]" :title="currentFileName">{{ currentFileName }}</span>
+            <span class="w-px h-3 bg-bg-tertiary flex-shrink-0" />
+            <span class="flex-shrink-0">{{ currentResolution || '--' }}</span>
+            <span class="w-px h-3 bg-bg-tertiary flex-shrink-0" />
+            <span class="flex-shrink-0">{{ secondsToHMS(currentFile.meta.duration) }}</span>
+            <span class="w-px h-3 bg-bg-tertiary flex-shrink-0" />
+            <span class="flex-shrink-0">{{ currentFileSize || '--' }}</span>
+            <span class="w-px h-3 bg-bg-tertiary flex-shrink-0 hidden sm:block" />
+            <span class="hidden sm:inline flex-shrink-0">{{ currentFile.meta.codec?.toUpperCase() || '--' }}</span>
+            <span class="w-px h-3 bg-bg-tertiary flex-shrink-0 hidden sm:block" />
+            <span class="hidden sm:inline flex-shrink-0">{{ currentFile.meta.bitrate ? (currentFile.meta.bitrate / 1000).toFixed(0) + ' kbps' : '--' }}</span>
+          </div>
+
+          <div class="video-player-wrapper glass-card overflow-hidden">
           <div class="relative bg-black">
             <video
               v-if="videoSrc"
@@ -417,36 +436,6 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
-
-        <!-- Video Info Card -->
-        <div v-if="currentFile?.meta" class="video-info-card">
-          <h3 class="text-sm font-semibold text-text-primary mb-3">视频信息</h3>
-          <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            <div>
-              <span class="text-text-muted text-xs">文件名</span>
-              <p class="text-text-primary truncate text-xs">{{ currentFileName }}</p>
-            </div>
-            <div>
-              <span class="text-text-muted text-xs">分辨率</span>
-              <p class="text-text-primary text-xs">{{ currentResolution || '未知' }}</p>
-            </div>
-            <div>
-              <span class="text-text-muted text-xs">时长</span>
-              <p class="text-text-primary text-xs">{{ secondsToHMS(currentFile.meta.duration) }}</p>
-            </div>
-            <div>
-              <span class="text-text-muted text-xs">文件大小</span>
-              <p class="text-text-primary text-xs">{{ currentFileSize || '未知' }}</p>
-            </div>
-            <div>
-              <span class="text-text-muted text-xs">编码格式</span>
-              <p class="text-text-primary text-xs">{{ currentFile.meta.codec?.toUpperCase() || '未知' }}</p>
-            </div>
-            <div>
-              <span class="text-text-muted text-xs">码率</span>
-              <p class="text-text-primary text-xs">{{ currentFile.meta.bitrate ? (currentFile.meta.bitrate / 1000).toFixed(0) + ' kbps' : '未知' }}</p>
-            </div>
-          </div>
         </div>
       </div>
     </div>

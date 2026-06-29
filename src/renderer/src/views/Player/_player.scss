@@ -104,15 +104,6 @@
   }
 }
 
-// ---- Video info card ----
-.video-info-card {
-  background: hsl(var(--background) / 0.8);
-  backdrop-filter: blur(16px);
-  border: 1px solid hsl(var(--border) / 0.6);
-  border-radius: var(--radius-lg, 12px);
-  padding: 1rem;
-}
-
 // ---- Responsive: small screen collapse sidebar ----
 @media (max-width: 1024px) {
   .player-layout {
