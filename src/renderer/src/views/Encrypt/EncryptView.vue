@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
-import { Shield, Lock, Unlock, Folder, Play, Pause, Eye, EyeOff, X, FileVideo, FolderOpen } from 'lucide-vue-next'
+import { Shield, Lock, Unlock, Folder, Play, Pause, X, FileVideo, FolderOpen, Key, Copy, Check } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
-import { useSettingsStore } from '@/stores/settings'
 import { formatSize, getFileName } from '@/utils/format'
 import { secondsToHMS } from '@/utils/time'
 import type { VideoMeta } from '@/types/file'
+import { DEFAULT_ENCRYPT_KEY, KEY_MASK_PREFIX_LENGTH } from '@/config/crypto'
 
 const progressStore = useProgressStore()
-const settingsStore = useSettingsStore()
 
 // Mode
 const mode = ref<'encrypt' | 'decrypt'>('encrypt')
@@ -49,36 +48,22 @@ const canPlayVideo = computed((): boolean => {
   return files.value.length > 0
 })
 
-const needsPasswordForPreview = computed((): boolean => {
-  return mode.value === 'decrypt' && files.value.length > 0 && password.value.length < 4
-})
+// ---- Key management ----
+const keyCopied = ref(false)
 
-// Password
-const password = ref('')
-const showPassword = ref(false)
-const confirmPassword = ref('')
+async function copyKeyToClipboard(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(DEFAULT_ENCRYPT_KEY)
+    keyCopied.value = true
+    setTimeout(() => { keyCopied.value = false }, 2000)
+  } catch (_e) {
+    // clipboard not available
+  }
+}
 
-// Password strength
-const passwordStrength = computed((): { label: string; color: string; width: string } => {
-  const pwd = password.value
-  if (pwd.length === 0) {
-    return { label: '', color: '', width: '0%' }
-  }
-  if (pwd.length < 6) {
-    return { label: '弱', color: 'var(--color-danger)', width: '25%' }
-  }
-  if (pwd.length < 10) {
-    return { label: '中等', color: 'var(--color-warning)', width: '50%' }
-  }
-  const hasUpper = /[A-Z]/.test(pwd)
-  const hasLower = /[a-z]/.test(pwd)
-  const hasNum = /\d/.test(pwd)
-  const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(pwd)
-  const score = [hasUpper, hasLower, hasNum, hasSpecial].filter(Boolean).length
-  if (score >= 3 && pwd.length >= 12) {
-    return { label: '强', color: 'var(--color-success)', width: '100%' }
-  }
-  return { label: '较强', color: 'var(--color-info)', width: '75%' }
+const maskedKey = computed((): string => {
+  if (DEFAULT_ENCRYPT_KEY.length <= KEY_MASK_PREFIX_LENGTH) { return DEFAULT_ENCRYPT_KEY }
+  return DEFAULT_ENCRYPT_KEY.slice(0, KEY_MASK_PREFIX_LENGTH) + '*'.repeat(12)
 })
 
 
@@ -138,7 +123,7 @@ async function resetPlayer(): Promise<void> {
 async function prepareDecryptPreview(): Promise<void> {
   if (mode.value !== 'decrypt') { return }
   const firstFile = files.value[0]
-  if (!firstFile || password.value.length < 4) { return }
+  if (!firstFile) { return }
 
   // Clean up old temp first
   await cleanupPreviewTemp()
@@ -152,7 +137,7 @@ async function prepareDecryptPreview(): Promise<void> {
     const success = await window.electronAPI.decryptFile({
       input: firstFile.path,
       output: tempPath,
-      password: password.value
+      password: DEFAULT_ENCRYPT_KEY
     })
 
     if (!success) {
@@ -252,20 +237,6 @@ watch(() => files.value[0]?.path, (newPath) => {
   }
 })
 
-// Re-prepare decrypt preview when password changes (debounced by user typing)
-let previewDebounceTimer: ReturnType<typeof setTimeout> | null = null
-watch(password, (newPwd) => {
-  if (mode.value !== 'decrypt' || files.value.length === 0) { return }
-  if (previewDebounceTimer) { clearTimeout(previewDebounceTimer) }
-  if (newPwd.length >= 4) {
-    previewDebounceTimer = setTimeout(() => {
-      prepareDecryptPreview()
-    }, 600)
-  } else {
-    resetPlayer()
-  }
-})
-
 // Reset player when switching mode
 watch(mode, () => {
   resetPlayer()
@@ -283,8 +254,6 @@ async function selectOutputDirForAll(): Promise<void> {
 
 const canStart = computed((): boolean => {
   if (files.value.length === 0) { return false }
-  if (password.value.length < 4) { return false }
-  if (mode.value === 'encrypt' && password.value !== confirmPassword.value) { return false }
   return true
 })
 
@@ -310,15 +279,13 @@ async function startProcess(): Promise<void> {
     progressStore.update(info)
   })
 
-  settingsStore.setLastPassword(password.value)
-
   try {
     const batchFiles = files.value.map((f) => ({ input: f.path, output: f.outputPath }))
     let result: { success: number; failed: string[] }
     if (mode.value === 'encrypt') {
-      result = await window.electronAPI.batchEncrypt({ files: batchFiles, password: password.value })
+      result = await window.electronAPI.batchEncrypt({ files: batchFiles, password: DEFAULT_ENCRYPT_KEY })
     } else {
-      result = await window.electronAPI.batchDecrypt({ files: batchFiles, password: password.value })
+      result = await window.electronAPI.batchDecrypt({ files: batchFiles, password: DEFAULT_ENCRYPT_KEY })
     }
 
     if (result.failed.length === 0) {
@@ -342,7 +309,6 @@ function switchMode(newMode: 'encrypt' | 'decrypt'): void {
 onUnmounted(() => {
   window.electronAPI?.removeProgressListener()
   cleanupPreviewTemp()
-  if (previewDebounceTimer) { clearTimeout(previewDebounceTimer) }
 })
 </script>
 
@@ -395,15 +361,8 @@ onUnmounted(() => {
 
         <!-- Video Preview -->
         <div v-if="canPlayVideo" class="video-player-container glass-card">
-          <!-- Needs password for decrypt preview -->
-          <div v-if="needsPasswordForPreview" class="flex items-center justify-center h-36 bg-black/50 rounded-t-xl">
-            <div class="text-center">
-              <Lock :size="24" class="text-text-muted mx-auto mb-2" />
-              <p class="text-sm text-text-secondary">输入解密密码后可预览</p>
-            </div>
-          </div>
           <!-- Preparing decrypt preview -->
-          <div v-else-if="previewPreparing" class="flex items-center justify-center h-36 bg-black/50 rounded-t-xl">
+          <div v-if="previewPreparing" class="flex items-center justify-center h-36 bg-black/50 rounded-t-xl">
             <div class="text-center">
               <div class="w-6 h-6 mx-auto mb-2 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
               <p class="text-sm text-text-secondary">正在准备预览...</p>
@@ -472,58 +431,36 @@ onUnmounted(() => {
 
       <!-- Right: Parameters -->
       <div class="space-y-3">
-        <!-- Password -->
+        <!-- Key Info -->
         <div class="glass-card">
-          <h3 class="section-title">
-            {{ mode === 'encrypt' ? '设置密码' : '输入密码' }}
-          </h3>
+          <h3 class="section-title">加密密钥</h3>
 
           <div class="space-y-3">
-            <div class="relative">
-              <input
-                v-model="password"
-                :type="showPassword ? 'text' : 'password'"
-                :placeholder="mode === 'encrypt' ? '输入加密密码' : '输入解密密码'"
-                class="input-field w-full pr-10"
-              />
-              <button
-                @click="showPassword = !showPassword"
-                class="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary"
-              >
-                <EyeOff v-if="showPassword" :size="16" />
-                <Eye v-else :size="16" />
-              </button>
+            <!-- Key display -->
+            <div class="flex items-center gap-2 p-3 rounded-lg bg-bg-tertiary/50 border border-bg-tertiary">
+              <Key :size="16" class="text-accent-blue flex-shrink-0" />
+              <code class="text-sm text-text-primary flex-1 font-mono truncate">
+                {{ maskedKey }}
+              </code>
             </div>
 
-            <!-- Password Strength (encrypt only) -->
-            <div v-if="mode === 'encrypt' && password.length > 0">
-              <div class="h-1.5 bg-bg-tertiary rounded-full overflow-hidden mb-1">
-                <div
-                  class="h-full rounded-full transition-all duration-500"
-                  :style="{ width: passwordStrength.width, backgroundColor: passwordStrength.color }"
-                />
-              </div>
-              <span class="text-xs" :style="{ color: passwordStrength.color }">
-                密码强度: {{ passwordStrength.label }}
-              </span>
-            </div>
+            <p class="text-xs text-text-muted">
+              加密和解密均使用内置默认密钥，无需手动输入。
+              如需在第三方程序中解密文件，请点击下方按钮获取完整密钥。
+            </p>
 
-            <!-- Confirm Password (encrypt only) -->
-            <div v-if="mode === 'encrypt'">
-              <input
-                v-model="confirmPassword"
-                type="password"
-                placeholder="再次输入密码确认"
-                class="input-field w-full"
-                :class="confirmPassword && password !== confirmPassword ? 'border-danger/50' : ''"
-              />
-              <p
-                v-if="confirmPassword && password !== confirmPassword"
-                class="text-xs text-danger mt-1"
-              >
-                两次输入的密码不一致
-              </p>
-            </div>
+            <!-- Copy button -->
+            <button
+              @click="copyKeyToClipboard"
+              class="w-full flex items-center justify-center gap-2 p-2.5 rounded-lg text-sm font-medium transition-colors"
+              :class="keyCopied
+                ? 'bg-success/10 border border-success/30 text-success'
+                : 'bg-accent-blue/10 border border-accent-blue/20 text-accent-blue hover:bg-accent-blue/20'"
+            >
+              <Check v-if="keyCopied" :size="16" />
+              <Copy v-else :size="16" />
+              {{ keyCopied ? '已复制到剪贴板' : '获取密钥' }}
+            </button>
           </div>
         </div>
 
@@ -547,11 +484,11 @@ onUnmounted(() => {
               <p class="font-medium text-text-primary mb-1">加密说明</p>
               <p v-if="mode === 'encrypt'">
                 使用 AES-256-CTR 算法加密视频文件。加密后的文件将以 <code class="text-accent-blue">.enc</code> 扩展名保存。
-                请妥善保管密码，丢失后无法恢复。
+                使用内置默认密钥，可通过上方"获取密钥"按钮导出给第三方程序使用。
               </p>
               <p v-else>
-                解密使用 AES-256-CTR 加密的视频文件。需要输入加密时设置的密码。
-                支持 <code class="text-accent-blue">.enc</code> 格式文件。
+                解密使用 AES-256-CTR 加密的视频文件，自动使用内置默认密钥。
+                如需在其他设备解密，请通过加密页面的"获取密钥"按钮复制密钥。
               </p>
             </div>
           </div>
