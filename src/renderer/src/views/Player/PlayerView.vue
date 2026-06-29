@@ -93,7 +93,7 @@ async function addFiles(paths: string[]): Promise<void> {
 
 async function addFilesAndLoadMeta(paths: string[]): Promise<void> {
   await addFiles(paths)
-  loadAllMeta()
+  void loadAllMeta()
 }
 
 function removeFile(index: number): void {
@@ -142,20 +142,9 @@ async function openTempDir(): Promise<void> {
   }
 }
 
-function clearList(): void {
-  // Destroy player and clean up all temp files
-  if (player) {
-    player.destroy()
-    player = null
-  }
-  isPlaying.value = false
-  for (const tempPath of tempPaths.value.values()) {
-    cleanupTemp(tempPath)
-  }
-  tempPaths.value.clear()
-  for (const entry of files.value) {
-    entry.tempPath = null
-  }
+async function clearList(): Promise<void> {
+  destroyPlayer()
+  await cleanupAllTemps()
   files.value = []
   currentIndex.value = -1
   errorMsg.value = ''
@@ -222,16 +211,19 @@ async function playFile(index: number): Promise<void> {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let player: any = null
 
-function initAndPlay(): void {
-  const el = videoPlayer.value
-  if (!el || !videoSrc.value) { return }
-
-  // :key="videoSrc" ensures DOM is fresh; old player is already orphaned
+function destroyPlayer(): void {
   if (player) {
     try { player.destroy() } catch (_e) { /* ignore */ }
     player = null
   }
   isPlaying.value = false
+}
+
+function initAndPlay(): void {
+  const el = videoPlayer.value
+  if (!el || !videoSrc.value) { return }
+
+  destroyPlayer()
 
   player = new Plyr(el, {
     controls: [
@@ -281,12 +273,16 @@ function initAndPlay(): void {
 }
 
 // ---- Encryption Decrypt for Playback ----
-async function decryptWithDefaultKey(file: PlayerEntry): Promise<void> {
-  const tempDir = await window.electronAPI.getTempDir()
+async function decryptAndPlay(file: PlayerEntry, password: string): Promise<void> {
+  if (file.tempPath) {
+    await cleanupTemp(file.tempPath)
+    file.tempPath = null
+  }
+
   const tempPath = await window.electronAPI.decryptForPlayback(
     file.path,
-    DEFAULT_ENCRYPT_KEY,
-    tempDir
+    password,
+    tempDir.value
   )
 
   if (files.value[currentIndex.value]?.path !== file.path) {
@@ -302,6 +298,10 @@ async function decryptWithDefaultKey(file: PlayerEntry): Promise<void> {
   initAndPlay()
 }
 
+async function decryptWithDefaultKey(file: PlayerEntry): Promise<void> {
+  await decryptAndPlay(file, DEFAULT_ENCRYPT_KEY)
+}
+
 async function confirmDecrypt(): Promise<void> {
   if (!decryptingFile.value) { return }
   if (passwordInput.value.length < 4) {
@@ -311,35 +311,13 @@ async function confirmDecrypt(): Promise<void> {
 
   passwordError.value = ''
   const file = decryptingFile.value
-
-  if (file.tempPath) {
-    await cleanupTemp(file.tempPath)
-    file.tempPath = null
-  }
-
-  const tempDir = await window.electronAPI.getTempDir()
-  const tempPath = await window.electronAPI.decryptForPlayback(
-    file.path,
-    passwordInput.value,
-    tempDir
-  )
-
-  if (files.value[currentIndex.value]?.path !== file.path) {
-    await cleanupTemp(tempPath)
-    return
-  }
-
-  file.tempPath = tempPath
-  tempPaths.value.set(file.path, tempPath)
-
-  await loadMeta(file)
+  const pwd = passwordInput.value
 
   showPasswordModal.value = false
   passwordInput.value = ''
   decryptingFile.value = null
 
-  await nextTick()
-  initAndPlay()
+  await decryptAndPlay(file, pwd)
 }
 
 function cancelDecrypt(): void {
@@ -366,10 +344,7 @@ async function cleanupAllTemps(): Promise<void> {
 
 // ---- Lifecycle ----
 onUnmounted(() => {
-  if (player) {
-    player.destroy()
-    player = null
-  }
+  destroyPlayer()
   cleanupAllTemps()
 })
 </script>
@@ -476,7 +451,7 @@ onUnmounted(() => {
           </div>
 
           <div :key="playerKey" class="video-player-wrapper glass-card overflow-hidden">
-          <div class="relative bg-black">
+            <div class="relative bg-black">
             <video
               v-if="videoSrc"
               ref="videoPlayer"

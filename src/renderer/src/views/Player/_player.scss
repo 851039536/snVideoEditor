@@ -3,8 +3,6 @@
 // Used by: PlayerView.vue, PlaylistPanel.vue
 // ============================================================
 
-// ---- Plyr Dark Tech Theme Overrides ----
-
 // Make Plyr controls bar background match dark theme
 .plyr--video .plyr__controls {
   background: linear-gradient(to top, hsl(var(--background) / 0.92), transparent);
