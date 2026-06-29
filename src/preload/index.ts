@@ -29,6 +29,9 @@ const electronAPI = {
   getTempDir: (): Promise<string> =>
     ipcRenderer.invoke('app:getTempDir'),
 
+  openFolder: (folderPath: string): Promise<string> =>
+    ipcRenderer.invoke('app:openFolder', folderPath),
+
   getCommonPaths: (): Promise<{ desktop: string; downloads: string }> =>
     ipcRenderer.invoke('app:getCommonPaths'),
 

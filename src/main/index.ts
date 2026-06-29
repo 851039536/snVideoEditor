@@ -341,6 +341,11 @@ function registerAppHandlers(): void {
     return getTempClipsDir()
   })
 
+  ipcMain.handle('app:openFolder', async (_event, folderPath: string) => {
+    const { shell } = await import('electron')
+    return shell.openPath(folderPath)
+  })
+
   ipcMain.handle('app:getCommonPaths', () => {
     const home = os.homedir()
     return {

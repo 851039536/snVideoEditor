@@ -59,10 +59,6 @@ function onDragEnd(): void {
   dragSrcIdx.value = -1
   dragOverIdx.value = -1
 }
-
-function onConfirmClear(): void {
-  emit('clearList')
-}
 </script>
 
 <template>
@@ -90,7 +86,7 @@ function onConfirmClear(): void {
           播放列表（{{ files.length }}）
         </h3>
         <button
-          @click="onConfirmClear"
+          @click="emit('clearList')"
           class="text-xs text-text-muted hover:text-danger transition-colors"
         >
           清空

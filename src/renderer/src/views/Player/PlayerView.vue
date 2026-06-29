@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onUnmounted } from 'vue'
-import { Play, Lock, LockKeyholeOpen, FileVideo } from 'lucide-vue-next'
+import { Play, Lock, LockKeyholeOpen, FileVideo, FolderOpen, Trash2 } from 'lucide-vue-next'
 // @ts-ignore - Plyr ESM default export
 import Plyr from 'plyr'
 import 'plyr/dist/plyr.css'
@@ -16,6 +16,7 @@ const files = ref<PlayerEntry[]>([])
 const currentIndex = ref(-1)
 const videoPlayer = ref<HTMLVideoElement | null>(null)
 const isPlaying = ref(false)
+const playerKey = ref(0)
 
 // Password modal for encrypted files
 const showPasswordModal = ref(false)
@@ -28,6 +29,12 @@ const autoDecrypt = ref(true)
 
 // Track temp paths for cleanup
 const tempPaths = ref<Map<string, string>>(new Map())
+const tempDir = ref('')
+
+// Load temp dir path on mount
+;(async () => {
+  tempDir.value = await window.electronAPI.getTempDir()
+})()
 
 // Error display
 const errorMsg = ref('')
@@ -90,6 +97,15 @@ async function addFilesAndLoadMeta(paths: string[]): Promise<void> {
 }
 
 function removeFile(index: number): void {
+  const removed = files.value[index]
+  if (!removed) { return }
+
+  // Clean up temp file if this was an encrypted file that was decrypted
+  if (removed.tempPath) {
+    cleanupTemp(removed.tempPath)
+    tempPaths.value.delete(removed.path)
+  }
+
   const wasCurrent = index === currentIndex.value
   files.value.splice(index, 1)
   if (wasCurrent) {
@@ -120,7 +136,26 @@ function handleReorder(payload: { from: number; to: number }): void {
   }
 }
 
+async function openTempDir(): Promise<void> {
+  if (tempDir.value) {
+    await window.electronAPI.openFolder(tempDir.value)
+  }
+}
+
 function clearList(): void {
+  // Destroy player and clean up all temp files
+  if (player) {
+    player.destroy()
+    player = null
+  }
+  isPlaying.value = false
+  for (const tempPath of tempPaths.value.values()) {
+    cleanupTemp(tempPath)
+  }
+  tempPaths.value.clear()
+  for (const entry of files.value) {
+    entry.tempPath = null
+  }
   files.value = []
   currentIndex.value = -1
   errorMsg.value = ''
@@ -140,23 +175,24 @@ async function selectDir(): Promise<void> {
 
 // ---- Meta loading ----
 async function loadMeta(entry: PlayerEntry): Promise<void> {
-  if (entry.isEncrypted && !entry.tempPath) { return }
-  const path = entry.isEncrypted && entry.tempPath ? entry.tempPath : entry.path
+  const path = entry.isEncrypted ? entry.tempPath! : entry.path
   const meta = await window.electronAPI.getVideoMeta(path)
   entry.meta = meta as VideoMeta
 }
 
 async function loadAllMeta(): Promise<void> {
-  for (const entry of files.value) {
-    if (!entry.isEncrypted) {
-      loadMeta(entry)
-    }
+  const nonEncrypted = files.value.filter((e) => !e.isEncrypted)
+  const results = await Promise.allSettled(nonEncrypted.map((entry) => loadMeta(entry)))
+  const failed = results.filter((r) => r.status === 'rejected').length
+  if (failed > 0) {
+    errorMsg.value = `${failed} 个文件元数据加载失败`
   }
 }
 
 // ---- Playback ----
 async function playFile(index: number): Promise<void> {
   errorMsg.value = ''
+  playerKey.value++
   currentIndex.value = index
   const file = files.value[index]
   if (!file) { return }
@@ -190,10 +226,12 @@ function initAndPlay(): void {
   const el = videoPlayer.value
   if (!el || !videoSrc.value) { return }
 
+  // :key="videoSrc" ensures DOM is fresh; old player is already orphaned
   if (player) {
-    player.destroy()
+    try { player.destroy() } catch (_e) { /* ignore */ }
     player = null
   }
+  isPlaying.value = false
 
   player = new Plyr(el, {
     controls: [
@@ -346,19 +384,44 @@ onUnmounted(() => {
         </div>
         <h1 class="text-xl font-bold text-text-primary">视频播放器</h1>
 
-        <!-- Auto-decrypt toggle -->
-        <button
-          @click="autoDecrypt = !autoDecrypt"
-          class="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all border"
-          :class="autoDecrypt
-            ? 'bg-accent-blue/10 border-accent-blue/30 text-accent-blue hover:bg-accent-blue/20'
-            : 'bg-bg-tertiary/60 border-bg-tertiary text-text-muted hover:bg-bg-tertiary'"
-          :title="autoDecrypt ? '加密视频自动使用内置密钥解密' : '加密视频需手动输入密码'"
-        >
-          <LockKeyholeOpen v-if="autoDecrypt" :size="13" />
-          <Lock v-else :size="13" />
-          <span>{{ autoDecrypt ? '自动解密' : '手动解密' }}</span>
-        </button>
+        <!-- Header Actions -->
+        <div class="ml-auto flex items-center gap-1.5">
+          <!-- Open temp folder -->
+          <button
+            v-if="tempDir"
+            @click="openTempDir"
+            class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors border border-bg-tertiary text-text-muted hover:text-text-primary hover:border-accent-blue/20"
+            title="打开临时文件目录"
+          >
+            <FolderOpen :size="13" />
+            <span class="hidden sm:inline">临时目录</span>
+          </button>
+
+          <!-- Clean temp files -->
+          <button
+            v-if="tempPaths.size > 0"
+            @click="cleanupAllTemps()"
+            class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors border border-bg-tertiary text-text-muted hover:text-danger hover:border-danger/30"
+            title="清理所有解密临时文件"
+          >
+            <Trash2 :size="13" />
+            <span class="hidden sm:inline">清理 ({{ tempPaths.size }})</span>
+          </button>
+
+          <!-- Auto-decrypt toggle -->
+          <button
+            @click="autoDecrypt = !autoDecrypt"
+            class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all border"
+            :class="autoDecrypt
+              ? 'bg-accent-blue/10 border-accent-blue/30 text-accent-blue hover:bg-accent-blue/20'
+              : 'bg-bg-tertiary/60 border-bg-tertiary text-text-muted hover:bg-bg-tertiary'"
+            :title="autoDecrypt ? '加密视频自动使用内置密钥解密' : '加密视频需手动输入密码'"
+          >
+            <LockKeyholeOpen v-if="autoDecrypt" :size="13" />
+            <Lock v-else :size="13" />
+            <span>{{ autoDecrypt ? '自动解密' : '手动解密' }}</span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -412,7 +475,7 @@ onUnmounted(() => {
             <span class="hidden sm:inline flex-shrink-0">{{ currentFile.meta.bitrate ? (currentFile.meta.bitrate / 1000).toFixed(0) + ' kbps' : '--' }}</span>
           </div>
 
-          <div class="video-player-wrapper glass-card overflow-hidden">
+          <div :key="playerKey" class="video-player-wrapper glass-card overflow-hidden">
           <div class="relative bg-black">
             <video
               v-if="videoSrc"
