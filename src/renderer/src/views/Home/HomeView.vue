@@ -123,11 +123,6 @@ const cards: FeatureCard[] = [
             </span>
           </div>
 
-          <!-- Action -->
-          <div class="flex items-center gap-2 text-accent-blue">
-            <span class="text-sm font-medium">开始使用</span>
-            <ArrowRight :size="16" />
-          </div>
         </div>
       </button>
     </div>
