@@ -4,7 +4,6 @@ import { FileVideo, Folder, X, Zap, Monitor, Download, FolderOpen } from 'lucide
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
-import { formatDuration } from '@/utils/time'
 import { formatSize } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
 import type { FileEntry } from '@/types/file'
