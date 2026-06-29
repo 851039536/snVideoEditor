@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import {
-  Play, Pause, Lock, FolderOpen, X, FileVideo, Volume2, VolumeX,
+  Play, Pause, Lock, LockKeyholeOpen, FolderOpen, X, FileVideo, Volume2, VolumeX,
   SkipBack, SkipForward
 } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import { formatSize, getFileName } from '@/utils/format'
 import { secondsToHMS } from '@/utils/time'
 import type { VideoMeta } from '@/types/file'
+import { DEFAULT_ENCRYPT_KEY } from '@/config/crypto'
 
 // ---- Types ----
 interface PlayerEntry {
@@ -31,6 +32,9 @@ const showPasswordModal = ref(false)
 const passwordInput = ref('')
 const passwordError = ref('')
 const decryptingFile = ref<PlayerEntry | null>(null)
+
+// Auto-decrypt toggle (default: ON — use built-in key)
+const autoDecrypt = ref(true)
 
 // Track temp paths for cleanup
 const tempPaths = ref<Map<string, string>>(new Map())
@@ -160,8 +164,11 @@ async function playFile(index: number): Promise<void> {
       // Already decrypted, just play
       await nextTick()
       startPlayback()
+    } else if (autoDecrypt.value) {
+      // Auto-decrypt with built-in key
+      await decryptWithDefaultKey(file)
     } else {
-      // Need password
+      // Manual password
       decryptingFile.value = file
       passwordInput.value = ''
       passwordError.value = ''
@@ -208,6 +215,34 @@ function nextFile(): void {
 }
 
 // ---- Encryption Decrypt for Playback ----
+
+/** Auto-decrypt using the built-in default key */
+async function decryptWithDefaultKey(file: PlayerEntry): Promise<void> {
+  try {
+    const tempDir = await window.electronAPI.getTempDir()
+    const tempPath = await window.electronAPI.decryptForPlayback(
+      file.path,
+      DEFAULT_ENCRYPT_KEY,
+      tempDir
+    )
+
+    // Verify still the current file
+    if (files.value[currentIndex.value]?.path !== file.path) {
+      await cleanupTemp(tempPath)
+      return
+    }
+
+    file.tempPath = tempPath
+    tempPaths.value.set(file.path, tempPath)
+
+    await loadMeta(file)
+    await nextTick()
+    startPlayback()
+  } catch (e) {
+    errorMsg.value = e instanceof Error ? e.message : '自动解密失败'
+  }
+}
+
 async function confirmDecrypt(): Promise<void> {
   if (!decryptingFile.value) { return }
   if (passwordInput.value.length < 4) {
@@ -364,8 +399,29 @@ onUnmounted(() => {
           <Play :size="20" class="text-accent-blue" />
         </div>
         <h1 class="text-2xl font-bold text-text-primary">视频播放器</h1>
+
+        <!-- Auto-decrypt toggle -->
+        <button
+          @click="autoDecrypt = !autoDecrypt"
+          class="ml-auto flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border"
+          :class="autoDecrypt
+            ? 'bg-accent-blue/10 border-accent-blue/30 text-accent-blue hover:bg-accent-blue/20'
+            : 'bg-bg-tertiary/60 border-bg-tertiary text-text-muted hover:bg-bg-tertiary'"
+          :title="autoDecrypt ? '加密视频自动使用内置密钥解密' : '加密视频需手动输入密码'"
+        >
+          <LockKeyholeOpen v-if="autoDecrypt" :size="15" />
+          <Lock v-else :size="15" />
+          <span>{{ autoDecrypt ? '自动解密' : '手动解密' }}</span>
+        </button>
       </div>
-      <p class="text-text-secondary text-sm">支持播放普通视频和加密视频（.enc），可批量添加文件创建播放列表</p>
+      <p class="text-text-secondary text-sm">
+        <template v-if="autoDecrypt">
+          加密视频（.enc）将自动使用内置密钥解密播放，无需手动输入密码。关闭开关可切换为手动密码模式。
+        </template>
+        <template v-else>
+          支持播放普通视频和加密视频（.enc），加密视频需手动输入密码。开启自动解密可免除输入。
+        </template>
+      </p>
     </header>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -522,7 +578,9 @@ onUnmounted(() => {
                 <Lock v-if="currentFile.isEncrypted" :size="32" class="mx-auto mb-2 opacity-40" />
                 <FileVideo v-else :size="32" class="mx-auto mb-2 opacity-40" />
                 <p class="text-sm">
-                  {{ currentFile.isEncrypted ? '加密视频需输入密码' : '准备播放...' }}
+                  {{ currentFile.isEncrypted
+                    ? (autoDecrypt ? '正在自动解密...' : '加密视频需输入密码')
+                    : '准备播放...' }}
                 </p>
               </div>
             </div>
