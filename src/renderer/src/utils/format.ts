@@ -32,6 +32,14 @@ export function truncateUrl(url: string, maxLen = 50): string {
 }
 
 /**
+ * Extract the directory portion from a full file path.
+ * Returns empty string if path has no directory component.
+ */
+export function getDirName(filePath: string): string {
+  return filePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+}
+
+/**
  * Sanitize a string for use as a filename:
  * - Remove illegal characters (\\ / : * ? " < > |)
  * - Replace whitespace with underscores

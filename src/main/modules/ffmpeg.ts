@@ -248,7 +248,7 @@ export interface BatchGifOptions {
 }
 
 export interface BatchCompressOptions {
-  files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string }[]
+  files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string }[]
   onProgress?: ProgressCallback
 }
 

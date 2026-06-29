@@ -96,7 +96,7 @@ const electronAPI = {
     ipcRenderer.invoke('video:compress', opts),
 
   batchCompress: (opts: {
-    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string }[]
+    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string }[]
   }): Promise<{ success: number; failed: string[] }> =>
     ipcRenderer.invoke('video:batchCompress', opts),
 

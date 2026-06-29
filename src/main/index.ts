@@ -192,7 +192,7 @@ function registerCompressHandlers(): void {
   }>('video:compress', 'compress', 'compress', (opts, onProgress) => compressVideo({ ...opts, onProgress }))
 
   wrapOperation<{
-    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string }[]
+    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string }[]
   }>('video:batchCompress', 'compress', 'compress', (opts, onProgress) => batchCompress({ ...opts, onProgress }))
 }
 

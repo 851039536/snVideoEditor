@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { FileVideo, Folder, X, Zap, Monitor, Download, FolderOpen } from 'lucide-vue-next'
+import { FileVideo, Folder, X, Zap, Monitor, Download, FolderOpen, Info } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
-import { formatSize } from '@/utils/format'
+import { formatSize, getDirName, getFileName } from '@/utils/format'
+import { secondsToHMS } from '@/utils/time'
 import { useFileList } from '@/composables/useFileList'
 import type { FileEntry } from '@/types/file'
 
@@ -12,14 +13,44 @@ const progressStore = useProgressStore()
 
 const { files, addFiles, removeFile, selectOutputDir, setOutputDir } = useFileList()
 const errorMsg = ref('')
+let isUnmounted = false
+
+// Video detail modal
+const detailEntry = ref<FileEntry | null>(null)
+const detailLoading = ref(false)
+
+function openDetail(entry: FileEntry): void {
+  detailEntry.value = entry
+  if (!entry.meta) {
+    detailLoading.value = true
+    window.electronAPI.getVideoMeta(entry.path).then((meta) => {
+      if (!isUnmounted) {
+        entry.meta = meta
+        detailLoading.value = false
+      }
+    }).catch(() => {
+      if (!isUnmounted) {
+        detailLoading.value = false
+      }
+    })
+  }
+}
+
+function closeDetail(): void {
+  detailEntry.value = null
+  detailLoading.value = false
+}
 
 // Common paths for quick output selection
 const commonPaths = ref<{ desktop: string; downloads: string }>({ desktop: '', downloads: '' })
-const selectedOutputDir = ref('')
 const loadingPath = ref('')
 const sourceDir = computed(() => {
   if (files.value.length === 0) { return '' }
-  return files.value[0].path.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+  return getDirName(files.value[0].path)
+})
+const selectedOutputDir = computed(() => {
+  const path = files.value[0]?.outputPath
+  return path ? getDirName(path) : ''
 })
 
 async function fetchCommonPaths(): Promise<boolean> {
@@ -52,22 +83,17 @@ async function selectQuickDir(type: 'desktop' | 'downloads' | 'source'): Promise
     }
     return
   }
-  selectedOutputDir.value = dir
   setOutputDir(dir, '_compressed.mp4')
 }
-
-// Sync selectedOutputDir when first file's outputPath changes (e.g. custom dir picker)
-watch(() => files.value[0]?.outputPath, (path) => {
-  if (path) {
-    selectedOutputDir.value = getOutputDir(path)
-  }
-})
 
 // Pre-fetch common paths on mount for snappier first click
 onMounted(async () => {
   fetchCommonPaths()
   try {
-    availableEncoders.value = await window.electronAPI.getAvailableEncoders()
+    const encoders = await window.electronAPI.getAvailableEncoders()
+    if (!isUnmounted) {
+      availableEncoders.value = encoders
+    }
   } catch (_e) {
     // leave empty
   }
@@ -145,11 +171,9 @@ async function startCompress(): Promise<void> {
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
     progressStore.reset()
+  } finally {
+    window.electronAPI.removeProgressListener()
   }
-}
-
-function getOutputDir(path: string): string {
-  return path.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
 }
 
 const canStart = computed((): boolean => {
@@ -167,6 +191,7 @@ const hasQsvEncoders = computed((): boolean => {
 })
 
 onUnmounted(() => {
+  isUnmounted = true
   window.electronAPI?.removeProgressListener()
 })
 </script>
@@ -197,7 +222,7 @@ onUnmounted(() => {
                 <th class="text-left p-3 font-medium">文件名</th>
                 <th class="text-right p-3 font-medium">大小</th>
                 <th class="text-right p-3 font-medium">预估</th>
-                <th class="text-right p-3 font-medium w-10" />
+                <th class="text-right p-3 font-medium w-20" />
               </tr>
             </thead>
             <tbody>
@@ -221,12 +246,22 @@ onUnmounted(() => {
                   {{ entry.meta ? estimateOutputSize(entry) : '...' }}
                 </td>
                 <td class="p-3 text-right">
-                  <button
-                    @click="removeFile(idx)"
-                    class="p-1 rounded"
-                  >
-                    <X :size="14" class="text-danger" />
-                  </button>
+                  <div class="flex items-center justify-end gap-0.5">
+                    <button
+                      @click="openDetail(entry)"
+                      class="p-1 rounded hover:bg-bg-tertiary transition-colors"
+                      title="视频详情"
+                    >
+                      <Info :size="14" class="text-accent-blue" />
+                    </button>
+                    <button
+                      @click="removeFile(idx)"
+                      class="p-1 rounded hover:bg-bg-tertiary transition-colors"
+                      title="移除文件"
+                    >
+                      <X :size="14" class="text-danger" />
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -387,6 +422,78 @@ onUnmounted(() => {
         <ProgressPanel />
       </div>
     </div>
+
+    <!-- Video Detail Modal -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div
+          v-if="detailEntry"
+          class="detail-overlay"
+          @click.self="closeDetail"
+          @keydown.escape="closeDetail"
+        >
+          <div class="detail-modal glass-card" role="dialog" aria-label="视频详细信息">
+            <div class="detail-header">
+              <div class="flex items-center gap-2 min-w-0">
+                <FileVideo :size="18" class="text-accent-purple flex-shrink-0" />
+                <h3 class="text-base font-semibold text-text-primary truncate" :title="detailEntry.path">
+                  {{ getFileName(detailEntry.path) }}
+                </h3>
+              </div>
+              <button
+                @click="closeDetail"
+                class="p-1.5 rounded hover:bg-bg-tertiary transition-colors"
+                title="关闭"
+              >
+                <X :size="18" class="text-text-secondary" />
+              </button>
+            </div>
+
+            <!-- Loading -->
+            <div v-if="detailLoading" class="detail-loading">
+              <p class="text-text-secondary text-sm">正在获取视频信息...</p>
+            </div>
+
+            <!-- Metadata grid -->
+            <div v-else-if="detailEntry.meta" class="detail-grid">
+              <div class="detail-item">
+                <span class="detail-label">文件路径</span>
+                <span class="detail-value text-xs font-mono truncate" :title="detailEntry.path">
+                  {{ detailEntry.path }}
+                </span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">视频编码</span>
+                <span class="detail-value">{{ detailEntry.meta.codec || '未知' }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">分辨率</span>
+                <span class="detail-value">{{ detailEntry.meta.width }} × {{ detailEntry.meta.height }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">时长</span>
+                <span class="detail-value font-mono">{{ secondsToHMS(detailEntry.meta.duration) }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">文件大小</span>
+                <span class="detail-value font-mono">{{ formatSize(detailEntry.meta.size) }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-label">视频码率</span>
+                <span class="detail-value font-mono">
+                  {{ detailEntry.meta.bitrate ? (detailEntry.meta.bitrate / 1000).toFixed(0) + ' Kbps' : '未知' }}
+                </span>
+              </div>
+            </div>
+
+            <!-- No meta yet -->
+            <div v-else class="detail-loading">
+              <p class="text-text-muted text-sm">暂无视频信息</p>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -399,5 +506,92 @@ onUnmounted(() => {
 .slider::-webkit-slider-thumb {
   border: 2px solid hsl(var(--primary));
   box-shadow: 0 0 8px rgba(123, 92, 252, 0.4);
+}
+
+/* Video detail modal */
+.detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.detail-modal {
+  width: 420px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-bg-tertiary, hsl(var(--border)));
+}
+
+.detail-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 12px;
+  background: var(--color-bg-secondary, hsl(var(--secondary)));
+  border-radius: var(--radius-sm, 4px);
+}
+
+.detail-label {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--color-text-muted);
+}
+
+.detail-value {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--color-text-primary);
+}
+
+/* Modal transition */
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity var(--transition-normal, 0.2s) ease;
+}
+
+.modal-fade-enter-active .detail-modal,
+.modal-fade-leave-active .detail-modal {
+  transition: transform var(--transition-normal, 0.2s) ease;
+}
+
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+
+.modal-fade-enter-from .detail-modal {
+  transform: scale(0.95) translateY(4px);
+}
+
+.modal-fade-leave-to .detail-modal {
+  transform: scale(0.95) translateY(4px);
 }
 </style>
