@@ -30,9 +30,13 @@ src/
     ├── views/                # 页面视图（每个功能一个子目录）
     │   ├── SplitMerge/       # 视频分割与合并（SplitMergeView + ClipList）
     │   ├── Compress/         # 视频压缩（CompressView）
-    │   ├── Encrypt/          # 加密解密（EncryptView）
+    │   ├── Encrypt/          # 加密解密（EncryptView + types/）
     │   ├── Gif/              # GIF 转换（GifConvertView）
+    │   ├── Player/           # 视频播放器（PlayerView + types/）
+    │   ├── Download/         # 视频下载（DownloadView + DownloadQueue）
     │   └── Home/             # 首页导航（HomeView）
+    ├── config/               # 全局配置
+    │   └── features.ts       # 功能元数据单一数据源（HomeView/SideNav 均从此派生）
     ├── components/           # 跨功能通用组件
     │   ├── SideNav.vue       # 侧边导航（含主题切换）
     │   ├── FileDropZone.vue  # 文件拖放区
@@ -53,7 +57,9 @@ src/
     ├── router/
     │   └── index.ts          # Hash 路由（createWebHashHistory）
     └── assets/
-        └── styles/           # 全局样式 + CSS 变量主题
+        └── styles/           # 全局样式 + CSS 变量主题 + 共享 partials
+            ├── global.scss
+            └── _timeline.scss
 ```
 
 ## IPC 通信架构
@@ -119,10 +125,82 @@ wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
 ## 文件组织规则
 - **views 子目录规则**：完整功能模块放在 `views/<功能名>/` 子目录下，主页面命名为 `<功能名>View.vue`，子组件放同目录
   - 示例：SplitMerge 功能 → `views/SplitMerge/SplitMergeView.vue` + `views/SplitMerge/ClipList.vue`
+  - 每个视图应有 `types/index.ts` 存放模块私有类型（禁止接口散落在 `.vue` 中）
+- **config 目录**：功能元数据单一数据源（见 `config/features.ts`），`HomeView`/`SideNav` 均从此导入，禁止在各文件中重复定义功能列表
 - **components 目录**：仅放跨模块共享的通用组件
 - **utils 目录**：共享工具函数，视图组件禁止内联重复定义 `formatSize` / `getFileName` / `secondsToHMS` / `hmsToSeconds` / `clamp`，必须从 utils 导入
 - **types 目录**：共享类型/接口定义。`ClipItem` 和 `VideoMeta` 统一从 `@/types/file` 导入，禁止在各视图内重复声明
-- 新增功能页面时同步更新 `router/index.ts`、HomeView 入口卡片
+- 新增功能页面时同步更新 `router/index.ts`、`config/features.ts`（HomeView 和 SideNav 自动同步）
+
+## 架构原则（6 大原则）
+
+基于 universal-arch-skill 审查规范，新增功能必须遵守：
+
+| # | 原则 | 核心要求 |
+|---|------|----------|
+| 1 | 功能模块化 | 每个视图独立目录，含主视图 + `types/index.ts`（禁止接口散落在 .vue 中） |
+| 2 | 注册完整性 | 新增视图同步更新 `config/features.ts` + `router/index.ts`（共 2 处），不得遗漏 |
+| 3 | 类型安全单一数据源 | 功能列表在 `config/features.ts` 统一定义，`HomeView`/`SideNav` 均从此导入 |
+| 4 | 统一入口 | 跨功能操作通过 IPC（`wrapOperation`）或 `stores/` (Pinia)，禁止直接 `fetch()`/`new CustomEvent()`/`document.execCommand()` |
+| 5 | 设计 Token | 禁止硬编码颜色/间距/字体，全部使用 CSS 变量或 Tailwind utility class |
+| 6 | 样式分离 | `.vue` 文件 `<style>` 优先使用 `@use` 导入外部 SCSS，禁止大量内联样式（>10 行） |
+
+### 新增功能注册清单
+
+```
+1. 创建 views/<FeatureName>/ 目录 + 主视图 + types/index.ts
+2. 在 config/features.ts 添加 FEATURE_CONFIG 条目
+3. 在 router/index.ts 添加路由记录
+```
+
+> `HomeView` 和 `SideNav` 自动从 `config/features.ts` 派生，无需手动同步。
+
+### preload 类型规则
+
+- `ProgressInfo` / `VideoMeta` / `FileInfo` / `OperationType` 均在 `preload/index.ts` 中统一定义并导出
+- `preload/index.d.ts` 通过 `import type` 从 `./index` 导入上述类型，禁止重复声明
+
+## 样式分离规则（强制）
+
+### 禁止
+- `.vue` 文件中 `<style>` 内联超过 10 行 SCSS 代码
+- 硬编码 `border-radius: Npx`（应使用 `var(--radius-*)`）
+- 硬编码 `font-family`（应使用 `var(--font-sans)` / `var(--font-mono)`）
+- 硬编码 hex 颜色（应使用 `var(--color-*)` 或 `hsl(var(--*))`）
+- 非标准过渡时长（统一使用 `var(--transition-*)`）
+
+### 共享样式
+- 提取跨视图重复样式到 `assets/styles/_<name>.scss`（下划线前缀 = SCSS partial）
+- 视图通过 `<style scoped>` 内 `@use` 导入，用 CSS 变量传递差异参数
+- **⚠️ `@use` 必须放在 `<style>` 块的第一行**（SCSS 规范要求），CSS 变量覆盖放在 `@use` 之后
+- 示例：`_timeline.scss` 被 `SplitMergeView` 和 `GifConvertView` 共享
+  ```scss
+  <style scoped>
+  @use "../../assets/styles/timeline";  // ← 必须第一行
+
+  .timeline-track {
+    --timeline-height: 48px;  // CSS 变量覆盖放在 @use 之后
+  }
+  </style>
+  ```
+
+## 设计 Token 速查表
+
+| Token | 值 | 用途 |
+|-------|-----|------|
+| `--font-sans` | `'PingFang SC', 'Microsoft YaHei', sans-serif` | 系统字体栈 |
+| `--font-mono` | `'JetBrains Mono', 'Fira Code', 'Consolas', monospace` | 等宽字体栈 |
+| `--font-size-base` | `14px` | 基准字号 |
+| `--transition-fast` | `0.12s` | 所有 UI 交互过渡（按钮/hover/focus） |
+| `--transition-normal` | `0.2s` | 面板展开/收起 |
+| `--transition-slow` | `0.3s` | 页面过渡/导航切换 |
+| `--radius-sm` | `4px` | 标签/徽章/微控件 |
+| `--radius-base` | `6px` | 输入框/小控件 |
+| `--radius-md` | `8px` | 卡片/section |
+| `--radius-lg` | `12px` | 弹窗/主面板 |
+| `--z-panel` | `10` | 浮动面板 |
+| `--z-overlay` | `20` | 遮罩层 |
+| `--z-modal` | `50` | 模态弹窗 |
 
 ## 设计风格
 - 深色科技风（Dark Tech），支持一键切换浅色主题
