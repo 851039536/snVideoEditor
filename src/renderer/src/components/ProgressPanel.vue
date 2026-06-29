@@ -45,7 +45,7 @@ const statusText = computed((): string => {
           <span class="text-sm font-medium text-text-primary">{{ statusText }}</span>
         </div>
         <button
-          @click="store.reset()"
+          @click="store.cancel()"
           class="p-1 rounded-md hover:bg-bg-tertiary transition-colors"
         >
           <X :size="14" class="text-text-secondary" />

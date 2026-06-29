@@ -162,6 +162,9 @@ async function startCompress(): Promise<void> {
       audioBitrate: audioBitrate.value
     }))
     const result = await window.electronAPI.batchCompress({ files: batchFiles })
+    if (!progressStore.isProcessing) {
+      return
+    }
     if (result.failed.length === 0) {
       progressStore.finish()
     } else {

@@ -100,6 +100,7 @@ export const useProgressStore = defineStore('progress', () => {
   }
 
   function update(info: ProgressInfo): void {
+    if (!isProcessing.value) { return }
     progress.value = info
   }
 

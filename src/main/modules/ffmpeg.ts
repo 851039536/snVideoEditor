@@ -639,7 +639,7 @@ export async function batchCompress(opts: BatchCompressOptions): Promise<{ succe
     if (isCancelled) { break }
     const file = opts.files[i]
     try {
-      await compressVideo({
+      const result = await compressVideo({
         ...file,
         onProgress: (data) => {
           if (opts.onProgress) {
@@ -651,6 +651,9 @@ export async function batchCompress(opts: BatchCompressOptions): Promise<{ succe
           }
         }
       })
+      if (!result) {
+        break
+      }
       success++
     } catch (e) {
       if (isCancelled) { break }
