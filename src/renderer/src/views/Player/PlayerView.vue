@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { Play, Lock, LockKeyholeOpen, FileVideo, FolderOpen, Trash2 } from 'lucide-vue-next'
+import { Play, Lock, LockKeyholeOpen, FileVideo, FolderOpen, Trash2, Camera, Loader, Image } from 'lucide-vue-next'
 // @ts-ignore - Plyr ESM default export
 import Plyr from 'plyr'
 import 'plyr/dist/plyr.css'
@@ -51,6 +51,133 @@ const tempCount = computed((): number => {
 
 // Error display
 const errorMsg = ref('')
+
+// ---- Screenshot ---- 
+const showScreenshotModal = ref(false)
+const screenshotTimeInput = ref('')
+const batchInterval = ref(10)
+const capturing = ref(false)
+const captureProgress = ref({ current: 0, total: 0 })
+const captureSuccess = ref(0)
+const screenshotMode = ref<'current' | 'custom' | 'batch'>('current')
+
+function getScreenshotInputPath(): string {
+  const cf = currentFile.value
+  if (!cf) { return '' }
+  if (cf.isEncrypted && cf.tempPath) {
+    return cf.tempPath
+  }
+  if (!cf.isEncrypted) {
+    return cf.path
+  }
+  return ''
+}
+
+function getScreenshotBasePath(): string {
+  const name = currentFileName.value.replace(/\.[^.]+$/, '')
+  const dir = currentFile.value?.path.replace(/[/\\][^/\\]+$/, '') || ''
+  return `${dir}/${name}`
+}
+
+function openScreenshotModal(): void {
+  if (!currentFile.value) { return }
+  const encrypted = currentFile.value.isEncrypted
+  if (encrypted && !currentFile.value.tempPath) {
+    errorMsg.value = '请先播放加密视频完成解密后再截图'
+    return
+  }
+  screenshotMode.value = 'current'
+  screenshotTimeInput.value = ''
+  batchInterval.value = 10
+  captureProgress.value = { current: 0, total: 0 }
+  captureSuccess.value = 0
+  showScreenshotModal.value = true
+}
+
+async function doCapture(timeSec: number, outputPath: string): Promise<boolean> {
+  const input = getScreenshotInputPath()
+  if (!input) { return false }
+  return window.electronAPI.captureScreenshot({ input, output: outputPath, time: timeSec })
+}
+
+async function captureCurrentFrame(): Promise<void> {
+  if (!player || capturing.value) { return }
+  capturing.value = true
+  try {
+    const t = player.currentTime || 0
+    const output = `${getScreenshotBasePath()}_screenshot_${new Date().toTimeString().slice(0, 8).replace(/:/g, '-')}.png`
+    await doCapture(t, output)
+  } catch (e) {
+    errorMsg.value = `截图失败: ${e}`
+  } finally {
+    capturing.value = false
+    showScreenshotModal.value = false
+  }
+}
+
+async function captureByTime(): Promise<void> {
+  if (!screenshotTimeInput.value || capturing.value) { return }
+  const timeSec = hmsToSeconds(screenshotTimeInput.value)
+  if (timeSec < 0) { return }
+  capturing.value = true
+  try {
+    const output = `${getScreenshotBasePath()}_screenshot_${new Date().toTimeString().slice(0, 8).replace(/:/g, '-')}.png`
+    await doCapture(timeSec, output)
+  } catch (e) {
+    errorMsg.value = `截图失败: ${e}`
+  } finally {
+    capturing.value = false
+    showScreenshotModal.value = false
+  }
+}
+
+async function batchCapture(): Promise<void> {
+  const dur = currentFile.value?.meta?.duration
+  if (!dur || !batchInterval.value || batchInterval.value < 1 || capturing.value) { return }
+
+  const total = Math.floor(dur / batchInterval.value)
+  if (total === 0) { return }
+
+  capturing.value = true
+  captureProgress.value = { current: 0, total }
+  captureSuccess.value = 0
+
+  for (let i = 0; i < total; i++) {
+    captureProgress.value.current = i + 1
+    const timeSec = i * batchInterval.value
+    const output = `${getScreenshotBasePath()}_frame_${String(i + 1).padStart(Math.max(3, String(total).length), '0')}.png`
+    try {
+      const ok = await doCapture(timeSec, output)
+      if (ok) { captureSuccess.value++ }
+    } catch {
+      // continue to next frame
+    }
+  }
+
+  capturing.value = false
+  showScreenshotModal.value = false
+}
+
+function closeScreenshotModal(): void {
+  if (!capturing.value) {
+    showScreenshotModal.value = false
+  }
+}
+
+function hmsToSeconds(input: string): number {
+  const trimmed = input.trim()
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    return parseFloat(trimmed)
+  }
+  const parts = trimmed.split(':')
+  if (parts.length === 3) {
+    return parseInt(parts[0], 10) * 3600 + parseInt(parts[1], 10) * 60 + parseFloat(parts[2])
+  }
+  if (parts.length === 2) {
+    return parseInt(parts[0], 10) * 60 + parseFloat(parts[1])
+  }
+  return -1
+}
 
 // Persisted settings store
 const settingsStore = useSettingsStore()
@@ -503,6 +630,17 @@ onUnmounted(async () => {
             <Lock v-else :size="13" />
             <span>{{ autoDecrypt ? '自动解密' : '手动解密' }}</span>
           </button>
+
+          <!-- Screenshot -->
+          <button
+            v-if="currentFile"
+            @click="openScreenshotModal"
+            class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all border border-bg-tertiary text-text-secondary hover:text-accent-purple hover:border-accent-purple/20"
+            title="视频截图"
+          >
+            <Camera :size="13" />
+            <span class="hidden sm:inline">截图</span>
+          </button>
         </div>
       </div>
     </header>
@@ -629,6 +767,132 @@ onUnmounted(async () => {
               解密并播放
             </button>
           </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Screenshot Modal -->
+    <Teleport to="body">
+      <div
+        v-if="showScreenshotModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        @click.self="closeScreenshotModal"
+      >
+        <div class="glass-card w-full max-w-md mx-4" @click.stop>
+          <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+            <Camera :size="18" class="text-accent-purple" />
+            视频截图
+            <span class="text-xs text-text-muted ml-auto">{{ currentFileName }}</span>
+          </h3>
+
+          <!-- Mode Tabs -->
+          <div class="flex border-b border-bg-tertiary mb-4">
+            <button
+              v-for="mode in (['current', 'custom', 'batch'] as const)"
+              :key="mode"
+              @click="screenshotMode = mode"
+              class="flex-1 pb-2 text-xs font-medium border-b-2 transition-colors"
+              :class="screenshotMode === mode
+                ? 'border-accent-purple text-accent-purple'
+                : 'border-transparent text-text-muted hover:text-text-secondary'"
+            >
+              {{ mode === 'current' ? '当前画面' : mode === 'custom' ? '指定时间' : '批量截图' }}
+            </button>
+          </div>
+
+          <!-- Current Frame -->
+          <div v-if="screenshotMode === 'current'" class="space-y-3">
+            <div class="flex items-center gap-3 p-3 rounded-lg bg-bg-tertiary/40">
+              <Image :size="32" class="text-text-muted" />
+              <div>
+                <p class="text-sm text-text-primary">截取当前播放画面</p>
+                <p class="text-xs text-text-muted">
+                  时间点：{{ secondsToHMS(player?.currentTime || 0) }}
+                </p>
+              </div>
+            </div>
+            <button
+              @click="captureCurrentFrame"
+              :disabled="capturing"
+              class="w-full px-4 py-2.5 rounded-lg bg-gradient-to-r from-accent-purple to-pink-500 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <Loader v-if="capturing" :size="14" class="animate-spin" />
+              <Camera v-else :size="14" />
+              {{ capturing ? '截图中...' : '截取当前画面' }}
+            </button>
+          </div>
+
+          <!-- Custom Time -->
+          <div v-if="screenshotMode === 'custom'" class="space-y-3">
+            <div>
+              <label class="text-xs text-text-secondary mb-1 block">截图时间点</label>
+              <input
+                v-model="screenshotTimeInput"
+                type="text"
+                placeholder="秒数，如 30 或 1:30"
+                class="input-base w-full"
+                :disabled="capturing"
+                @keyup.enter="captureByTime"
+              />
+              <p class="text-xs text-text-muted mt-1">支持格式：秒数（30）、分:秒（1:30）、时:分:秒（0:01:30）</p>
+            </div>
+            <button
+              @click="captureByTime"
+              :disabled="!screenshotTimeInput || capturing"
+              class="w-full px-4 py-2.5 rounded-lg bg-accent-purple text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <Loader v-if="capturing" :size="14" class="animate-spin" />
+              截图
+            </button>
+          </div>
+
+          <!-- Batch -->
+          <div v-if="screenshotMode === 'batch'" class="space-y-3">
+            <div v-if="!capturing">
+              <label class="text-xs text-text-secondary mb-1 block">截图间隔（秒）</label>
+              <input
+                v-model.number="batchInterval"
+                type="number"
+                min="1"
+                step="1"
+                class="input-base w-full"
+              />
+              <p class="text-xs text-text-muted mt-1">
+                预计 {{ Math.floor((currentFile?.meta?.duration || 0) / (batchInterval || 1)) }} 帧，
+                每 {{ batchInterval }} 秒一帧
+              </p>
+            </div>
+
+            <!-- Progress bar (batch only) -->
+            <div v-if="capturing" class="space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-text-secondary">批量截图进度</span>
+                <span class="text-text-primary font-mono">
+                  {{ captureProgress.current }} / {{ captureProgress.total }}
+                </span>
+              </div>
+              <div class="w-full h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
+                <div
+                  class="h-full rounded-full bg-gradient-to-r from-accent-purple to-pink-500 transition-all duration-300"
+                  :style="{ width: (captureProgress.total > 0 ? (captureProgress.current / captureProgress.total) * 100 : 0) + '%' }"
+                />
+              </div>
+            </div>
+
+            <button
+              @click="batchCapture"
+              :disabled="capturing || !batchInterval || batchInterval < 1"
+              class="w-full px-4 py-2.5 rounded-lg bg-accent-purple text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <Loader v-if="capturing" :size="14" class="animate-spin" />
+              {{ capturing ? '批量截图中...' : '开始批量截图' }}
+            </button>
+          </div>
+
+          <!-- Output hint -->
+          <p class="text-xs text-text-muted mt-4 pt-3 border-t border-bg-tertiary">
+            保存位置：视频文件同目录
+          </p>
         </div>
       </div>
     </Teleport>

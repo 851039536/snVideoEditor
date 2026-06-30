@@ -3,7 +3,7 @@ import { join } from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, convertToGif, batchConvertToGif, cancelFfmpegOperation, getAvailableEncoders } from './modules/ffmpeg'
+import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, convertToGif, batchConvertToGif, captureScreenshot, cancelFfmpegOperation, getAvailableEncoders } from './modules/ffmpeg'
 import { downloadM3u8, fetchM3u8Variants } from './modules/download'
 import { fetchPageM3u8ViaBrowser } from './modules/page-fetcher'
 import { DownloadQueueManager } from './modules/download-queue'
@@ -250,6 +250,11 @@ function registerPlayerHandlers(): void {
   ipcMain.handle('video:decryptForPlayback', async (_event, input: string, password: string, tempDir: string) => {
     return decryptForPlayback(input, password, tempDir)
   })
+
+  wrapOperation<{ input: string; output: string; time: number }>(
+    'video:screenshot', 'screenshot', 'screenshot',
+    (opts, onProgress) => captureScreenshot({ ...opts, onProgress })
+  )
 }
 
 // Download handlers (queue-based)

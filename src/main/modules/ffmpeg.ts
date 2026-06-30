@@ -953,3 +953,69 @@ export async function batchConvertToGif(opts: BatchGifOptions): Promise<{ succes
 
   return { success, failed }
 }
+
+export interface ScreenshotOptions {
+  input: string
+  output: string
+  time: number
+  onProgress?: ProgressCallback
+}
+
+/**
+ * Capture a single screenshot frame from a video at a specific time.
+ * Uses ffmpeg -ss <time> -i <input> -vframes 1 -q:v 2 <output>
+ */
+export function captureScreenshot(opts: ScreenshotOptions): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    if (!fs.existsSync(opts.input)) {
+      reject(new Error(`输入文件不存在: ${opts.input}`))
+      return
+    }
+
+    isCancelled = false
+
+    const args = [
+      '-ss', String(opts.time),
+      '-i', opts.input,
+      '-vframes', '1',
+      '-q:v', '2',
+      '-y',
+      opts.output
+    ]
+
+    const proc = spawn(getFfmpegPath(), args)
+    currentProc = proc
+    const stderrLines: string[] = []
+
+    proc.stderr.on('data', (data: Buffer) => {
+      stderrLines.push(data.toString())
+    })
+
+    proc.on('close', (code: number | null) => {
+      currentProc = null
+      if (isCancelled) {
+        resolve(false)
+        return
+      }
+      if (code === 0) {
+        if (opts.onProgress) {
+          opts.onProgress({
+            percent: 100,
+            currentFile: 1,
+            totalFiles: 1,
+            speed: '完成',
+            eta: '0:00'
+          })
+        }
+        resolve(true)
+      } else {
+        reject(new Error(`FFmpeg 截图失败 (code: ${code}): ${stderrLines.join('').slice(-500)}`))
+      }
+    })
+
+    proc.on('error', (err: Error) => {
+      currentProc = null
+      reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
+    })
+  })
+}

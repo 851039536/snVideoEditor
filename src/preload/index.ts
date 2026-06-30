@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 export interface ProgressInfo {
-  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download'
+  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot'
   percent: number
   currentFile: number
   totalFiles: number
@@ -159,6 +159,10 @@ const electronAPI = {
 
   decryptForPlayback: (input: string, password: string, tempDir: string): Promise<string> =>
     ipcRenderer.invoke('video:decryptForPlayback', input, password, tempDir),
+
+  // Screenshot
+  captureScreenshot: (opts: { input: string; output: string; time: number }): Promise<boolean> =>
+    ipcRenderer.invoke('video:screenshot', opts),
 
   // Progress
   onProgress: (callback: (info: ProgressInfo) => void): void => {
