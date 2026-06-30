@@ -19,6 +19,9 @@ const { files, addFiles, removeFile, selectOutputDir, setOutputDir } = useFileLi
 
 const twoPassTip = useInfoTooltip()
 const codecTip = useInfoTooltip()
+const bitrateTip = useInfoTooltip()
+const audioBitrateTip = useInfoTooltip()
+const presetTip = useInfoTooltip()
 
 // Compression params — initialized from persisted preset
 const preset = ref(settingsStore.compressPreset.preset)
@@ -341,7 +344,35 @@ onUnmounted(() => {
 
             <!-- Bitrate -->
             <div>
-              <label class="text-sm text-text-secondary mb-2 block">视频码率限制</label>
+              <div class="relative flex items-center gap-1 mb-2">
+                <label class="text-sm text-text-secondary">视频码率限制</label>
+                <button
+                  type="button"
+                  class="p-0.5 rounded hover:bg-bg-tertiary transition-colors"
+                  @click.stop="bitrateTip.toggle()"
+                  title="视频码率是什么？"
+                >
+                  <HelpCircle :size="14" class="text-text-muted hover:text-text-secondary transition-colors" />
+                </button>
+                <transition name="tooltip-fade">
+                  <div
+                    v-if="bitrateTip.isOpen.value"
+                    :ref="bitrateTip.elRef"
+                    class="absolute left-0 bottom-full mb-2 w-72 p-3 rounded-lg bg-bg-secondary border border-bg-tertiary shadow-lg z-50 text-xs leading-relaxed text-text-secondary"
+                  >
+                    <p class="mb-2"><strong class="text-text-primary">视频码率</strong> 表示每秒传输的视频数据量：</p>
+                    <ul class="list-disc list-inside space-y-1">
+                      <li>码率越高 → 画质越好，文件越大</li>
+                      <li>码率越低 → 文件越小，画质越差</li>
+                    </ul>
+                    <p class="mt-2 text-text-muted">
+                      <span class="text-accent-blue font-medium">CRF 模式</span>（选"自动"）：以画质为目标，编码器自行决定码率。<br/>
+                      <span class="text-accent-purple font-medium">固定码率</span>：精确控制输出文件大小，适合有体积要求的场景。
+                    </p>
+                    <p class="mt-1 text-text-muted">选择固定码率后可开启 <span class="text-accent-blue">2-Pass</span> 进一步提升画质。</p>
+                  </div>
+                </transition>
+              </div>
               <select v-model="bitrate" class="select-input w-full">
                 <option value="">自动 (CRF 模式)</option>
                 <option value="4000k">4 Mbps</option>
@@ -421,7 +452,32 @@ onUnmounted(() => {
 
             <!-- Audio Bitrate -->
             <div>
-              <label class="text-sm text-text-secondary mb-2 block">音频码率</label>
+              <div class="relative flex items-center gap-1 mb-2">
+                <label class="text-sm text-text-secondary">音频码率</label>
+                <button
+                  type="button"
+                  class="p-0.5 rounded hover:bg-bg-tertiary transition-colors"
+                  @click.stop="audioBitrateTip.toggle()"
+                  title="音频码率是什么？"
+                >
+                  <HelpCircle :size="14" class="text-text-muted hover:text-text-secondary transition-colors" />
+                </button>
+                <transition name="tooltip-fade">
+                  <div
+                    v-if="audioBitrateTip.isOpen.value"
+                    :ref="audioBitrateTip.elRef"
+                    class="absolute left-0 bottom-full mb-2 w-72 p-3 rounded-lg bg-bg-secondary border border-bg-tertiary shadow-lg z-50 text-xs leading-relaxed text-text-secondary"
+                  >
+                    <p class="mb-2"><strong class="text-text-primary">音频码率</strong> 决定音频的清晰度：</p>
+                    <ul class="list-disc list-inside space-y-1">
+                      <li><span class="text-accent-blue font-medium">32~64 Kbps</span>：语音/ podcast 足够，极小体积</li>
+                      <li><span class="text-accent-purple font-medium">96~128 Kbps</span>：常规视频够用，音质与体积平衡</li>
+                      <li><span class="text-accent-yellow font-medium">192 Kbps</span>：接近无损，适合音乐/高音质需求</li>
+                    </ul>
+                    <p class="mt-2 text-text-muted">音频通常只占视频总大小的 5%~15%，降低音频码率对总文件大小影响有限。</p>
+                  </div>
+                </transition>
+              </div>
               <select v-model="audioBitrate" class="select-input w-full">
                 <option value="32k">32 Kbps</option>
                 <option value="64k">64 Kbps</option>
@@ -433,7 +489,35 @@ onUnmounted(() => {
 
             <!-- Encoding Preset (CPU only) -->
             <div v-if="!isGpuEncoder">
-              <label class="text-sm text-text-secondary mb-2 block">编码速度预设</label>
+              <div class="relative flex items-center gap-1 mb-2">
+                <label class="text-sm text-text-secondary">编码速度预设</label>
+                <button
+                  type="button"
+                  class="p-0.5 rounded hover:bg-bg-tertiary transition-colors"
+                  @click.stop="presetTip.toggle()"
+                  title="编码预设是什么意思？"
+                >
+                  <HelpCircle :size="14" class="text-text-muted hover:text-text-secondary transition-colors" />
+                </button>
+                <transition name="tooltip-fade">
+                  <div
+                    v-if="presetTip.isOpen.value"
+                    :ref="presetTip.elRef"
+                    class="absolute left-0 bottom-full mb-2 w-72 p-3 rounded-lg bg-bg-secondary border border-bg-tertiary shadow-lg z-50 text-xs leading-relaxed text-text-secondary"
+                  >
+                    <p class="mb-2"><strong class="text-text-primary">编码速度预设</strong> 是速度与画质的权衡：</p>
+                    <ul class="list-disc list-inside space-y-1">
+                      <li><span class="text-accent-blue font-medium">ultrafast → fast</span>：编码快，但同码率下画质略差，文件更大</li>
+                      <li><span class="text-accent-purple font-medium">medium → veryslow</span>：编码慢，但用更复杂的算法压缩，同码率下画质更好，文件更小</li>
+                    </ul>
+                    <p class="mt-2 text-text-muted">
+                      越慢的预设意味着编码器会花更多时间分析视频，用更智能的方式分配码率。<br/>
+                      推荐日常使用 <span class="text-accent-blue">medium</span>，追求画质用 <span class="text-accent-purple">slow</span> 或 <span class="text-accent-purple">veryslow</span>。
+                    </p>
+                    <p class="mt-1 text-text-muted">仅 CPU 编码可用，GPU 加速编码不受此影响。</p>
+                  </div>
+                </transition>
+              </div>
               <select v-model="preset" class="select-input w-full">
                 <option value="ultrafast">ultrafast (极速)</option>
                 <option value="superfast">superfast</option>
