@@ -71,17 +71,63 @@ const screenshotMode = ref<'current' | 'custom' | 'batch'>('current')
 // ---- Markers (screenshot positions on progress bar) ----
 const screenshotMarkers = ref<ScreenshotMarker[]>([])
 
-function addMarker(timeSec: number): void {
+function addMarker(timeSec: number, labelPrefix = '截图'): void {
   const rounded = Math.round(timeSec)
   if (screenshotMarkers.value.some((m) => Math.abs(m.time - rounded) < 1)) { return }
-  const label = `截图 ${screenshotMarkers.value.length + 1}`
+  const label = `${labelPrefix} ${screenshotMarkers.value.length + 1}`
   screenshotMarkers.value.push({ time: rounded, label })
+  renderMarkers()
+}
+
+/** Manually inject marker DOM elements into Plyr's progress bar */
+function renderMarkers(): void {
+  if (!player) { return }
+  const dur = currentFile.value?.meta?.duration
+  if (!dur || dur <= 0) { return }
+
+  const progressEl = player.elements?.progress as HTMLElement | null
+  if (!progressEl) { return }
+
+  // Remove existing markers
+  progressEl.querySelectorAll('.plyr__progress__marker').forEach((el) => el.remove())
+
+  // Create a marker element for each entry
+  for (let i = 0; i < screenshotMarkers.value.length; i++) {
+    const m = screenshotMarkers.value[i]
+    const pct = (m.time / dur) * 100
+    if (pct < 0 || pct > 100) { continue }
+    const span = document.createElement('span')
+    span.className = 'plyr__progress__marker'
+    span.setAttribute('data-time', String(m.time))
+    span.setAttribute('data-label', m.label)
+    span.style.left = pct + '%'
+    span.title = m.label + ' (' + secondsToHMS(m.time) + ') — 右键删除'
+    // Right-click to remove individual marker
+    span.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      removeMarkerByIndex(i)
+    })
+    progressEl.appendChild(span)
+  }
 }
 
 function addCurrentMarker(): void {
   if (!player) { return }
   const t = player.currentTime || 0
-  addMarker(t)
+  addMarker(t, '标记')
+  saveToStore()
+}
+
+function removeMarkerByIndex(index: number): void {
+  screenshotMarkers.value.splice(index, 1)
+  renderMarkers()
+  saveToStore()
+}
+
+function clearAllMarkers(): void {
+  screenshotMarkers.value = []
+  renderMarkers()
   saveToStore()
 }
 
@@ -579,11 +625,13 @@ function initAndPlay(): void {
     fullscreen: { enabled: true, fallback: true },
     hideControls: autoHideControls.value,
     resetOnEnd: false,
-    markers: { enabled: screenshotMarkers.value.length > 0, points: screenshotMarkers.value },
     previewThumbnails: thumbnailData.value
       ? { enabled: true, src: thumbnailData.value.vttUrl }
       : { enabled: false, src: '' }
   })
+
+  // Manually render markers (Plyr only reads them at init — we handle updates ourselves)
+  renderMarkers()
 
   player.on('ratechange', () => {
     if (player) {
@@ -893,6 +941,17 @@ onUnmounted(async () => {
             >
               <Bookmark :size="13" />
               <span class="hidden sm:inline">标记</span>
+            </button>
+
+            <!-- Clear All Markers -->
+            <button
+              v-if="screenshotMarkers.length > 0"
+              @click="clearAllMarkers"
+              class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors text-text-muted hover:text-danger hover:bg-danger/10"
+              title="清除全部标记（右键单个标记可单独删除）"
+            >
+              <X :size="13" />
+              <span class="hidden sm:inline">清除 ({{ screenshotMarkers.length }})</span>
             </button>
 
             <span class="w-px h-4 bg-bg-tertiary" />
