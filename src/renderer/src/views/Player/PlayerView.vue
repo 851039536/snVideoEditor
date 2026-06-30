@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { Play, Lock, LockKeyholeOpen, FileVideo, FolderOpen, Trash2, Camera, Loader, Image, X, Eye, EyeOff, Gauge } from 'lucide-vue-next'
+import { Play, Lock, LockKeyholeOpen, FileVideo, FolderOpen, Trash2, Camera, Loader, Image, X, Eye, EyeOff, Gauge, Bookmark } from 'lucide-vue-next'
 // @ts-ignore - Plyr ESM default export
 import Plyr from 'plyr'
 import 'plyr/dist/plyr.css'
@@ -76,6 +76,13 @@ function addMarker(timeSec: number): void {
   if (screenshotMarkers.value.some((m) => Math.abs(m.time - rounded) < 1)) { return }
   const label = `截图 ${screenshotMarkers.value.length + 1}`
   screenshotMarkers.value.push({ time: rounded, label })
+}
+
+function addCurrentMarker(): void {
+  if (!player) { return }
+  const t = player.currentTime || 0
+  addMarker(t)
+  saveToStore()
 }
 
 // ---- Toolbar controls ----
@@ -874,6 +881,18 @@ onUnmounted(async () => {
               <Eye v-if="!showControlsOverlay" :size="13" />
               <EyeOff v-else :size="13" />
               <span class="hidden sm:inline">控件栏</span>
+            </button>
+
+            <span class="w-px h-4 bg-bg-tertiary" />
+
+            <!-- Add Marker -->
+            <button
+              @click="addCurrentMarker"
+              class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors text-text-muted hover:text-accent-purple hover:bg-accent-purple/10"
+              title="在当前播放位置添加标记"
+            >
+              <Bookmark :size="13" />
+              <span class="hidden sm:inline">标记</span>
             </button>
 
             <span class="w-px h-4 bg-bg-tertiary" />
