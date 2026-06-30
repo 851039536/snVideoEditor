@@ -8,6 +8,7 @@ import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
 import { formatSize, getDirName } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
+import { useInfoTooltip } from '@/composables/useInfoTooltip'
 import type { FileEntry } from '@/types/file'
 import type { CompressResultItem } from './types'
 
@@ -15,6 +16,9 @@ const progressStore = useProgressStore()
 const settingsStore = useSettingsStore()
 
 const { files, addFiles, removeFile, selectOutputDir, setOutputDir } = useFileList()
+
+const twoPassTip = useInfoTooltip()
+const codecTip = useInfoTooltip()
 
 // Compression params — initialized from persisted preset
 const preset = ref(settingsStore.compressPreset.preset)
@@ -228,27 +232,6 @@ const canStart = computed((): boolean => {
 // Compression result comparison
 const compressResult = ref<CompressResultItem[]>([])
 
-const showTwoPassInfo = ref(false)
-const twoPassTooltipRef = ref<HTMLElement | null>(null)
-
-function onDocumentClick(e: MouseEvent): void {
-  if (showTwoPassInfo.value && twoPassTooltipRef.value && !twoPassTooltipRef.value.contains(e.target as Node)) {
-    showTwoPassInfo.value = false
-  }
-}
-
-function toggleTwoPassInfo(): void {
-  showTwoPassInfo.value = !showTwoPassInfo.value
-  if (showTwoPassInfo.value) {
-    // Register click-outside on next tick so this click doesn't trigger it
-    import('vue').then(({ nextTick }) => {
-      nextTick(() => { document.addEventListener('click', onDocumentClick) })
-    })
-  } else {
-    document.removeEventListener('click', onDocumentClick)
-  }
-}
-
 const availableEncoders = ref<string[]>([])
 
 const hasNvidiaEncoders = computed((): boolean => {
@@ -261,7 +244,6 @@ const hasQsvEncoders = computed((): boolean => {
 
 onUnmounted(() => {
   isUnmounted = true
-  document.removeEventListener('click', onDocumentClick)
   window.electronAPI?.removeProgressListener()
 })
 </script>
@@ -392,7 +374,34 @@ onUnmounted(() => {
 
             <!-- Codec -->
             <div>
-              <label class="text-sm text-text-secondary mb-2 block">编码格式</label>
+              <div class="relative flex items-center gap-1 mb-2">
+                <label class="text-sm text-text-secondary">编码格式</label>
+                <button
+                  type="button"
+                  class="p-0.5 rounded hover:bg-bg-tertiary transition-colors"
+                  @click.stop="codecTip.toggle()"
+                  title="编码格式有什么区别？"
+                >
+                  <HelpCircle :size="14" class="text-text-muted hover:text-text-secondary transition-colors" />
+                </button>
+                <transition name="tooltip-fade">
+                  <div
+                    v-if="codecTip.isOpen.value"
+                    :ref="codecTip.elRef"
+                    class="absolute left-0 bottom-full mb-2 w-80 p-3 rounded-lg bg-bg-secondary border border-bg-tertiary shadow-lg z-50 text-xs leading-relaxed text-text-secondary"
+                  >
+                    <p class="mb-2"><strong class="text-text-primary">编码格式</strong> 决定视频的兼容性与压缩效率：</p>
+                    <ul class="list-disc list-inside space-y-1.5">
+                      <li><span class="text-accent-blue font-medium">H.264</span>：兼容性最好，几乎所有设备都能播放，文件适中。</li>
+                      <li><span class="text-accent-purple font-medium">H.265 / HEVC</span>：比 H.264 压缩率高约 30%~50%，同等画质文件更小，但老设备可能不兼容。</li>
+                      <li><span class="text-accent-yellow font-medium">VP9</span>：YouTube/Web 优化，开源免费，压缩比接近 HEVC，适合网页播放。</li>
+                    </ul>
+                    <p class="mt-2 pt-2 border-t border-bg-tertiary text-text-muted">
+                      <span class="font-medium text-text-primary">GPU 加速</span>（NVENC / QSV）：编码速度极快，但同码率下画质略逊于 CPU 软编码。
+                    </p>
+                  </div>
+                </transition>
+              </div>
               <select v-model="codec" class="select-input w-full">
                 <optgroup label="CPU 软编码">
                   <option value="libx264">H.264 (兼容性最好)</option>
@@ -445,7 +454,7 @@ onUnmounted(() => {
                 <button
                   type="button"
                   class="p-0.5 rounded hover:bg-bg-tertiary transition-colors"
-                  @click.stop="toggleTwoPassInfo"
+                  @click.stop="twoPassTip.toggle()"
                   title="什么是 2-Pass？"
                 >
                   <HelpCircle :size="14" class="text-text-muted hover:text-text-secondary transition-colors" />
@@ -453,8 +462,8 @@ onUnmounted(() => {
                 <!-- Tooltip -->
                 <transition name="tooltip-fade">
                   <div
-                    v-if="showTwoPassInfo"
-                    ref="twoPassTooltipRef"
+                    v-if="twoPassTip.isOpen.value"
+                    :ref="twoPassTip.elRef"
                     class="absolute left-0 bottom-full mb-2 w-72 p-3 rounded-lg bg-bg-secondary border border-bg-tertiary shadow-lg z-50 text-xs leading-relaxed text-text-secondary"
                   >
                     <p class="mb-2"><strong class="text-text-primary">2-Pass 编码</strong> 是一种两次编码技术：</p>
