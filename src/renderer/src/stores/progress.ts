@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ProgressInfo } from '../../../preload/index'
 
+type OperationType = ProgressInfo['type']
+
 export interface QueueItem {
   id: string
   url: string
@@ -84,12 +86,12 @@ export const useProgressStore = defineStore('progress', () => {
     }
   }
 
-  function start(type: string): void {
+  function start(type: OperationType): void {
     isProcessing.value = true
     operationType.value = type
     startTime.value = Date.now()
     progress.value = {
-      type: 'compress',
+      type: type,
       percent: 0,
       currentFile: 0,
       totalFiles: 0,

@@ -102,9 +102,7 @@ function wrapOperation<TOpts>(
   executor: (opts: TOpts, onProgress: (data: ProgressData) => void) => Promise<unknown>
 ): void {
   ipcMain.handle(channel, async (event, opts: TOpts) => {
-    if (!acquireLock(lockType)) {
-      throw new Error('有操作正在进行中，请等待完成后再试')
-    }
+    acquireLock(lockType)
     try {
       return executor(opts, (data) => {
         sendProgress(event, { ...data, type: progressType })

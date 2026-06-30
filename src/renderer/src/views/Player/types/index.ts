@@ -12,6 +12,12 @@ export interface ScreenshotMarker {
   label: string   // e.g. "截图 #1"
 }
 
+/** Thumbnail sprite data for Plyr previewThumbnails */
+export interface ThumbnailData {
+  spriteUrl: string
+  vttUrl: string
+}
+
 /** Data persisted to localStorage across app restarts */
 export interface PersistedPlayerData {
   /** Absolute paths of playlist files */

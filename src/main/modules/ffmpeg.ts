@@ -1,297 +1,73 @@
-import { spawn, spawnSync, type ChildProcess } from 'child_process'
+/**
+ * ffmpeg.ts — barrel re-export for backward compatibility.
+ *
+ * Module split (2026-06-30):
+ *   ffmpeg-shared.ts    — binary resolution, cancellation, progress parsing, shared interfaces
+ *   ffmpeg-compress.ts  — compressVideo, batchCompress, runCompressPass
+ *   ffmpeg-gif.ts       — convertToGif, batchConvertToGif
+ *   ffmpeg-thumbnails.ts — captureScreenshot, generateThumbnailSprite
+ *
+ * Core functions (splitVideo, mergeVideos, getVideoMeta, getAvailableEncoders)
+ * remain in this file.
+ */
+
+import { spawn, type ChildProcess } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
 
-/**
- * Resolve ffmpeg binary path with multiple fallbacks.
- * Some environments (corporate Windows, AV software) may block
- * the ffmpeg-static binary, so we fall back to system PATH.
- */
-function resolveFfmpegPath(): string {
-  // 1. Try env var first (user override)
-  if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
-    return process.env.FFMPEG_PATH
-  }
+// ─── Re-export from shared ────────────────────────────────────────────────────
+export {
+  getFfmpegPath,
+  getFfprobePath,
+  cancelFfmpegOperation,
+  killFfmpegProc,
+  setFfmpegProc,
+  parseProgressLine,
+  timeToSeconds
+} from './ffmpeg-shared'
+export type { ProgressCallback, VideoMeta } from './ffmpeg-shared'
 
-  // 2. Try ffmpeg-static (may be blocked by AV on Windows)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const p = require('ffmpeg-static')
-    if (p && typeof p === 'string') {
-      // Verify the binary is actually runnable
-      if (canExecute(p)) {
-        return p
-      }
-    }
-  } catch {
-    // ignore
-  }
+// ─── Re-export from sub-modules ───────────────────────────────────────────────
+export { compressVideo, batchCompress } from './ffmpeg-compress'
+export type { CompressOptions, BatchCompressOptions } from './ffmpeg-compress'
 
-  // 3. Search node_modules relative to __dirname
-  const exeName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
-  const searchDirs = [
-    __dirname,
-    path.join(__dirname, '..'),
-    path.join(__dirname, '..', '..'),
-    process.cwd()
-  ]
+export { convertToGif, batchConvertToGif } from './ffmpeg-gif'
+export type { GifOptions, BatchGifOptions } from './ffmpeg-gif'
 
-  for (const dir of searchDirs) {
-    const candidate = path.join(dir, 'node_modules', 'ffmpeg-static', exeName)
-    if (fs.existsSync(candidate) && canExecute(candidate)) {
-      return candidate
-    }
-  }
+export { captureScreenshot, generateThumbnailSprite } from './ffmpeg-thumbnails'
+export type { ScreenshotOptions, ThumbnailSpriteOptions, ThumbnailSpriteResult } from './ffmpeg-thumbnails'
 
-  // 4. Fallback: use system ffmpeg from PATH (bare "ffmpeg")
-  try {
-    const { execSync } = require('child_process')
-    const result = execSync(
-      process.platform === 'win32' ? 'where ffmpeg 2>nul' : 'which ffmpeg 2>/dev/null',
-      { encoding: 'utf-8', timeout: 5000 }
-    )
-    const sysPath = result.trim().split('\n')[0]?.trim()
-    if (sysPath && canExecute(sysPath)) {
-      return sysPath
-    }
-  } catch {
-    // ignore
-  }
+// ─── Local imports for core functions ─────────────────────────────────────────
+import {
+  getFfmpegPath,
+  getFfprobePath,
+  parseProgressLine,
+  timeToSeconds,
+  setFfmpegProc as _setFfmpegProc,
+  isCancelled,
+  resetCancelled,
+  currentProc,
+  type VideoMeta
+} from './ffmpeg-shared'
 
-  throw new Error(
-    `找不到可用的 FFmpeg。请安装 FFmpeg 并将其添加到 PATH，或设置 FFMPEG_PATH 环境变量。`
-  )
-}
-
-/**
- * Check if a binary file is actually executable.
- * On Windows, the file may exist but be blocked by security policy.
- */
-function canExecute(binaryPath: string): boolean {
-  // Quick existence check first
-  if (!fs.existsSync(binaryPath)) {
-    return false
-  }
-
-  // On non-Windows, assume it's executable if it exists
-  if (process.platform !== 'win32') {
-    return true
-  }
-
-  // On Windows, try to spawn with -version to verify it runs
-  try {
-    const result = spawnSync(binaryPath, ['-version'], {
-      timeout: 10000,
-      windowsHide: true
-    })
-    return result.status === 0 || !result.error
-  } catch {
-    return false
-  }
-}
-
-/**
- * Resolve ffprobe binary path with multiple fallbacks.
- */
-function resolveFfprobePath(): string {
-  if (process.env.FFPROBE_PATH && fs.existsSync(process.env.FFPROBE_PATH)) {
-    return process.env.FFPROBE_PATH
-  }
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const p = require('ffprobe-static')
-    if (p?.path && typeof p.path === 'string' && canExecute(p.path)) {
-      return p.path
-    }
-  } catch {
-    // ignore
-  }
-
-  const exeName = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'
-  const searchDirs = [
-    __dirname,
-    path.join(__dirname, '..'),
-    path.join(__dirname, '..', '..'),
-    process.cwd()
-  ]
-
-  for (const dir of searchDirs) {
-    const candidate = path.join(dir, 'node_modules', 'ffprobe-static', exeName)
-    if (fs.existsSync(candidate) && canExecute(candidate)) {
-      return candidate
-    }
-  }
-
-  // Fallback to system PATH
-  try {
-    const { execSync } = require('child_process')
-    const result = execSync(
-      process.platform === 'win32' ? 'where ffprobe 2>nul' : 'which ffprobe 2>/dev/null',
-      { encoding: 'utf-8', timeout: 5000 }
-    )
-    const sysPath = result.trim().split('\n')[0]?.trim()
-    if (sysPath && canExecute(sysPath)) {
-      return sysPath
-    }
-  } catch {
-    // ignore
-  }
-
-  throw new Error(
-    `找不到可用的 ffprobe。请安装 FFmpeg 并将其添加到 PATH，或设置 FFPROBE_PATH 环境变量。`
-  )
-}
-
-let _ffmpegPath: string | null = null
-let _ffprobePath: string | null = null
-
-export function getFfmpegPath(): string {
-  if (!_ffmpegPath) {
-    _ffmpegPath = resolveFfmpegPath()
-  }
-  return _ffmpegPath
-}
-
-function getFfprobePath(): string {
-  if (!_ffprobePath) {
-    _ffprobePath = resolveFfprobePath()
-  }
-  return _ffprobePath
-}
-
-// ---- Cancellation support ----
-let currentProc: ChildProcess | null = null
-let isCancelled = false
-
-export function cancelFfmpegOperation(): void {
-  isCancelled = true
-  if (currentProc) {
-    killFfmpegProc(currentProc)
-    currentProc = null
-  }
-}
-
-/**
- * Kill a specific ffmpeg child process (with all children on Windows).
- */
-export function killFfmpegProc(proc: ChildProcess): void {
-  if (process.platform === 'win32' && proc.pid) {
-    spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'])
-  } else {
-    proc.kill('SIGTERM')
-  }
-}
-
-export interface ProgressCallback {
-  (data: { percent: number; currentFile: number; totalFiles: number; speed: string; eta: string }): void
-}
-
-export interface VideoMeta {
-  duration: number
-  width: number
-  height: number
-  bitrate: number
-  codec: string
-  size: number
-}
+// ─── Core interfaces ──────────────────────────────────────────────────────────
 
 export interface SplitOptions {
   input: string
   output: string
   startTime: string
   duration: string
-  onProgress?: ProgressCallback
+  onProgress?: import('./ffmpeg-shared').ProgressCallback
 }
 
 export interface MergeOptions {
   inputs: string[]
   output: string
-  onProgress?: ProgressCallback
+  onProgress?: import('./ffmpeg-shared').ProgressCallback
 }
 
-export interface CompressOptions {
-  input: string
-  output: string
-  crf: number
-  resolution: string
-  bitrate: string
-  codec: string
-  audioBitrate?: string
-  preset?: string
-  twoPass?: boolean
-  onProgress?: ProgressCallback
-}
+// ─── splitVideo ───────────────────────────────────────────────────────────────
 
-export interface GifOptions {
-  input: string
-  output: string
-  fps: number
-  width: number
-  quality: 'high' | 'medium' | 'low'
-  startTime?: number
-  duration?: number
-  loop: number
-  onProgress?: ProgressCallback
-}
-
-export interface BatchGifOptions {
-  files: {
-    input: string
-    output: string
-    fps: number
-    width: number
-    quality: 'high' | 'medium' | 'low'
-    startTime?: number
-    duration?: number
-    loop: number
-  }[]
-  onProgress?: ProgressCallback
-}
-
-export interface BatchCompressOptions {
-  files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; twoPass?: boolean }[]
-  onProgress?: ProgressCallback
-}
-
-/**
- * Parse FFmpeg stderr output to extract progress information
- */
-export function parseProgressLine(
-  line: string
-): { time: string; speed: string } | null {
-  const timeMatch = line.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/)
-  const speedMatch = line.match(/speed=\s*(\S+)x/)
-  if (!timeMatch) {
-    return null
-  }
-  return {
-    time: timeMatch[1],
-    speed: speedMatch ? `${speedMatch[1]}x` : '计算中...'
-  }
-}
-
-/**
- * Convert time string (HH:MM:SS.mm) to seconds
- */
-export function timeToSeconds(timeStr: string): number {
-  const parts = timeStr.split(':')
-  const hours = parseInt(parts[0], 10)
-  const minutes = parseInt(parts[1], 10)
-  const seconds = parseFloat(parts[2])
-  return hours * 3600 + minutes * 60 + seconds
-}
-
-/**
- * Set the current FFmpeg process for cancellation support
- */
-export function setFfmpegProc(proc: ChildProcess | null): void {
-  currentProc = proc
-}
-
-/**
- * Split a video file by start time and duration
- */
 export function splitVideo(opts: SplitOptions): Promise<boolean> {
   return new Promise((resolve, reject) => {
     if (!fs.existsSync(opts.input)) {
@@ -299,7 +75,7 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
       return
     }
 
-    isCancelled = false
+    resetCancelled()
 
     const args = [
       '-ss', opts.startTime,
@@ -312,7 +88,7 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
     ]
 
     const proc = spawn(getFfmpegPath(), args)
-    currentProc = proc
+    _setFfmpegProc(proc)
     const stderrLines: string[] = []
 
     proc.stderr.on('data', (data: Buffer) => {
@@ -334,7 +110,7 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
     })
 
     proc.on('close', (code: number | null) => {
-      currentProc = null
+      _setFfmpegProc(null)
       if (isCancelled) {
         resolve(false)
         return
@@ -356,15 +132,14 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
     })
 
     proc.on('error', (err: Error) => {
-      currentProc = null
+      _setFfmpegProc(null)
       reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
     })
   })
 }
 
-/**
- * Merge multiple video files into one using concat demuxer
- */
+// ─── mergeVideos ──────────────────────────────────────────────────────────────
+
 export function mergeVideos(opts: MergeOptions): Promise<boolean> {
   return new Promise((resolve, reject) => {
     if (opts.inputs.length === 0) {
@@ -372,9 +147,8 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
       return
     }
 
-    isCancelled = false
+    resetCancelled()
 
-    // Create temporary concat list file
     const concatDir = path.dirname(opts.output)
     const concatListPath = path.join(concatDir, `_concat_list_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`)
 
@@ -397,7 +171,7 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
     ]
 
     const proc = spawn(getFfmpegPath(), args)
-    currentProc = proc
+    _setFfmpegProc(proc)
     const stderrLines: string[] = []
 
     proc.stderr.on('data', (data: Buffer) => {
@@ -419,8 +193,7 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
     })
 
     proc.on('close', (code: number | null) => {
-      currentProc = null
-      // Clean up temp file
+      _setFfmpegProc(null)
       if (fs.existsSync(concatListPath)) {
         fs.unlinkSync(concatListPath)
       }
@@ -446,7 +219,7 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
     })
 
     proc.on('error', (err: Error) => {
-      currentProc = null
+      _setFfmpegProc(null)
       if (fs.existsSync(concatListPath)) {
         fs.unlinkSync(concatListPath)
       }
@@ -455,9 +228,8 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
   })
 }
 
-/**
- * Get video metadata using ffprobe
- */
+// ─── getVideoMeta ─────────────────────────────────────────────────────────────
+
 export function getVideoMeta(filePath: string): Promise<VideoMeta> {
   return new Promise((resolve, reject) => {
     const ffprobeProcess = spawn(getFfprobePath(), [
@@ -467,7 +239,7 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
       '-show_streams',
       filePath
     ])
-    currentProc = ffprobeProcess
+    _setFfmpegProc(ffprobeProcess)
 
     let stdout = ''
     let stderr = ''
@@ -481,7 +253,7 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
     })
 
     ffprobeProcess.on('close', (code: number | null) => {
-      currentProc = null
+      _setFfmpegProc(null)
       if (code !== 0) {
         reject(new Error(`ffprobe 执行失败: ${stderr}`))
         return
@@ -511,751 +283,28 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
     })
 
     ffprobeProcess.on('error', (err: Error) => {
-      currentProc = null
+      _setFfmpegProc(null)
       reject(new Error(`启动 ffprobe 失败 (${getFfprobePath()}): ${err.message}`))
     })
   })
 }
 
-/**
- * Build ffmpeg arguments for a single compress pass.
- * Does NOT include '-pass' or output path — those are added per-pass.
- */
-function buildCompressArgs(opts: CompressOptions): string[] {
-  const args: string[] = [
-    '-i', opts.input,
-    '-c:v', opts.codec || 'libx264'
-  ]
+// ─── getAvailableEncoders ─────────────────────────────────────────────────────
 
-  const isGpu = (opts.codec || '').includes('nvenc') || (opts.codec || '').includes('qsv')
-  if (opts.bitrate) {
-    args.push('-b:v', opts.bitrate)
-  } else if (opts.codec?.includes('nvenc')) {
-    args.push('-rc', 'vbr', '-cq', String(opts.crf || 23))
-  } else if (opts.codec?.includes('qsv')) {
-    args.push('-global_quality', String(opts.crf || 23))
-  } else {
-    args.push('-crf', String(opts.crf || 23))
-  }
-
-  // Resolution scaling
-  if (opts.resolution && opts.resolution !== 'original') {
-    args.push('-vf', `scale=${opts.resolution}`)
-  }
-
-  // Audio
-  args.push('-c:a', 'aac', '-b:a', opts.audioBitrate || '32k')
-
-  if (!isGpu) {
-    args.push('-preset', opts.preset || 'fast')
-  }
-
-  args.push('-movflags', '+faststart')
-  args.push('-y')
-
-  return args
-}
-
-/**
- * Spawn a single ffmpeg pass and return a Promise that resolves to
- * { success: boolean; stderrLines: string[] }
- */
-function runCompressPass(
-  args: string[],
-  opts: CompressOptions,
-  passLabel?: string
-): Promise<{ success: boolean; stderrLines: string[] }> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(getFfmpegPath(), args)
-    currentProc = proc
-    const stderrLines: string[] = []
-    let meta: VideoMeta | null = null
-
-    proc.stderr.on('data', (data: Buffer) => {
-      const chunk = data.toString()
-      stderrLines.push(chunk)
-
-      // Try to extract duration from first lines
-      if (!meta) {
-        const durMatch = chunk.match(/Duration: (\d{2}:\d{2}:\d{2}\.\d{2})/)
-        if (durMatch) {
-          meta = {
-            duration: timeToSeconds(durMatch[1]),
-            width: 0,
-            height: 0,
-            bitrate: 0,
-            codec: '',
-            size: 0
-          }
-        }
-      }
-
-      // Only report progress for pass 2 (or single-pass)
-      if (passLabel !== 'pass1') {
-        const parsed = parseProgressLine(chunk)
-        if (parsed && meta && opts.onProgress) {
-          const current = timeToSeconds(parsed.time)
-          const percent = Math.min(Math.round((current / meta.duration) * 100), 99)
-          opts.onProgress({
-            percent,
-            currentFile: 1,
-            totalFiles: 1,
-            speed: parsed.speed,
-            eta: parsed.time
-          })
-        }
-      }
-    })
-
-    proc.on('close', (code: number | null) => {
-      currentProc = null
-      if (isCancelled) {
-        resolve({ success: false, stderrLines })
-        return
-      }
-      resolve({ success: code === 0, stderrLines })
-    })
-
-    proc.on('error', (err: Error) => {
-      currentProc = null
-      reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
-    })
-  })
-}
-
-/**
- * Compress a single video file
- */
-export function compressVideo(opts: CompressOptions): Promise<boolean> {
-  return new Promise(async (resolve, reject) => {
-    if (!fs.existsSync(opts.input)) {
-      reject(new Error(`输入文件不存在: ${opts.input}`))
-      return
-    }
-
-    isCancelled = false
-
-    const isGpu = (opts.codec || '').includes('nvenc') || (opts.codec || '').includes('qsv')
-    const useTwoPass = opts.twoPass && !!opts.bitrate && !isGpu
-
-    if (useTwoPass) {
-      // 2-pass encoding (bitrate mode, CPU only)
-      const baseArgs = buildCompressArgs(opts)
-
-      // Pass 1: analysis
-      const pass1Args = [...baseArgs, '-pass', '1', '-f', 'null', process.platform === 'win32' ? 'NUL' : '/dev/null']
-      try {
-        const pass1Result = await runCompressPass(pass1Args, opts, 'pass1')
-        if (!pass1Result.success) {
-          reject(new Error(`FFmpeg 2-pass (pass 1) 失败: ${pass1Result.stderrLines.join('').slice(-500)}`))
-          return
-        }
-      } catch (e) {
-        reject(e)
-        return
-      }
-
-      if (isCancelled) {
-        resolve(false)
-        return
-      }
-
-      // Pass 2: actual encode
-      const pass2Args = [...baseArgs, '-pass', '2', opts.output]
-      try {
-        const pass2Result = await runCompressPass(pass2Args, opts, 'pass2')
-        // Clean up 2-pass log files
-        const logDir = path.dirname(opts.output)
-        for (const logName of ['ffmpeg2pass-0.log', 'ffmpeg2pass-0.log.mbtree']) {
-          try { fs.unlinkSync(path.join(logDir, logName)) } catch { /* ok */ }
-        }
-
-        if (!pass2Result.success) {
-          reject(new Error(`FFmpeg 2-pass (pass 2) 失败 (code: ${pass2Result.stderrLines.length ? 'error' : 'unknown'}): ${pass2Result.stderrLines.join('').slice(-500)}`))
-          return
-        }
-
-        if (opts.onProgress) {
-          opts.onProgress({ percent: 100, currentFile: 1, totalFiles: 1, speed: '完成', eta: '0:00' })
-        }
-        resolve(true)
-      } catch (e) {
-        reject(e)
-      }
-    } else {
-      // Single-pass (CRF, GPU, or bitrate without 2-pass)
-      const args = [...buildCompressArgs(opts), opts.output]
-      try {
-        const result = await runCompressPass(args, opts)
-        if (isCancelled) {
-          resolve(false)
-          return
-        }
-        if (result.success) {
-          if (opts.onProgress) {
-            opts.onProgress({ percent: 100, currentFile: 1, totalFiles: 1, speed: '完成', eta: '0:00' })
-          }
-          resolve(true)
-        } else {
-          reject(new Error(`FFmpeg 压缩失败: ${result.stderrLines.join('').slice(-500)}`))
-        }
-      } catch (e) {
-        reject(e)
-      }
-    }
-  })
-}
-
-/**
- * Batch compress multiple video files
- */
-export async function batchCompress(opts: BatchCompressOptions): Promise<{ success: number; successFiles: string[]; failed: string[] }> {
-  let success = 0
-  const successFiles: string[] = []
-  const failed: string[] = []
-
-  isCancelled = false
-
-  for (let i = 0; i < opts.files.length; i++) {
-    if (isCancelled) { break }
-    const file = opts.files[i]
-    try {
-      const result = await compressVideo({
-        ...file,
-        onProgress: (data) => {
-          if (opts.onProgress) {
-            opts.onProgress({
-              ...data,
-              currentFile: i + 1,
-              totalFiles: opts.files.length
-            })
-          }
-        }
-      })
-      if (!result) {
-        break
-      }
-      success++
-      successFiles.push(file.output)
-    } catch (e) {
-      if (isCancelled) { break }
-      failed.push(file.input)
-    }
-  }
-
-  return { success, successFiles, failed }
-}
-
-/**
- * Detect encoders available in the current ffmpeg build
- */
 export function getAvailableEncoders(): Promise<string[]> {
   return new Promise((resolve) => {
     const proc = spawn(getFfmpegPath(), ['-encoders'])
-    currentProc = proc
+    _setFfmpegProc(proc)
     let stdout = ''
     proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
     proc.on('close', () => {
-      currentProc = null
+      _setFfmpegProc(null)
       const encoders = stdout
         .split('\n')
         .filter((l) => /^\s+V.....\s+\S/.test(l))
         .map((l) => l.trim().split(/\s+/)[1])
       resolve(encoders)
     })
-    proc.on('error', () => { currentProc = null; resolve([]) })
+    proc.on('error', () => { _setFfmpegProc(null); resolve([]) })
   })
-}
-
-/**
- * Convert a video file to GIF using two-pass palette optimization
- */
-export function   convertToGif(opts: GifOptions): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    if (!fs.existsSync(opts.input)) {
-      reject(new Error(`输入文件不存在: ${opts.input}`))
-      return
-    }
-
-    isCancelled = false
-
-    const qualityMap = {
-      high: { statsMode: 'diff', dither: 'bayer:bayer_scale=5' },
-      medium: { statsMode: 'diff', dither: 'bayer:bayer_scale=3' },
-      low: { statsMode: 'full', dither: 'sierra2_4a' }
-    }
-    const q = qualityMap[opts.quality]
-    const widthArg = opts.width > 0 ? `${opts.width}:-1` : '-1:-1'
-
-    const palettePath = path.join(path.dirname(opts.output), `_gif_palette_${Date.now()}.png`)
-
-    const trimArgs: string[] = []
-    if (opts.startTime !== undefined && opts.startTime > 0) {
-      trimArgs.push('-ss', String(opts.startTime))
-    }
-    if (opts.duration !== undefined && opts.duration > 0) {
-      trimArgs.push('-t', String(opts.duration))
-    }
-
-    if (opts.onProgress) {
-      opts.onProgress({
-        percent: 5, currentFile: 1, totalFiles: 1,
-        speed: '生成调色板...', eta: ''
-      })
-    }
-
-    // Pass 1: Palette generation
-    const paletteArgs = [
-      ...trimArgs,
-      '-i', opts.input,
-      '-vf', `fps=${opts.fps},scale=${widthArg}:flags=lanczos,palettegen=stats_mode=${q.statsMode}`,
-      '-y',
-      palettePath
-    ]
-
-    const paletteProc = spawn(getFfmpegPath(), paletteArgs)
-    currentProc = paletteProc
-
-    paletteProc.on('close', (code: number | null) => {
-      if (isCancelled) {
-        cleanup()
-        resolve(false)
-        return
-      }
-      if (code !== 0) {
-        cleanup()
-        reject(new Error(`FFmpeg 调色板生成失败 (code: ${code})`))
-        return
-      }
-
-      if (opts.onProgress) {
-        opts.onProgress({
-          percent: 30, currentFile: 1, totalFiles: 1,
-          speed: '生成GIF...', eta: ''
-        })
-      }
-
-      // Pass 2: GIF generation with palette
-      const gifArgs = [
-        ...trimArgs,
-        '-i', opts.input,
-        '-i', palettePath,
-        '-lavfi', `fps=${opts.fps},scale=${widthArg}:flags=lanczos [x]; [x][1:v] paletteuse=dither=${q.dither}`,
-        '-loop', String(opts.loop),
-        '-y',
-        opts.output
-      ]
-
-      const gifProc = spawn(getFfmpegPath(), gifArgs)
-      currentProc = gifProc
-      let stderr = ''
-      let gifMeta: { duration: number } | null = null
-
-      gifProc.stderr.on('data', (data: Buffer) => {
-        const chunk = data.toString()
-        stderrLines.push(chunk)
-
-        if (!gifMeta) {
-          const durMatch = chunk.match(/Duration: (\d{2}:\d{2}:\d{2}\.\d{2})/)
-          if (durMatch) {
-            const fullDuration = timeToSeconds(durMatch[1])
-            gifMeta = { duration: opts.duration || fullDuration }
-          }
-        }
-
-        const parsed = parseProgressLine(chunk)
-        if (parsed && gifMeta && opts.onProgress) {
-          const current = timeToSeconds(parsed.time)
-          const total = gifMeta.duration
-          const pass2Percent = Math.min(Math.round((current / total) * 100), 99)
-          const overallPercent = 30 + Math.round((pass2Percent / 100) * 65)
-          opts.onProgress({
-            percent: Math.min(overallPercent, 95),
-            currentFile: 1,
-            totalFiles: 1,
-            speed: parsed.speed,
-            eta: parsed.time
-          })
-        }
-      })
-
-      gifProc.on('close', (code: number | null) => {
-        currentProc = null
-        cleanup()
-        if (isCancelled) {
-          resolve(false)
-          return
-        }
-        if (code === 0) {
-          if (opts.onProgress) {
-            opts.onProgress({
-              percent: 100, currentFile: 1, totalFiles: 1,
-              speed: '完成', eta: '0:00'
-            })
-          }
-          resolve(true)
-        } else {
-          reject(new Error(`FFmpeg GIF生成失败 (code: ${code}): ${stderrLines.join('').slice(-500)}`))
-        }
-      })
-
-      gifProc.on('error', (err: Error) => {
-        currentProc = null
-        cleanup()
-        reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
-      })
-    })
-
-    paletteProc.on('error', (err: Error) => {
-      currentProc = null
-      reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
-    })
-
-    function cleanup(): void {
-      if (fs.existsSync(palettePath)) {
-        try { fs.unlinkSync(palettePath) } catch { /* ignore */ }
-      }
-    }
-  })
-}
-
-/**
- * Batch convert video files to GIF
- */
-export async function batchConvertToGif(opts: BatchGifOptions): Promise<{ success: number; failed: string[] }> {
-  let success = 0
-  const failed: string[] = []
-
-  isCancelled = false
-
-  for (let i = 0; i < opts.files.length; i++) {
-    if (isCancelled) { break }
-    const file = opts.files[i]
-    try {
-      await convertToGif({
-        ...file,
-        onProgress: (data) => {
-          if (opts.onProgress) {
-            opts.onProgress({
-              ...data,
-              currentFile: i + 1,
-              totalFiles: opts.files.length
-            })
-          }
-        }
-      })
-      success++
-    } catch (e) {
-      if (isCancelled) { break }
-      failed.push(file.input)
-    }
-  }
-
-  return { success, failed }
-}
-
-export interface ScreenshotOptions {
-  input: string
-  output: string
-  time: number
-  onProgress?: ProgressCallback
-}
-
-/**
- * Capture a single screenshot frame from a video at a specific time.
- * Uses ffmpeg -ss <time> -i <input> -vframes 1 -q:v 2 <output>
- */
-export function captureScreenshot(opts: ScreenshotOptions): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    if (!fs.existsSync(opts.input)) {
-      reject(new Error(`输入文件不存在: ${opts.input}`))
-      return
-    }
-
-    isCancelled = false
-
-    const args = [
-      '-ss', String(opts.time),
-      '-i', opts.input,
-      '-vframes', '1',
-      '-q:v', '2',
-      '-y',
-      opts.output
-    ]
-
-    const proc = spawn(getFfmpegPath(), args)
-    currentProc = proc
-    const stderrLines: string[] = []
-
-    proc.stderr.on('data', (data: Buffer) => {
-      stderrLines.push(data.toString())
-    })
-
-    proc.on('close', (code: number | null) => {
-      currentProc = null
-      if (isCancelled) {
-        resolve(false)
-        return
-      }
-      if (code === 0) {
-        if (opts.onProgress) {
-          opts.onProgress({
-            percent: 100,
-            currentFile: 1,
-            totalFiles: 1,
-            speed: '完成',
-            eta: '0:00'
-          })
-        }
-        resolve(true)
-      } else {
-        reject(new Error(`FFmpeg 截图失败 (code: ${code}): ${stderrLines.join('').slice(-500)}`))
-      }
-    })
-
-    proc.on('error', (err: Error) => {
-      currentProc = null
-      reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
-    })
-  })
-}
-
-export interface ThumbnailSpriteOptions {
-  input: string
-  outputDir: string
-  thumbWidth?: number   // default 160
-  thumbHeight?: number  // default 90
-  interval?: number     // default 5 (seconds per thumbnail)
-  cols?: number         // default 10 (sprites per row)
-  onProgress?: ProgressCallback
-}
-
-export interface ThumbnailSpriteResult {
-  spriteUrl: string    // file:///path/to/sprite.jpg
-  vttUrl: string       // file:///path/to/sprite.vtt
-  count: number        // total thumbnail count
-  interval: number     // seconds between thumbnails
-}
-
-/**
- * Generate thumbnail sprite + VTT for Plyr previewThumbnails.
- * Step 1: Extract frames at fixed interval into outputDir/frames/
- * Step 2: Tile frames into a single sprite.jpg
- * Step 3: Write sprite.vtt with #xywh coordinates
- */
-export function generateThumbnailSprite(opts: ThumbnailSpriteOptions): Promise<ThumbnailSpriteResult> {
-  return new Promise((resolve, reject) => {
-    if (!fs.existsSync(opts.input)) {
-      reject(new Error(`输入文件不存在: ${opts.input}`))
-      return
-    }
-
-    const thumbW = opts.thumbWidth ?? 160
-    const thumbH = opts.thumbHeight ?? 90
-    const interval = opts.interval ?? 5
-    const cols = opts.cols ?? 10
-
-    // Ensure output directory exists
-    if (!fs.existsSync(opts.outputDir)) {
-      fs.mkdirSync(opts.outputDir, { recursive: true })
-    }
-
-    const framesDir = path.join(opts.outputDir, 'frames')
-    if (!fs.existsSync(framesDir)) {
-      fs.mkdirSync(framesDir, { recursive: true })
-    }
-
-    const spritePath = path.join(opts.outputDir, 'sprite.jpg')
-    const vttPath = path.join(opts.outputDir, 'sprite.vtt')
-
-    isCancelled = false
-
-    // Step 1: Extract frames at interval
-    const framePattern = path.join(framesDir, 'thumb_%04d.jpg')
-    const extractArgs = [
-      '-i', opts.input,
-      '-vf', `fps=1/${interval},scale=${thumbW}:${thumbH}:force_original_aspect_ratio=decrease,pad=${thumbW}:${thumbH}:(ow-iw)/2:(oh-ih)/2`,
-      '-q:v', '3',
-      '-y',
-      framePattern
-    ]
-
-    const extractProc = spawn(getFfmpegPath(), extractArgs)
-    currentProc = extractProc
-    const extractStderr: string[] = []
-
-    extractProc.stderr.on('data', (data: Buffer) => {
-      extractStderr.push(data.toString())
-    })
-
-    extractProc.on('close', (extractCode: number | null) => {
-      currentProc = null
-      if (isCancelled) {
-        cleanupThumbnailDir(opts.outputDir)
-        resolve({ spriteUrl: '', vttUrl: '', count: 0, interval })
-        return
-      }
-      if (extractCode !== 0) {
-        const errMsg = extractStderr.join('').slice(-500)
-        reject(new Error(`缩略图帧提取失败 (code: ${extractCode}): ${errMsg}`))
-        return
-      }
-
-      // Count extracted frames
-      const frameFiles = fs.readdirSync(framesDir)
-        .filter((f) => f.startsWith('thumb_') && f.endsWith('.jpg'))
-        .sort()
-
-      const count = frameFiles.length
-      if (count === 0) {
-        reject(new Error('未提取到任何缩略图帧'))
-        return
-      }
-
-      if (opts.onProgress) {
-        opts.onProgress({ percent: 50, currentFile: 1, totalFiles: 1, speed: '正在拼接', eta: '' })
-      }
-
-      // Step 2: Tile frames into sprite
-      const rows = Math.ceil(count / cols)
-      const inputFiles = frameFiles.map((f) => `file '${path.join(framesDir, f).replace(/\\/g, '/')}'`)
-      const concatFile = path.join(opts.outputDir, 'frames.txt')
-      fs.writeFileSync(concatFile, inputFiles.join('\n'), 'utf-8')
-
-      const tileArgs = [
-        '-f', 'concat',
-        '-safe', '0',
-        '-i', concatFile,
-        '-vf', `tile=${cols}x${rows}:padding=0:margin=0`,
-        '-q:v', '3',
-        '-frames:v', '1',
-        '-y',
-        spritePath
-      ]
-
-      const tileProc = spawn(getFfmpegPath(), tileArgs)
-      currentProc = tileProc
-      const tileStderr: string[] = []
-
-      tileProc.stderr.on('data', (data: Buffer) => {
-        tileStderr.push(data.toString())
-      })
-
-      tileProc.on('close', (tileCode: number | null) => {
-        currentProc = null
-        // Clean up intermediate files
-        try { fs.unlinkSync(concatFile) } catch { /* ignore */ }
-        try {
-          for (const f of frameFiles) {
-            fs.unlinkSync(path.join(framesDir, f))
-          }
-          fs.rmdirSync(framesDir)
-        } catch { /* ignore */ }
-
-        if (isCancelled) {
-          cleanupThumbnailDir(opts.outputDir)
-          resolve({ spriteUrl: '', vttUrl: '', count: 0, interval })
-          return
-        }
-        if (tileCode !== 0) {
-          const errMsg = tileStderr.join('').slice(-500)
-          reject(new Error(`缩略图拼接失败 (code: ${tileCode}): ${errMsg}`))
-          return
-        }
-
-        if (opts.onProgress) {
-          opts.onProgress({ percent: 80, currentFile: 1, totalFiles: 1, speed: '正在生成索引', eta: '' })
-        }
-
-        // Step 3: Generate VTT
-        generateThumbnailVtt(vttPath, spritePath, count, interval, thumbW, thumbH, cols)
-
-        if (opts.onProgress) {
-          opts.onProgress({ percent: 100, currentFile: 1, totalFiles: 1, speed: '完成', eta: '0:00' })
-        }
-
-        const toFileUrl = (p: string): string => {
-          const abs = path.resolve(p)
-          return 'file:///' + abs.replace(/\\/g, '/').replace(/^([A-Za-z]):/, '$1:')
-        }
-
-        resolve({
-          spriteUrl: toFileUrl(spritePath),
-          vttUrl: toFileUrl(vttPath),
-          count,
-          interval
-        })
-      })
-
-      tileProc.on('error', (err: Error) => {
-        currentProc = null
-        reject(new Error(`启动 FFmpeg 拼接失败: ${err.message}`))
-      })
-    })
-
-    extractProc.on('error', (err: Error) => {
-      currentProc = null
-      reject(new Error(`启动 FFmpeg 帧提取失败: ${err.message}`))
-    })
-  })
-}
-
-/**
- * Write a WebVTT file mapping time ranges to sprite coordinates.
- */
-function generateThumbnailVtt(
-  vttPath: string,
-  spritePath: string,
-  count: number,
-  interval: number,
-  thumbW: number,
-  thumbH: number,
-  cols: number
-): void {
-  const spriteName = path.basename(spritePath)
-  const lines: string[] = ['WEBVTT', '']
-
-  for (let i = 0; i < count; i++) {
-    const startSec = i * interval
-    const endSec = startSec + interval
-    const col = i % cols
-    const row = Math.floor(i / cols)
-    const x = col * thumbW
-    const y = row * thumbH
-
-    const startTs = secondsToVttTime(startSec)
-    const endTs = secondsToVttTime(endSec)
-
-    lines.push(`${startTs} --> ${endTs}`)
-    lines.push(`${spriteName}#xywh=${x},${y},${thumbW},${thumbH}`)
-    lines.push('')
-  }
-
-  fs.writeFileSync(vttPath, lines.join('\n'), 'utf-8')
-}
-
-function secondsToVttTime(totalSec: number): string {
-  const h = Math.floor(totalSec / 3600)
-  const m = Math.floor((totalSec % 3600) / 60)
-  const s = Math.floor(totalSec % 60)
-  const ms = Math.floor((totalSec % 1) * 1000)
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`
-}
-
-function cleanupThumbnailDir(dir: string): void {
-  try {
-    const framesDir = path.join(dir, 'frames')
-    if (fs.existsSync(framesDir)) {
-      for (const f of fs.readdirSync(framesDir)) {
-        fs.unlinkSync(path.join(framesDir, f))
-      }
-      fs.rmdirSync(framesDir)
-    }
-    const concatFile = path.join(dir, 'frames.txt')
-    if (fs.existsSync(concatFile)) { fs.unlinkSync(concatFile) }
-    const spritePath = path.join(dir, 'sprite.jpg')
-    if (fs.existsSync(spritePath)) { fs.unlinkSync(spritePath) }
-    const vttPath = path.join(dir, 'sprite.vtt')
-    if (fs.existsSync(vttPath)) { fs.unlinkSync(vttPath) }
-  } catch { /* ignore */ }
 }

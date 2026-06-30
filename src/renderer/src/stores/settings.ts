@@ -63,7 +63,6 @@ function applyTheme(theme: 'dark' | 'light'): void {
 
 export const useSettingsStore = defineStore('settings', () => {
   const outputDirectory = ref<string>('')
-  const lastPassword = ref<string>('')
   const theme = ref<'dark' | 'light'>(loadTheme())
   const compressPreset = ref<CompressPreset>(loadCompressPreset())
   const playerData = ref<PersistedPlayerData>(loadPlayerData())
@@ -73,10 +72,6 @@ export const useSettingsStore = defineStore('settings', () => {
 
   function setOutputDirectory(dir: string): void {
     outputDirectory.value = dir
-  }
-
-  function setLastPassword(password: string): void {
-    lastPassword.value = password
   }
 
   function toggleTheme(): void {
@@ -109,12 +104,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     outputDirectory,
-    lastPassword,
     theme,
     compressPreset,
     playerData,
     setOutputDirectory,
-    setLastPassword,
     toggleTheme,
     setCompressPreset,
     setPlayerData

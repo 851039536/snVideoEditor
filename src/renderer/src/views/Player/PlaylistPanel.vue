@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Lock, FileVideo, X, GripVertical, FolderSync } from 'lucide-vue-next'
+import { Lock, FileVideo, X, GripVertical, FolderSync, FolderOpen } from 'lucide-vue-next'
 import { formatSize, getFileName } from '@/utils/format'
 import type { PlayerEntry } from './types'
 import FileDropZone from '@/components/FileDropZone.vue'
@@ -83,7 +83,7 @@ function getFolderName(path: string): string {
       @click="emit('scanDir')"
       class="w-full flex items-center justify-center gap-2 p-2.5 rounded-lg border border-dashed border-bg-tertiary text-text-secondary text-sm hover:border-accent-blue/30 hover:text-text-primary transition-colors"
     >
-      <span>📁</span>
+      <FolderOpen :size="14" />
       扫描文件夹
     </button>
 

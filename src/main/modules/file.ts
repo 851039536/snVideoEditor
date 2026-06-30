@@ -18,17 +18,6 @@ const VIDEO_FILTERS: FileFilter[] = [
   }
 ]
 
-const ENCRYPTED_FILTER: FileFilter[] = [
-  {
-    name: '加密视频文件',
-    extensions: ['enc']
-  },
-  {
-    name: '所有文件',
-    extensions: ['*']
-  }
-]
-
 const PLAYER_FILTERS: FileFilter[] = [
   {
     name: '视频文件（含加密）',
@@ -150,37 +139,10 @@ export function getFileInfo(filePath: string): { size: number; ext: string; name
 }
 
 /**
- * Scan directory for video files recursively
+ * Scan directory recursively for files with given extensions
  */
-export function scanVideoFiles(dirPath: string): string[] {
+function scanFiles(dirPath: string, exts: Set<string>): string[] {
   const results: string[] = []
-  const videoExts = new Set(VIDEO_FILTERS[0].extensions)
-
-  function scan(currentPath: string): void {
-    const entries = fs.readdirSync(currentPath, { withFileTypes: true })
-    for (const entry of entries) {
-      const fullPath = path.join(currentPath, entry.name)
-      if (entry.isDirectory()) {
-        scan(fullPath)
-      } else if (entry.isFile()) {
-        const ext = path.extname(entry.name).toLowerCase().slice(1)
-        if (videoExts.has(ext)) {
-          results.push(fullPath)
-        }
-      }
-    }
-  }
-
-  scan(dirPath)
-  return results
-}
-
-/**
- * Scan directory for video + encrypted files recursively (for player)
- */
-export function scanPlayerFiles(dirPath: string): string[] {
-  const results: string[] = []
-  const playerExts = new Set(PLAYER_FILTERS[0].extensions)
 
   function scan(currentPath: string): void {
     let entries: fs.Dirent[]
@@ -195,7 +157,7 @@ export function scanPlayerFiles(dirPath: string): string[] {
         scan(fullPath)
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase().slice(1)
-        if (playerExts.has(ext)) {
+        if (exts.has(ext)) {
           results.push(fullPath)
         }
       }
@@ -204,6 +166,20 @@ export function scanPlayerFiles(dirPath: string): string[] {
 
   scan(dirPath)
   return results
+}
+
+/**
+ * Scan directory for video files recursively
+ */
+export function scanVideoFiles(dirPath: string): string[] {
+  return scanFiles(dirPath, new Set(VIDEO_FILTERS[0].extensions))
+}
+
+/**
+ * Scan directory for video + encrypted files recursively (for player)
+ */
+export function scanPlayerFiles(dirPath: string): string[] {
+  return scanFiles(dirPath, new Set(PLAYER_FILTERS[0].extensions))
 }
 
 /**
