@@ -45,8 +45,10 @@ const isInitialTrimEnd = ref(true)
 // ---- Manual time inputs (for fine-tuning) ----
 // Derived from trim times via computed getter; setters write back with clamping + seek
 function hmsFieldSetter(field: 'start' | 'end', h: string, m: string, s: string): void {
-  const total = parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s)
-  if (isNaN(total)) { return }
+  const hNum = parseInt(h) || 0
+  const mNum = parseInt(m) || 0
+  const sNum = parseInt(s) || 0
+  const total = hNum * 3600 + mNum * 60 + sNum
   if (field === 'start') {
     trimStartSec.value = clamp(total, 0, trimEndSec.value - 0.1)
     seekVideoPlayer(trimStartSec.value)
@@ -58,29 +60,32 @@ function hmsFieldSetter(field: 'start' | 'end', h: string, m: string, s: string)
   }
 }
 
+const startParts = computed(() => secondsToHMS(trimStartSec.value).split(':'))
+const endParts = computed(() => secondsToHMS(trimEndSec.value).split(':'))
+
 const startHour = computed({
-  get: () => secondsToHMS(trimStartSec.value).split(':')[0],
+  get: () => startParts.value[0],
   set: (v: string) => hmsFieldSetter('start', v, startMin.value, startSec.value)
 })
 const startMin = computed({
-  get: () => secondsToHMS(trimStartSec.value).split(':')[1],
+  get: () => startParts.value[1],
   set: (v: string) => hmsFieldSetter('start', startHour.value, v, startSec.value)
 })
 const startSec = computed({
-  get: () => secondsToHMS(trimStartSec.value).split(':')[2],
+  get: () => startParts.value[2],
   set: (v: string) => hmsFieldSetter('start', startHour.value, startMin.value, v)
 })
 
 const endHour = computed({
-  get: () => secondsToHMS(trimEndSec.value).split(':')[0],
+  get: () => endParts.value[0],
   set: (v: string) => hmsFieldSetter('end', v, endMin.value, endSec.value)
 })
 const endMin = computed({
-  get: () => secondsToHMS(trimEndSec.value).split(':')[1],
+  get: () => endParts.value[1],
   set: (v: string) => hmsFieldSetter('end', endHour.value, v, endSec.value)
 })
 const endSec = computed({
-  get: () => secondsToHMS(trimEndSec.value).split(':')[2],
+  get: () => endParts.value[2],
   set: (v: string) => hmsFieldSetter('end', endHour.value, endMin.value, v)
 })
 
@@ -243,7 +248,6 @@ watch(mode, (newMode) => {
       loadVideoMeta(files.value[0])
     }
   } else if (newMode === 'merge') {
-    files.value = []
     outputName.value = ''
     outputDir.value = ''
     errorMsg.value = ''
@@ -427,6 +431,10 @@ function onGlobalPointerUp(e: PointerEvent): void {
 // ---- Clip list management ----
 
 async function cutToClipList(): Promise<void> {
+  if (files.value.length === 0) {
+    errorMsg.value = '请先添加视频文件'
+    return
+  }
   if (clipDurationSec.value <= 0) {
     errorMsg.value = '请选择有效的片段范围'
     return
@@ -534,12 +542,18 @@ async function startProcess(): Promise<void> {
     })
     if (result) {
       // Clean up selected clip temp files after successful merge
-      for (const c of clips.value.filter((c) => c.selected)) {
-        window.electronAPI.deleteFile(c.outputFile)
+      const deleteResults = await Promise.allSettled(
+        clips.value.filter((c) => c.selected).map((c) => window.electronAPI.deleteFile(c.outputFile))
+      )
+      const failedCount = deleteResults.filter((r) => r.status === 'rejected').length
+      if (failedCount > 0) {
+        console.warn(`合并后清理临时文件失败: ${failedCount} 个`)
       }
       // Remove merged clips from list to avoid stale references
       clips.value = clips.value.filter((c) => !c.selected)
       store.finish()
+    } else {
+      store.reset()
     }
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
@@ -568,9 +582,15 @@ if (typeof window !== 'undefined') {
 onUnmounted(() => {
   document.removeEventListener('pointermove', onGlobalPointerMove)
   document.removeEventListener('pointerup', onGlobalPointerUp)
+  // Clean up temporary clip files
+  for (const c of clips.value) {
+    window.electronAPI.deleteFile(c.outputFile).catch(() => {})
+  }
   if (window.electronAPI) {
     window.electronAPI.removeProgressListener()
   }
+  // Stop progress store timer to prevent memory leak
+  store.reset()
 })
 </script>
 
