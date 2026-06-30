@@ -1,0 +1,10 @@
+// ---- EncryptView shared styles ----
+// Usage: @use in EncryptView.vue with scoped
+// CSS variable overrides go after @use
+
+code {
+  background: hsl(var(--primary) / 0.1);
+  padding: 0.0625rem 0.25rem;
+  border-radius: calc(var(--radius-sm, 4px) - 1px);
+  font-size: 0.75rem;
+}

@@ -8,6 +8,7 @@ import { formatSize, getFileName } from '@/utils/format'
 import { secondsToHMS } from '@/utils/time'
 import type { VideoMeta } from '@/types/file'
 import { DEFAULT_ENCRYPT_KEY, KEY_MASK_PREFIX_LENGTH } from '@/config/crypto'
+import type { CryptoEntry } from './types'
 
 const progressStore = useProgressStore()
 
@@ -15,11 +16,6 @@ const progressStore = useProgressStore()
 const mode = ref<'encrypt' | 'decrypt'>('encrypt')
 
 // Files
-interface CryptoEntry {
-  path: string
-  outputPath: string
-}
-
 const files = ref<CryptoEntry[]>([])
 const errorMsg = ref('')
 
@@ -520,23 +516,5 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.input-field {
-  padding: 0.625rem 0.875rem;
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-md, 8px);
-  color: hsl(var(--foreground));
-  outline: none;
-}
-
-.input-field::placeholder {
-  color: hsl(var(--muted-foreground));
-}
-
-code {
-  background: hsl(var(--primary) / 0.1);
-  padding: 0.0625rem 0.25rem;
-  border-radius: calc(var(--radius-sm, 4px) - 1px);
-  font-size: 0.75rem;
-}
+@use "../../assets/styles/encrypt";
 </style>
