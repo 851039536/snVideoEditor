@@ -27,14 +27,26 @@ const decryptingFile = ref<PlayerEntry | null>(null)
 // Auto-decrypt toggle (default: ON — use built-in key)
 const autoDecrypt = ref(true)
 
-// Track temp paths for cleanup
-const tempPaths = ref<Map<string, string>>(new Map())
+// Temp dir — resolved once on mount, awaited before any decrypt
 const tempDir = ref('')
+let tempDirReady: Promise<void>
 
-// Load temp dir path on mount
-;(async () => {
-  tempDir.value = await window.electronAPI.getTempDir()
+// Init temp dir with error handling (must resolve before any decrypt)
+tempDirReady = (async (): Promise<void> => {
+  try {
+    tempDir.value = await window.electronAPI.getTempDir()
+  } catch (_e) {
+    // tempDir stays '', decryptAndPlay will check before proceeding
+  }
 })()
+
+// Guard against concurrent decrypts
+let decrypting = false
+
+// Derived: how many files currently have a temp decrypted copy
+const tempCount = computed((): number => {
+  return files.value.filter((e) => e.tempPath).length
+})
 
 // Error display
 const errorMsg = ref('')
@@ -81,10 +93,9 @@ const hasNext = computed((): boolean => {
 async function addFiles(paths: string[]): Promise<void> {
   for (const p of paths) {
     if (files.value.some((f) => f.path === p)) { continue }
-    const ext = p.split('.').pop()?.toLowerCase()
     files.value.push({
       path: p,
-      isEncrypted: ext === 'enc',
+      isEncrypted: p.toLowerCase().endsWith('.enc'),
       meta: null,
       tempPath: null
     })
@@ -96,14 +107,14 @@ async function addFilesAndLoadMeta(paths: string[]): Promise<void> {
   void loadAllMeta()
 }
 
-function removeFile(index: number): void {
+async function removeFile(index: number): Promise<void> {
   const removed = files.value[index]
   if (!removed) { return }
 
   // Clean up temp file if this was an encrypted file that was decrypted
   if (removed.tempPath) {
-    cleanupTemp(removed.tempPath)
-    tempPaths.value.delete(removed.path)
+    await cleanupTemp(removed.tempPath)
+    removed.tempPath = null
   }
 
   const wasCurrent = index === currentIndex.value
@@ -164,6 +175,7 @@ async function selectDir(): Promise<void> {
 
 // ---- Meta loading ----
 async function loadMeta(entry: PlayerEntry): Promise<void> {
+  if (entry.isEncrypted && !entry.tempPath) { return }
   const path = entry.isEncrypted ? entry.tempPath! : entry.path
   const meta = await window.electronAPI.getVideoMeta(path)
   entry.meta = meta as VideoMeta
@@ -191,7 +203,7 @@ async function playFile(index: number): Promise<void> {
       await nextTick()
       initAndPlay()
     } else if (autoDecrypt.value) {
-      await decryptWithDefaultKey(file)
+      await decryptAndPlay(file, DEFAULT_ENCRYPT_KEY)
     } else {
       decryptingFile.value = file
       passwordInput.value = ''
@@ -274,32 +286,41 @@ function initAndPlay(): void {
 
 // ---- Encryption Decrypt for Playback ----
 async function decryptAndPlay(file: PlayerEntry, password: string): Promise<void> {
-  if (file.tempPath) {
-    await cleanupTemp(file.tempPath)
-    file.tempPath = null
+  if (decrypting) { return }
+  decrypting = true
+
+  try {
+    if (file.tempPath) {
+      await cleanupTemp(file.tempPath)
+      file.tempPath = null
+    }
+
+    // Ensure tempDir is resolved before using
+    await tempDirReady
+    if (!tempDir.value) {
+      errorMsg.value = '无法获取临时目录，解密失败'
+      return
+    }
+
+    const tempPath = await window.electronAPI.decryptForPlayback(
+      file.path,
+      password,
+      tempDir.value
+    )
+
+    if (files.value[currentIndex.value]?.path !== file.path) {
+      await cleanupTemp(tempPath)
+      return
+    }
+
+    file.tempPath = tempPath
+
+    await loadMeta(file)
+    await nextTick()
+    initAndPlay()
+  } finally {
+    decrypting = false
   }
-
-  const tempPath = await window.electronAPI.decryptForPlayback(
-    file.path,
-    password,
-    tempDir.value
-  )
-
-  if (files.value[currentIndex.value]?.path !== file.path) {
-    await cleanupTemp(tempPath)
-    return
-  }
-
-  file.tempPath = tempPath
-  tempPaths.value.set(file.path, tempPath)
-
-  await loadMeta(file)
-  await nextTick()
-  initAndPlay()
-}
-
-async function decryptWithDefaultKey(file: PlayerEntry): Promise<void> {
-  await decryptAndPlay(file, DEFAULT_ENCRYPT_KEY)
 }
 
 async function confirmDecrypt(): Promise<void> {
@@ -333,19 +354,18 @@ async function cleanupTemp(tempPath: string): Promise<void> {
 }
 
 async function cleanupAllTemps(): Promise<void> {
-  for (const tempPath of tempPaths.value.values()) {
-    await cleanupTemp(tempPath)
-  }
-  tempPaths.value.clear()
   for (const entry of files.value) {
-    entry.tempPath = null
+    if (entry.tempPath) {
+      await cleanupTemp(entry.tempPath)
+      entry.tempPath = null
+    }
   }
 }
 
 // ---- Lifecycle ----
-onUnmounted(() => {
+onUnmounted(async () => {
   destroyPlayer()
-  cleanupAllTemps()
+  await cleanupAllTemps()
 })
 </script>
 
@@ -374,13 +394,13 @@ onUnmounted(() => {
 
           <!-- Clean temp files -->
           <button
-            v-if="tempPaths.size > 0"
+            v-if="tempCount > 0"
             @click="cleanupAllTemps()"
             class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors border border-bg-tertiary text-text-muted hover:text-danger hover:border-danger/30"
             title="清理所有解密临时文件"
           >
             <Trash2 :size="13" />
-            <span class="hidden sm:inline">清理 ({{ tempPaths.size }})</span>
+            <span class="hidden sm:inline">清理 ({{ tempCount }})</span>
           </button>
 
           <!-- Auto-decrypt toggle -->
@@ -401,8 +421,11 @@ onUnmounted(() => {
     </header>
 
     <!-- Error Banner -->
-    <div v-if="errorMsg" class="alert-danger mb-3">
+    <div v-if="errorMsg" class="alert-danger mb-3 flex items-center justify-between">
       <p>{{ errorMsg }}</p>
+      <button @click="errorMsg = ''" class="p-0.5 rounded hover:bg-danger/10 transition-colors flex-shrink-0">
+        <X :size="14" />
+      </button>
     </div>
 
     <!-- Main Layout -->
