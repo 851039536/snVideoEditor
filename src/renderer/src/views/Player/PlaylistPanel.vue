@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Lock, FileVideo, X, GripVertical } from 'lucide-vue-next'
+import { Lock, FileVideo, X, GripVertical, FolderSync } from 'lucide-vue-next'
 import { formatSize, getFileName } from '@/utils/format'
 import type { PlayerEntry } from './types'
 import FileDropZone from '@/components/FileDropZone.vue'
@@ -9,6 +9,7 @@ const props = defineProps<{
   files: PlayerEntry[]
   currentIndex: number
   isPlaying: boolean
+  lastFolder?: string
 }>()
 
 const emit = defineEmits<{
@@ -18,6 +19,7 @@ const emit = defineEmits<{
   scanDir: []
   clearList: []
   reorder: [payload: { from: number; to: number }]
+  rescanLastFolder: []
 }>()
 
 // ---- Drag reorder ----
@@ -59,6 +61,12 @@ function onDragEnd(): void {
   dragSrcIdx.value = -1
   dragOverIdx.value = -1
 }
+
+function getFolderName(path: string): string {
+  if (!path) { return '' }
+  const parts = path.replace(/[/\\]+$/, '').split(/[/\\]/)
+  return parts[parts.length - 1] || path
+}
 </script>
 
 <template>
@@ -77,6 +85,17 @@ function onDragEnd(): void {
     >
       <span>📁</span>
       扫描文件夹
+    </button>
+
+    <!-- Re-scan last folder -->
+    <button
+      v-if="lastFolder"
+      @click="emit('rescanLastFolder')"
+      class="w-full flex items-center justify-center gap-2 p-2.5 rounded-lg border border-dashed border-accent-blue/20 text-accent-blue text-sm hover:bg-accent-blue/5 transition-colors"
+      :title="'重新加载: ' + lastFolder"
+    >
+      <FolderSync :size="14" />
+      重新加载 {{ getFolderName(lastFolder) }}
     </button>
 
     <!-- File List -->

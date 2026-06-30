@@ -1,8 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
+import type { PersistedPlayerData } from '@/views/Player/types'
+import { DEFAULT_PLAYER_DATA } from '@/views/Player/types'
 
 const THEME_KEY = 'snve-theme'
 const COMPRESS_PRESET_KEY = 'snve-compress-preset'
+const PLAYER_DATA_KEY = 'snve-player-data'
 
 export interface CompressPreset {
   crfValue: number
@@ -43,6 +46,17 @@ function loadCompressPreset(): CompressPreset {
   return { ...DEFAULT_COMPRESS_PRESET }
 }
 
+function loadPlayerData(): PersistedPlayerData {
+  try {
+    const saved = localStorage.getItem(PLAYER_DATA_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      return { ...DEFAULT_PLAYER_DATA, ...parsed }
+    }
+  } catch { /* ignore */ }
+  return { ...DEFAULT_PLAYER_DATA }
+}
+
 function applyTheme(theme: 'dark' | 'light'): void {
   document.documentElement.classList.toggle('light', theme === 'light')
 }
@@ -52,6 +66,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const lastPassword = ref<string>('')
   const theme = ref<'dark' | 'light'>(loadTheme())
   const compressPreset = ref<CompressPreset>(loadCompressPreset())
+  const playerData = ref<PersistedPlayerData>(loadPlayerData())
 
   // Apply theme on init
   applyTheme(theme.value)
@@ -72,6 +87,10 @@ export const useSettingsStore = defineStore('settings', () => {
     compressPreset.value = preset
   }
 
+  function setPlayerData(data: PersistedPlayerData): void {
+    playerData.value = data
+  }
+
   // Persist theme and apply to DOM
   watch(theme, (val) => {
     try { localStorage.setItem(THEME_KEY, val) } catch { /* ignore */ }
@@ -83,14 +102,21 @@ export const useSettingsStore = defineStore('settings', () => {
     try { localStorage.setItem(COMPRESS_PRESET_KEY, JSON.stringify(val)) } catch { /* ignore */ }
   }, { deep: true })
 
+  // Persist player data
+  watch(playerData, (val) => {
+    try { localStorage.setItem(PLAYER_DATA_KEY, JSON.stringify(val)) } catch { /* ignore */ }
+  }, { deep: true })
+
   return {
     outputDirectory,
     lastPassword,
     theme,
     compressPreset,
+    playerData,
     setOutputDirectory,
     setLastPassword,
     toggleTheme,
-    setCompressPreset
+    setCompressPreset,
+    setPlayerData
   }
 })

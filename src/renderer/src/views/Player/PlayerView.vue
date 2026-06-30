@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { Play, Lock, LockKeyholeOpen, FileVideo, FolderOpen, Trash2 } from 'lucide-vue-next'
 // @ts-ignore - Plyr ESM default export
 import Plyr from 'plyr'
@@ -9,6 +9,7 @@ import { secondsToHMS } from '@/utils/time'
 import type { VideoMeta } from '@/types/file'
 import { DEFAULT_ENCRYPT_KEY } from '@/config/crypto'
 import type { PlayerEntry } from './types'
+import { useSettingsStore } from '@/stores/settings'
 import PlaylistPanel from './PlaylistPanel.vue'
 
 // ---- State ----
@@ -50,6 +51,60 @@ const tempCount = computed((): number => {
 
 // Error display
 const errorMsg = ref('')
+
+// Persisted settings store
+const settingsStore = useSettingsStore()
+
+// Last scanned folder (for quick re-scan button)
+const lastFolder = ref(settingsStore.playerData.lastFolder)
+
+// ---- Persistence -----
+function saveToStore(): void {
+  settingsStore.setPlayerData({
+    filePaths: files.value.map((e) => e.path),
+    lastFolder: lastFolder.value,
+    autoDecrypt: autoDecrypt.value,
+    lastIndex: currentIndex.value,
+    playbackTime: player ? player.currentTime || 0 : 0
+  })
+}
+
+function savePlaybackTime(): void {
+  if (player) {
+    const t = player.currentTime || 0
+    const p = settingsStore.playerData
+    settingsStore.setPlayerData({ ...p, playbackTime: t, lastIndex: currentIndex.value })
+  }
+}
+
+// Restore saved playlist on mount
+onMounted(async () => {
+  const pd = settingsStore.playerData
+
+  // Restore auto-decrypt preference
+  autoDecrypt.value = pd.autoDecrypt
+
+  // Restore last folder
+  lastFolder.value = pd.lastFolder
+
+  // Restore file list
+  if (pd.filePaths.length > 0) {
+    await addFiles(pd.filePaths)
+    void loadAllMeta()
+
+    // Restore last index (clamp to valid range)
+    if (pd.lastIndex >= 0 && pd.lastIndex < files.value.length) {
+      currentIndex.value = pd.lastIndex
+    }
+  }
+})
+
+// Auto-save playlist, index, and autoDecrypt on changes
+watch(
+  [() => files.value.map((e) => e.path), currentIndex, autoDecrypt],
+  () => { saveToStore() },
+  { deep: true }
+)
 
 // ---- Computed ----
 const currentFile = computed((): PlayerEntry | null => {
@@ -165,11 +220,30 @@ async function selectDir(): Promise<void> {
   const dir = await window.electronAPI.selectDirectory()
   if (!dir) { return }
 
+  lastFolder.value = dir
+
   const scanned = await window.electronAPI.scanPlayerFiles(dir)
   if (scanned.length === 0) {
     errorMsg.value = '未找到视频文件或加密文件'
     return
   }
+  await addFilesAndLoadMeta(scanned)
+}
+
+/** Re-scan the last remembered folder */
+async function rescanLastFolder(): Promise<void> {
+  if (!lastFolder.value) { return }
+  errorMsg.value = ''
+  const scanned = await window.electronAPI.scanPlayerFiles(lastFolder.value)
+  if (scanned.length === 0) {
+    errorMsg.value = '未找到视频文件或加密文件'
+    return
+  }
+  // Clear existing list then reload
+  destroyPlayer()
+  await cleanupAllTemps()
+  files.value = []
+  currentIndex.value = -1
   await addFilesAndLoadMeta(scanned)
 }
 
@@ -263,10 +337,12 @@ function initAndPlay(): void {
 
   player.on('pause', () => {
     isPlaying.value = false
+    savePlaybackTime()
   })
 
   player.on('ended', () => {
     isPlaying.value = false
+    savePlaybackTime()
     if (hasNext.value) {
       playFile(currentIndex.value + 1)
     }
@@ -276,6 +352,16 @@ function initAndPlay(): void {
     isPlaying.value = false
     errorMsg.value = '视频加载失败'
   })
+
+  // Resume playback position if available
+  const savedTime = settingsStore.playerData.playbackTime
+  if (savedTime > 0) {
+    player.on('canplay', () => {
+      if (player && player.currentTime < 1) {
+        player.currentTime = savedTime
+      }
+    })
+  }
 
   try {
     player.play()
@@ -364,6 +450,7 @@ async function cleanupAllTemps(): Promise<void> {
 
 // ---- Lifecycle ----
 onUnmounted(async () => {
+  savePlaybackTime()
   destroyPlayer()
   await cleanupAllTemps()
 })
@@ -436,12 +523,14 @@ onUnmounted(async () => {
           :files="files"
           :current-index="currentIndex"
           :is-playing="isPlaying"
+          :last-folder="lastFolder"
           @select-file="playFile"
           @remove-file="removeFile"
           @add-files="addFilesAndLoadMeta"
           @scan-dir="selectDir"
           @clear-list="clearList"
           @reorder="handleReorder"
+          @rescan-last-folder="rescanLastFolder"
         />
       </div>
 
