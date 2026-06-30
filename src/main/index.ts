@@ -189,10 +189,13 @@ function registerCompressHandlers(): void {
     resolution: string
     bitrate: string
     codec: string
+    audioBitrate?: string
+    preset?: string
+    twoPass?: boolean
   }>('video:compress', 'compress', 'compress', (opts, onProgress) => compressVideo({ ...opts, onProgress }))
 
   wrapOperation<{
-    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string }[]
+    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; twoPass?: boolean }[]
   }>('video:batchCompress', 'compress', 'compress', (opts, onProgress) => batchCompress({ ...opts, onProgress }))
 }
 

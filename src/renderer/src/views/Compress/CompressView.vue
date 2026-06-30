@@ -1,44 +1,62 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { FileVideo, Folder, X, Zap, Monitor, Download, FolderOpen, Info } from 'lucide-vue-next'
+import { FileVideo, Folder, X, Zap, Monitor, Download, FolderOpen, Info, HelpCircle } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
+import VideoDetailModal from './VideoDetailModal.vue'
 import { useProgressStore } from '@/stores/progress'
-import { formatSize, getDirName, getFileName } from '@/utils/format'
-import { secondsToHMS } from '@/utils/time'
+import { useSettingsStore } from '@/stores/settings'
+import { formatSize, getDirName } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
 import type { FileEntry } from '@/types/file'
+import type { CompressResultItem } from './types'
 
 const progressStore = useProgressStore()
+const settingsStore = useSettingsStore()
 
 const { files, addFiles, removeFile, selectOutputDir, setOutputDir } = useFileList()
+
+// Compression params — initialized from persisted preset
+const preset = ref(settingsStore.compressPreset.preset)
+const crfValue = ref(settingsStore.compressPreset.crfValue)
+const resolution = ref(settingsStore.compressPreset.resolution)
+const bitrate = ref(settingsStore.compressPreset.bitrate)
+const codec = ref(settingsStore.compressPreset.codec)
+const audioBitrate = ref(settingsStore.compressPreset.audioBitrate)
+const twoPass = ref(settingsStore.compressPreset.twoPass)
+
 const errorMsg = ref('')
 let isUnmounted = false
 
+// Persist changes back to store
+function savePreset(): void {
+  settingsStore.setCompressPreset({
+    crfValue: crfValue.value,
+    resolution: resolution.value,
+    bitrate: bitrate.value,
+    codec: codec.value,
+    audioBitrate: audioBitrate.value,
+    preset: preset.value,
+    twoPass: twoPass.value
+  })
+}
+
 // Video detail modal
 const detailEntry = ref<FileEntry | null>(null)
-const detailLoading = ref(false)
+const detailModalRef = ref<InstanceType<typeof VideoDetailModal> | null>(null)
 
 function openDetail(entry: FileEntry): void {
   detailEntry.value = entry
-  if (!entry.meta) {
-    detailLoading.value = true
-    window.electronAPI.getVideoMeta(entry.path).then((meta) => {
-      if (!isUnmounted) {
-        entry.meta = meta
-        detailLoading.value = false
-      }
-    }).catch(() => {
-      if (!isUnmounted) {
-        detailLoading.value = false
-      }
+  // Defer meta fetch to modal's onOpen via nextTick
+  import('vue').then(({ nextTick }) => {
+    nextTick(() => {
+      detailModalRef.value?.onOpen()
     })
-  }
+  })
 }
 
 function closeDetail(): void {
   detailEntry.value = null
-  detailLoading.value = false
 }
 
 // Common paths for quick output selection
@@ -99,12 +117,10 @@ onMounted(async () => {
   }
 })
 
-// Compression params
-const crfValue = ref(23)
-const resolution = ref('original')
-const bitrate = ref('')
-const codec = ref('libx264')
-const audioBitrate = ref('32k')
+// GPU encoder detection
+const isGpuEncoder = computed(() => {
+  return (codec.value || '').includes('nvenc') || (codec.value || '').includes('qsv')
+})
 
 const RESOLUTION_BITRATE: Record<string, string> = {
   '1920:1080': '4000k',
@@ -119,6 +135,11 @@ watch(resolution, (res) => {
   bitrate.value = RESOLUTION_BITRATE[res] || ''
 })
 
+// Auto-persist preset on any param change
+watch([crfValue, resolution, bitrate, codec, audioBitrate, preset, twoPass], () => {
+  savePreset()
+}, { deep: false })
+
 function estimateOutputSize(entry: FileEntry): string {
   if (!entry.meta || entry.meta.size === 0) { return '未知' }
   const originalMB = entry.meta.size / (1024 * 1024)
@@ -131,6 +152,7 @@ function estimateOutputSize(entry: FileEntry): string {
 
 async function startCompress(): Promise<void> {
   errorMsg.value = ''
+  compressResult.value = []
   if (files.value.length === 0) { return }
 
   for (const entry of files.value) {
@@ -159,7 +181,9 @@ async function startCompress(): Promise<void> {
       resolution: resolution.value,
       bitrate: bitrate.value,
       codec: codec.value,
-      audioBitrate: audioBitrate.value
+      audioBitrate: audioBitrate.value,
+      preset: preset.value,
+      twoPass: twoPass.value
     }))
     const result = await window.electronAPI.batchCompress({ files: batchFiles })
     if (!progressStore.isProcessing) {
@@ -167,8 +191,26 @@ async function startCompress(): Promise<void> {
     }
     if (result.failed.length === 0) {
       progressStore.finish()
+      // Build comparison data
+      for (const outputPath of result.successFiles) {
+        try {
+          const fileInfo = await window.electronAPI.getFileInfo(outputPath)
+          const original = files.value.find((f) => f.outputPath === outputPath)
+          if (original && original.meta) {
+            compressResult.value.push({
+              fileName: outputPath.split(/[/\\]/).pop() || outputPath,
+              originalSize: original.meta.size,
+              compressedSize: fileInfo.size
+            })
+          }
+        } catch { /* skip files that can't be read */ }
+      }
     } else {
-      errorMsg.value = `${result.failed.length} 个文件压缩失败`
+      const failedNames = result.failed.map((_p) => {
+        const f = files.value.find((x) => x.path === _p)
+        return f ? (f.path.split(/[/\\]/).pop() || _p) : _p
+      }).join(', ')
+      errorMsg.value = `${result.failed.length} 个文件压缩失败: ${failedNames}`
       progressStore.reset()
     }
   } catch (e) {
@@ -183,6 +225,30 @@ const canStart = computed((): boolean => {
   return files.value.length > 0 && !progressStore.isProcessing
 })
 
+// Compression result comparison
+const compressResult = ref<CompressResultItem[]>([])
+
+const showTwoPassInfo = ref(false)
+const twoPassTooltipRef = ref<HTMLElement | null>(null)
+
+function onDocumentClick(e: MouseEvent): void {
+  if (showTwoPassInfo.value && twoPassTooltipRef.value && !twoPassTooltipRef.value.contains(e.target as Node)) {
+    showTwoPassInfo.value = false
+  }
+}
+
+function toggleTwoPassInfo(): void {
+  showTwoPassInfo.value = !showTwoPassInfo.value
+  if (showTwoPassInfo.value) {
+    // Register click-outside on next tick so this click doesn't trigger it
+    import('vue').then(({ nextTick }) => {
+      nextTick(() => { document.addEventListener('click', onDocumentClick) })
+    })
+  } else {
+    document.removeEventListener('click', onDocumentClick)
+  }
+}
+
 const availableEncoders = ref<string[]>([])
 
 const hasNvidiaEncoders = computed((): boolean => {
@@ -195,6 +261,7 @@ const hasQsvEncoders = computed((): boolean => {
 
 onUnmounted(() => {
   isUnmounted = true
+  document.removeEventListener('click', onDocumentClick)
   window.electronAPI?.removeProgressListener()
 })
 </script>
@@ -315,10 +382,11 @@ onUnmounted(() => {
                 class="w-full mt-2 slider-base slider"
               />
               <div class="flex justify-between text-xs text-text-muted mt-1">
-                <span>无损</span>
-                <span>最佳</span>
-                <span>默认</span>
-                <span>低质量</span>
+                <span>0 真无损</span>
+                <span>18 视觉无损</span>
+                <span>23 默认</span>
+                <span>28 标清</span>
+                <span>51 最差</span>
               </div>
             </div>
 
@@ -352,6 +420,65 @@ onUnmounted(() => {
                 <option value="128k">128 Kbps</option>
                 <option value="192k">192 Kbps</option>
               </select>
+            </div>
+
+            <!-- Encoding Preset (CPU only) -->
+            <div v-if="!isGpuEncoder">
+              <label class="text-sm text-text-secondary mb-2 block">编码速度预设</label>
+              <select v-model="preset" class="select-input w-full">
+                <option value="ultrafast">ultrafast (极速)</option>
+                <option value="superfast">superfast</option>
+                <option value="veryfast">veryfast</option>
+                <option value="faster">faster</option>
+                <option value="fast">fast (默认)</option>
+                <option value="medium">medium</option>
+                <option value="slow">slow</option>
+                <option value="slower">slower</option>
+                <option value="veryslow">veryslow (最佳画质)</option>
+              </select>
+            </div>
+
+            <!-- 2-Pass (CPU + bitrate only) -->
+            <div v-if="!isGpuEncoder && !!bitrate" class="flex items-center gap-3">
+              <div class="relative flex items-center gap-1">
+                <label class="text-sm text-text-secondary">2-Pass 编码</label>
+                <button
+                  type="button"
+                  class="p-0.5 rounded hover:bg-bg-tertiary transition-colors"
+                  @click.stop="toggleTwoPassInfo"
+                  title="什么是 2-Pass？"
+                >
+                  <HelpCircle :size="14" class="text-text-muted hover:text-text-secondary transition-colors" />
+                </button>
+                <!-- Tooltip -->
+                <transition name="tooltip-fade">
+                  <div
+                    v-if="showTwoPassInfo"
+                    ref="twoPassTooltipRef"
+                    class="absolute left-0 bottom-full mb-2 w-72 p-3 rounded-lg bg-bg-secondary border border-bg-tertiary shadow-lg z-50 text-xs leading-relaxed text-text-secondary"
+                  >
+                    <p class="mb-2"><strong class="text-text-primary">2-Pass 编码</strong> 是一种两次编码技术：</p>
+                    <ul class="list-disc list-inside space-y-1">
+                      <li><span class="text-accent-blue font-medium">第 1 遍</span>：分析视频内容，记录每帧的复杂度信息（不输出文件）</li>
+                      <li><span class="text-accent-purple font-medium">第 2 遍</span>：根据分析结果，更精准地分配码率，正式编码输出文件</li>
+                    </ul>
+                    <p class="mt-2 text-text-muted">✅ 同等码率下画质更好 &nbsp;|&nbsp; ⚠️ 耗时约 2 倍</p>
+                    <p class="mt-1 text-text-muted">仅在使用码率限制（非 CRF 模式）+ CPU 编码时可用。</p>
+                  </div>
+                </transition>
+              </div>
+              <button
+                type="button"
+                class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
+                :class="twoPass ? 'bg-accent-blue' : 'bg-bg-tertiary'"
+                @click="twoPass = !twoPass"
+              >
+                <span
+                  class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200"
+                  :class="twoPass ? 'translate-x-[18px]' : 'translate-x-[2px]'"
+                />
+              </button>
+              <span class="text-xs text-text-muted">提升画质，耗时约 2 倍</span>
             </div>
         </div>
 
@@ -419,182 +546,42 @@ onUnmounted(() => {
             : 'bg-bg-tertiary text-text-muted'"
         >
           <Zap :size="18" />
-          {{ progressStore.isProcessing ? '压缩中...' : `开始压缩 (${files.length} 个文件)` }}
+          开始压缩 ({{ files.length }} 个文件)
         </button>
 
         <ProgressPanel />
+
+        <!-- Compression Result Comparison -->
+        <div v-if="compressResult.length > 0" class="glass-card p-4">
+          <h3 class="text-base font-semibold text-text-primary mb-3">压缩结果对比</h3>
+          <div class="space-y-2">
+            <div
+              v-for="(item, idx) in compressResult"
+              :key="idx"
+              class="flex items-center justify-between gap-2 py-1.5 border-b border-bg-tertiary/50 last:border-0"
+            >
+              <span class="text-sm text-text-primary truncate flex-1 min-w-0">{{ item.fileName }}</span>
+              <span class="text-xs text-text-secondary whitespace-nowrap">
+                {{ formatSize(item.originalSize) }} → {{ formatSize(item.compressedSize) }}
+              </span>
+              <span class="text-xs font-mono text-success whitespace-nowrap">
+                -{{ Math.round((1 - item.compressedSize / item.originalSize) * 100) }}%
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- Video Detail Modal -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div
-          v-if="detailEntry"
-          class="detail-overlay"
-          @click.self="closeDetail"
-          @keydown.escape="closeDetail"
-        >
-          <div class="detail-modal glass-card" role="dialog" aria-label="视频详细信息">
-            <div class="detail-header">
-              <div class="flex items-center gap-2 min-w-0">
-                <FileVideo :size="18" class="text-accent-purple flex-shrink-0" />
-                <h3 class="text-base font-semibold text-text-primary truncate" :title="detailEntry.path">
-                  {{ getFileName(detailEntry.path) }}
-                </h3>
-              </div>
-              <button
-                @click="closeDetail"
-                class="p-1.5 rounded hover:bg-bg-tertiary transition-colors"
-                title="关闭"
-              >
-                <X :size="18" class="text-text-secondary" />
-              </button>
-            </div>
-
-            <!-- Loading -->
-            <div v-if="detailLoading" class="detail-loading">
-              <p class="text-text-secondary text-sm">正在获取视频信息...</p>
-            </div>
-
-            <!-- Metadata grid -->
-            <div v-else-if="detailEntry.meta" class="detail-grid">
-              <div class="detail-item">
-                <span class="detail-label">文件路径</span>
-                <span class="detail-value text-xs font-mono truncate" :title="detailEntry.path">
-                  {{ detailEntry.path }}
-                </span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">视频编码</span>
-                <span class="detail-value">{{ detailEntry.meta.codec || '未知' }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">分辨率</span>
-                <span class="detail-value">{{ detailEntry.meta.width }} × {{ detailEntry.meta.height }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">时长</span>
-                <span class="detail-value font-mono">{{ secondsToHMS(detailEntry.meta.duration) }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">文件大小</span>
-                <span class="detail-value font-mono">{{ formatSize(detailEntry.meta.size) }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="detail-label">视频码率</span>
-                <span class="detail-value font-mono">
-                  {{ detailEntry.meta.bitrate ? (detailEntry.meta.bitrate / 1000).toFixed(0) + ' Kbps' : '未知' }}
-                </span>
-              </div>
-            </div>
-
-            <!-- No meta yet -->
-            <div v-else class="detail-loading">
-              <p class="text-text-muted text-sm">暂无视频信息</p>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <VideoDetailModal
+      ref="detailModalRef"
+      :entry="detailEntry"
+      @close="closeDetail"
+    />
   </div>
 </template>
 
 <style scoped>
-/* Slider color theme (structure from global slider-base) */
-.slider {
-  background: linear-gradient(to right, #3FB950, #D29922, #F85149);
-}
-
-.slider::-webkit-slider-thumb {
-  border: 2px solid hsl(var(--primary));
-  box-shadow: 0 0 8px rgba(123, 92, 252, 0.4);
-}
-
-/* Video detail modal */
-.detail-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(4px);
-}
-
-.detail-modal {
-  width: 420px;
-  max-width: 90vw;
-  max-height: 80vh;
-  overflow-y: auto;
-  padding: 20px;
-}
-
-.detail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--color-bg-tertiary, hsl(var(--border)));
-}
-
-.detail-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 0;
-}
-
-.detail-grid {
-  display: grid;
-  gap: 6px;
-}
-
-.detail-item {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 6px 12px;
-  background: var(--color-bg-secondary, hsl(var(--secondary)));
-  border-radius: var(--radius-sm, 4px);
-}
-
-.detail-label {
-  font-size: 11px;
-  line-height: 1.3;
-  color: var(--color-text-muted);
-}
-
-.detail-value {
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--color-text-primary);
-}
-
-/* Modal transition */
-.modal-fade-enter-active,
-.modal-fade-leave-active {
-  transition: opacity var(--transition-normal, 0.2s) ease;
-}
-
-.modal-fade-enter-active .detail-modal,
-.modal-fade-leave-active .detail-modal {
-  transition: transform var(--transition-normal, 0.2s) ease;
-}
-
-.modal-fade-enter-from,
-.modal-fade-leave-to {
-  opacity: 0;
-}
-
-.modal-fade-enter-from .detail-modal {
-  transform: scale(0.95) translateY(4px);
-}
-
-.modal-fade-leave-to .detail-modal {
-  transform: scale(0.95) translateY(4px);
-}
+@use "../../assets/styles/compress";
 </style>

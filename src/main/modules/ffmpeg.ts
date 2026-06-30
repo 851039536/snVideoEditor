@@ -218,6 +218,8 @@ export interface CompressOptions {
   bitrate: string
   codec: string
   audioBitrate?: string
+  preset?: string
+  twoPass?: boolean
   onProgress?: ProgressCallback
 }
 
@@ -248,7 +250,7 @@ export interface BatchGifOptions {
 }
 
 export interface BatchCompressOptions {
-  files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string }[]
+  files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; twoPass?: boolean }[]
   onProgress?: ProgressCallback
 }
 
@@ -516,23 +518,15 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
 }
 
 /**
- * Compress a single video file
+ * Build ffmpeg arguments for a single compress pass.
+ * Does NOT include '-pass' or output path — those are added per-pass.
  */
-export function   compressVideo(opts: CompressOptions): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    if (!fs.existsSync(opts.input)) {
-      reject(new Error(`输入文件不存在: ${opts.input}`))
-      return
-    }
-
-    isCancelled = false
-
+function buildCompressArgs(opts: CompressOptions): string[] {
   const args: string[] = [
     '-i', opts.input,
     '-c:v', opts.codec || 'libx264'
   ]
 
-  // Quality / bitrate (mutually exclusive: bitrate wins)
   const isGpu = (opts.codec || '').includes('nvenc') || (opts.codec || '').includes('qsv')
   if (opts.bitrate) {
     args.push('-b:v', opts.bitrate)
@@ -545,20 +539,33 @@ export function   compressVideo(opts: CompressOptions): Promise<boolean> {
   }
 
   // Resolution scaling
-    if (opts.resolution && opts.resolution !== 'original') {
-      args.push('-vf', `scale=${opts.resolution}`)
-    }
+  if (opts.resolution && opts.resolution !== 'original') {
+    args.push('-vf', `scale=${opts.resolution}`)
+  }
 
-  // Audio: copy stream
+  // Audio
   args.push('-c:a', 'aac', '-b:a', opts.audioBitrate || '32k')
 
   if (!isGpu) {
-    args.push('-preset', 'fast')
+    args.push('-preset', opts.preset || 'fast')
   }
+
   args.push('-movflags', '+faststart')
   args.push('-y')
-  args.push(opts.output)
 
+  return args
+}
+
+/**
+ * Spawn a single ffmpeg pass and return a Promise that resolves to
+ * { success: boolean; stderrLines: string[] }
+ */
+function runCompressPass(
+  args: string[],
+  opts: CompressOptions,
+  passLabel?: string
+): Promise<{ success: boolean; stderrLines: string[] }> {
+  return new Promise((resolve, reject) => {
     const proc = spawn(getFfmpegPath(), args)
     currentProc = proc
     const stderrLines: string[] = []
@@ -583,40 +590,30 @@ export function   compressVideo(opts: CompressOptions): Promise<boolean> {
         }
       }
 
-      const parsed = parseProgressLine(chunk)
-      if (parsed && meta && opts.onProgress) {
-        const current = timeToSeconds(parsed.time)
-        const percent = Math.min(Math.round((current / meta.duration) * 100), 99)
-        opts.onProgress({
-          percent,
-          currentFile: 1,
-          totalFiles: 1,
-          speed: parsed.speed,
-          eta: parsed.time
-        })
+      // Only report progress for pass 2 (or single-pass)
+      if (passLabel !== 'pass1') {
+        const parsed = parseProgressLine(chunk)
+        if (parsed && meta && opts.onProgress) {
+          const current = timeToSeconds(parsed.time)
+          const percent = Math.min(Math.round((current / meta.duration) * 100), 99)
+          opts.onProgress({
+            percent,
+            currentFile: 1,
+            totalFiles: 1,
+            speed: parsed.speed,
+            eta: parsed.time
+          })
+        }
       }
     })
 
     proc.on('close', (code: number | null) => {
       currentProc = null
       if (isCancelled) {
-        resolve(false)
+        resolve({ success: false, stderrLines })
         return
       }
-      if (code === 0) {
-        if (opts.onProgress) {
-          opts.onProgress({
-            percent: 100,
-            currentFile: 1,
-            totalFiles: 1,
-            speed: '完成',
-            eta: '0:00'
-          })
-        }
-        resolve(true)
-      } else {
-        reject(new Error(`FFmpeg 压缩失败 (code: ${code}): ${stderrLines.join('').slice(-500)}`))
-      }
+      resolve({ success: code === 0, stderrLines })
     })
 
     proc.on('error', (err: Error) => {
@@ -627,10 +624,94 @@ export function   compressVideo(opts: CompressOptions): Promise<boolean> {
 }
 
 /**
+ * Compress a single video file
+ */
+export function compressVideo(opts: CompressOptions): Promise<boolean> {
+  return new Promise(async (resolve, reject) => {
+    if (!fs.existsSync(opts.input)) {
+      reject(new Error(`输入文件不存在: ${opts.input}`))
+      return
+    }
+
+    isCancelled = false
+
+    const isGpu = (opts.codec || '').includes('nvenc') || (opts.codec || '').includes('qsv')
+    const useTwoPass = opts.twoPass && !!opts.bitrate && !isGpu
+
+    if (useTwoPass) {
+      // 2-pass encoding (bitrate mode, CPU only)
+      const baseArgs = buildCompressArgs(opts)
+
+      // Pass 1: analysis
+      const pass1Args = [...baseArgs, '-pass', '1', '-f', 'null', process.platform === 'win32' ? 'NUL' : '/dev/null']
+      try {
+        const pass1Result = await runCompressPass(pass1Args, opts, 'pass1')
+        if (!pass1Result.success) {
+          reject(new Error(`FFmpeg 2-pass (pass 1) 失败: ${pass1Result.stderrLines.join('').slice(-500)}`))
+          return
+        }
+      } catch (e) {
+        reject(e)
+        return
+      }
+
+      if (isCancelled) {
+        resolve(false)
+        return
+      }
+
+      // Pass 2: actual encode
+      const pass2Args = [...baseArgs, '-pass', '2', opts.output]
+      try {
+        const pass2Result = await runCompressPass(pass2Args, opts, 'pass2')
+        // Clean up 2-pass log files
+        const logDir = path.dirname(opts.output)
+        for (const logName of ['ffmpeg2pass-0.log', 'ffmpeg2pass-0.log.mbtree']) {
+          try { fs.unlinkSync(path.join(logDir, logName)) } catch { /* ok */ }
+        }
+
+        if (!pass2Result.success) {
+          reject(new Error(`FFmpeg 2-pass (pass 2) 失败 (code: ${pass2Result.stderrLines.length ? 'error' : 'unknown'}): ${pass2Result.stderrLines.join('').slice(-500)}`))
+          return
+        }
+
+        if (opts.onProgress) {
+          opts.onProgress({ percent: 100, currentFile: 1, totalFiles: 1, speed: '完成', eta: '0:00' })
+        }
+        resolve(true)
+      } catch (e) {
+        reject(e)
+      }
+    } else {
+      // Single-pass (CRF, GPU, or bitrate without 2-pass)
+      const args = [...buildCompressArgs(opts), opts.output]
+      try {
+        const result = await runCompressPass(args, opts)
+        if (isCancelled) {
+          resolve(false)
+          return
+        }
+        if (result.success) {
+          if (opts.onProgress) {
+            opts.onProgress({ percent: 100, currentFile: 1, totalFiles: 1, speed: '完成', eta: '0:00' })
+          }
+          resolve(true)
+        } else {
+          reject(new Error(`FFmpeg 压缩失败: ${result.stderrLines.join('').slice(-500)}`))
+        }
+      } catch (e) {
+        reject(e)
+      }
+    }
+  })
+}
+
+/**
  * Batch compress multiple video files
  */
-export async function batchCompress(opts: BatchCompressOptions): Promise<{ success: number; failed: string[] }> {
+export async function batchCompress(opts: BatchCompressOptions): Promise<{ success: number; successFiles: string[]; failed: string[] }> {
   let success = 0
+  const successFiles: string[] = []
   const failed: string[] = []
 
   isCancelled = false
@@ -655,13 +736,14 @@ export async function batchCompress(opts: BatchCompressOptions): Promise<{ succe
         break
       }
       success++
+      successFiles.push(file.output)
     } catch (e) {
       if (isCancelled) { break }
       failed.push(file.input)
     }
   }
 
-  return { success, failed }
+  return { success, successFiles, failed }
 }
 
 /**

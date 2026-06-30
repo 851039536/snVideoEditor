@@ -92,12 +92,15 @@ const electronAPI = {
     resolution: string
     bitrate: string
     codec: string
+    audioBitrate?: string
+    preset?: string
+    twoPass?: boolean
   }): Promise<boolean> =>
     ipcRenderer.invoke('video:compress', opts),
 
   batchCompress: (opts: {
-    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string }[]
-  }): Promise<{ success: number; failed: string[] }> =>
+    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; twoPass?: boolean }[]
+  }): Promise<{ success: number; successFiles: string[]; failed: string[] }> =>
     ipcRenderer.invoke('video:batchCompress', opts),
 
   // GIF conversion
