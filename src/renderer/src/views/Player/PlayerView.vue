@@ -1,16 +1,24 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { Play, Lock, LockKeyholeOpen, FileVideo, FolderOpen, Trash2, Camera, Loader, Image } from 'lucide-vue-next'
+import { Play, Lock, LockKeyholeOpen, FileVideo, FolderOpen, Trash2, Camera, Loader, Image, X } from 'lucide-vue-next'
 // @ts-ignore - Plyr ESM default export
 import Plyr from 'plyr'
 import 'plyr/dist/plyr.css'
 import { formatSize, getFileName } from '@/utils/format'
-import { secondsToHMS } from '@/utils/time'
+import { secondsToHMS, parseTimeInput } from '@/utils/time'
 import type { VideoMeta } from '@/types/file'
 import { DEFAULT_ENCRYPT_KEY } from '@/config/crypto'
 import type { PlayerEntry } from './types'
 import { useSettingsStore } from '@/stores/settings'
 import PlaylistPanel from './PlaylistPanel.vue'
+
+// Pre-compiled regexes
+const EXT_RE = /\.[^.]+$/
+const COLON_RE = /:/g
+const DIR_SEP_RE = /[/\\][^/\\]+$/
+
+// Constants
+const ERR_NO_VIDEO = '未找到视频文件或加密文件'
 
 // ---- State ----
 const files = ref<PlayerEntry[]>([])
@@ -58,7 +66,6 @@ const screenshotTimeInput = ref('')
 const batchInterval = ref(10)
 const capturing = ref(false)
 const captureProgress = ref({ current: 0, total: 0 })
-const captureSuccess = ref(0)
 const screenshotMode = ref<'current' | 'custom' | 'batch'>('current')
 
 function getScreenshotInputPath(): string {
@@ -74,8 +81,8 @@ function getScreenshotInputPath(): string {
 }
 
 function getScreenshotBasePath(): string {
-  const name = currentFileName.value.replace(/\.[^.]+$/, '')
-  const dir = currentFile.value?.path.replace(/[/\\][^/\\]+$/, '') || ''
+  const name = currentFileName.value.replace(EXT_RE, '')
+  const dir = currentFile.value?.path.replace(DIR_SEP_RE, '') || ''
   return `${dir}/${name}`
 }
 
@@ -90,7 +97,6 @@ function openScreenshotModal(): void {
   screenshotTimeInput.value = ''
   batchInterval.value = 10
   captureProgress.value = { current: 0, total: 0 }
-  captureSuccess.value = 0
   showScreenshotModal.value = true
 }
 
@@ -100,13 +106,11 @@ async function doCapture(timeSec: number, outputPath: string): Promise<boolean> 
   return window.electronAPI.captureScreenshot({ input, output: outputPath, time: timeSec })
 }
 
-async function captureCurrentFrame(): Promise<void> {
-  if (!player || capturing.value) { return }
+async function doSingleCapture(timeSec: number): Promise<void> {
   capturing.value = true
   try {
-    const t = player.currentTime || 0
-    const output = `${getScreenshotBasePath()}_screenshot_${new Date().toTimeString().slice(0, 8).replace(/:/g, '-')}.png`
-    await doCapture(t, output)
+    const output = `${getScreenshotBasePath()}_screenshot_${new Date().toTimeString().slice(0, 8).replace(COLON_RE, '-')}.png`
+    await doCapture(timeSec, output)
   } catch (e) {
     errorMsg.value = `截图失败: ${e}`
   } finally {
@@ -115,20 +119,17 @@ async function captureCurrentFrame(): Promise<void> {
   }
 }
 
+async function captureCurrentFrame(): Promise<void> {
+  if (!player || capturing.value) { return }
+  const t = player.currentTime || 0
+  await doSingleCapture(t)
+}
+
 async function captureByTime(): Promise<void> {
   if (!screenshotTimeInput.value || capturing.value) { return }
-  const timeSec = hmsToSeconds(screenshotTimeInput.value)
+  const timeSec = parseTimeInput(screenshotTimeInput.value)
   if (timeSec < 0) { return }
-  capturing.value = true
-  try {
-    const output = `${getScreenshotBasePath()}_screenshot_${new Date().toTimeString().slice(0, 8).replace(/:/g, '-')}.png`
-    await doCapture(timeSec, output)
-  } catch (e) {
-    errorMsg.value = `截图失败: ${e}`
-  } finally {
-    capturing.value = false
-    showScreenshotModal.value = false
-  }
+  await doSingleCapture(timeSec)
 }
 
 async function batchCapture(): Promise<void> {
@@ -140,15 +141,13 @@ async function batchCapture(): Promise<void> {
 
   capturing.value = true
   captureProgress.value = { current: 0, total }
-  captureSuccess.value = 0
 
   for (let i = 0; i < total; i++) {
     captureProgress.value.current = i + 1
     const timeSec = i * batchInterval.value
     const output = `${getScreenshotBasePath()}_frame_${String(i + 1).padStart(Math.max(3, String(total).length), '0')}.png`
     try {
-      const ok = await doCapture(timeSec, output)
-      if (ok) { captureSuccess.value++ }
+      await doCapture(timeSec, output)
     } catch {
       // continue to next frame
     }
@@ -162,21 +161,6 @@ function closeScreenshotModal(): void {
   if (!capturing.value) {
     showScreenshotModal.value = false
   }
-}
-
-function hmsToSeconds(input: string): number {
-  const trimmed = input.trim()
-  if (/^\d+(\.\d+)?$/.test(trimmed)) {
-    return parseFloat(trimmed)
-  }
-  const parts = trimmed.split(':')
-  if (parts.length === 3) {
-    return parseInt(parts[0], 10) * 3600 + parseInt(parts[1], 10) * 60 + parseFloat(parts[2])
-  }
-  if (parts.length === 2) {
-    return parseInt(parts[0], 10) * 60 + parseFloat(parts[1])
-  }
-  return -1
 }
 
 // Persisted settings store
@@ -216,8 +200,7 @@ onMounted(async () => {
 
   // Restore file list
   if (pd.filePaths.length > 0) {
-    await addFiles(pd.filePaths)
-    void loadAllMeta()
+    await addFilesAndLoadMeta(pd.filePaths)
 
     // Restore last index (clamp to valid range)
     if (pd.lastIndex >= 0 && pd.lastIndex < files.value.length) {
@@ -351,7 +334,7 @@ async function selectDir(): Promise<void> {
 
   const scanned = await window.electronAPI.scanPlayerFiles(dir)
   if (scanned.length === 0) {
-    errorMsg.value = '未找到视频文件或加密文件'
+    errorMsg.value = ERR_NO_VIDEO
     return
   }
   await addFilesAndLoadMeta(scanned)
@@ -363,7 +346,7 @@ async function rescanLastFolder(): Promise<void> {
   errorMsg.value = ''
   const scanned = await window.electronAPI.scanPlayerFiles(lastFolder.value)
   if (scanned.length === 0) {
-    errorMsg.value = '未找到视频文件或加密文件'
+    errorMsg.value = ERR_NO_VIDEO
     return
   }
   // Clear existing list then reload
@@ -706,8 +689,7 @@ onUnmounted(async () => {
               v-if="videoSrc"
               ref="videoPlayer"
               :src="videoSrc"
-              class="w-full"
-              style="max-height: 55vh; min-height: 240px;"
+              class="w-full" style="max-height: 55vh; min-height: 240px;"
               preload="auto"
               crossorigin="anonymous"
             />
