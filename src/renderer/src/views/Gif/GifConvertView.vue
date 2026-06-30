@@ -1,24 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { Image, Folder, X, Zap, Clock } from 'lucide-vue-next'
+import { Image, Folder, X, Zap, Clock, Play, Pause } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
-import { secondsToHMS, formatDuration } from '@/utils/time'
+import { secondsToHMS, hmsToSeconds, formatDuration } from '@/utils/time'
 import { clamp } from '@/utils/math'
+import { getFileName } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
 import type { FileEntry } from '@/types/file'
+import type { QualityPreset, WidthOption } from './types'
 
 const progressStore = useProgressStore()
 const { files, addFiles, removeFile, selectOutputDir } = useFileList()
 
-// Quality presets (module-level constants)
-interface QualityPreset {
-  value: 'high' | 'medium' | 'low'
-  label: string
-  description: string
-}
-
+// Quality presets
 const QUALITY_PRESETS: QualityPreset[] = [
   { value: 'high', label: '高质量', description: '最佳画质，文件较大' },
   { value: 'medium', label: '中等质量', description: '画质与大小平衡' },
@@ -29,7 +25,7 @@ const selectedQuality = ref<'high' | 'medium' | 'low'>('medium')
 // Parameters
 const fps = ref(10)
 const selectedWidth = ref('480')
-const WIDTH_OPTIONS = [
+const WIDTH_OPTIONS: WidthOption[] = [
   { label: '原始尺寸', value: '0' },
   { label: '320px', value: '320' },
   { label: '480px (推荐)', value: '480' },
@@ -46,7 +42,7 @@ const MIN_TRIM_GAP = 0.1
 
 // ---- HH:MM:SS fields derived from trimSec refs (pattern: SplitMergeView) ----
 function hmsFieldSetter(field: 'start' | 'end', h: string, m: string, s: string): void {
-  const total = parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s)
+  const total = hmsToSeconds(h, m, s)
   if (isNaN(total)) { return }
   if (field === 'start') {
     trimStartSec.value = clamp(total, 0, trimEndSec.value - MIN_TRIM_GAP)
@@ -248,7 +244,10 @@ function estimateOutputSize(entry: FileEntry): string {
   if (!entry.meta || entry.meta.duration === 0) { return '未知' }
   const duration = enableTrim.value ? trimDuration.value : entry.meta.duration
   const w = computedWidth.value > 0 ? computedWidth.value : (entry.meta.width || 640)
-  const pixels = w * (w * 9 / 16)
+  const h = entry.meta.height
+    ? Math.round(w * (entry.meta.height / entry.meta.width))
+    : Math.round(w * 9 / 16)
+  const pixels = w * h
   const frames = duration * fps.value
   const qualityFactors: Record<string, number> = { high: 0.6, medium: 0.4, low: 0.2 }
   const factor = qualityFactors[selectedQuality.value]
@@ -376,20 +375,15 @@ onUnmounted(() => {
                 class="p-1.5 rounded-full"
                 :class="isPlaying ? 'bg-accent-purple' : 'bg-accent-blue'"
               >
-                <svg v-if="isPlaying" class="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="4" width="4" height="16" rx="1" />
-                  <rect x="14" y="4" width="4" height="16" rx="1" />
-                </svg>
-                <svg v-else class="w-3.5 h-3.5 text-white ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="5,3 19,12 5,21" />
-                </svg>
+                <Pause v-if="isPlaying" :size="14" class="text-white" />
+                <Play v-else :size="14" class="text-white ml-0.5" />
               </button>
               <span class="text-xs font-mono text-text-secondary">
                 {{ secondsToHMS(currentTime) }} / {{ secondsToHMS(maxDuration) }}
               </span>
             </div>
             <span v-if="files[0]?.meta" class="text-xs text-text-muted truncate ml-2 max-w-[160px]">
-              {{ files[0].path.split(/[/\\]/).pop() }}
+              {{ getFileName(files[0].path) }}
             </span>
           </div>
         </div>
@@ -484,7 +478,7 @@ onUnmounted(() => {
                   <div class="flex items-center gap-2">
                     <Image :size="16" class="text-warning flex-shrink-0" />
                     <span class="truncate max-w-[200px]" :title="entry.path">
-                      {{ entry.path.split(/[/\\]/).pop() }}
+                      {{ getFileName(entry.path) }}
                     </span>
                   </div>
                 </td>
@@ -518,11 +512,10 @@ onUnmounted(() => {
               v-for="p in QUALITY_PRESETS"
               :key="p.value"
               @click="selectedQuality = p.value"
-              class="preset-btn p-3 rounded-lg text-left transition-all duration-200"
+              class="quality-preset-btn p-3 rounded-lg text-left transition-all duration-200 border"
               :class="selectedQuality === p.value
                 ? 'bg-warning/10 border-warning/50'
                 : 'bg-bg-tertiary/50 border-transparent'"
-              style="border-width: 1px; border-style: solid;"
             >
               <span class="text-sm font-medium text-text-primary block">{{ p.label }}</span>
               <span class="text-xs text-text-muted">{{ p.description }}</span>
@@ -623,61 +616,5 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* Slider color theme (structure from global slider-base) */
-.slider {
-  background: linear-gradient(to right, var(--color-warning), var(--color-accent-light));
-}
-
-.slider::-webkit-slider-thumb {
-  border: 2px solid var(--color-warning);
-  box-shadow: 0 0 8px rgba(240, 160, 80, 0.4);
-}
-
-/* ---- Timeline ---- */
-.timeline-track {
-  position: relative;
-  width: 100%;
-  height: 40px;
-  background: hsl(var(--background));
-  border-radius: 10px;
-  display: flex;
-  overflow: visible;
-  cursor: pointer;
-  user-select: none;
-}
-
-.timeline-dimmed-l,
-.timeline-dimmed-r {
-  height: 100%;
-  background: hsl(var(--background) / 0.8);
-  flex-shrink: 0;
-  pointer-events: none;
-}
-
-.timeline-selected {
-  position: relative;
-  height: 100%;
-  background: linear-gradient(90deg, rgba(240, 160, 80, 0.3), rgba(210, 153, 34, 0.35));
-  border-left: 2px solid var(--color-warning);
-  border-right: 2px solid var(--color-accent-light);
-  flex-shrink: 0;
-}
-
-.timeline-playhead {
-  position: absolute;
-  top: 0;
-  width: 2px;
-  height: 100%;
-  background: var(--color-playhead);
-  outline: 1px solid rgba(255, 107, 107, 0.3);
-  z-index: 5;
-  transition: left 0.1s linear;
-  pointer-events: none;
-}
-
-@media (max-width: 768px) {
-  .slider {
-    height: 8px;
-  }
-}
+@use "../../assets/styles/gif";
 </style>

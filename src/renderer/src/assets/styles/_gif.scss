@@ -1,0 +1,92 @@
+// ─── GifConvertView 共享样式 ────────────────────────────────────────────────────
+
+// Local rgb tokens for alpha compositing with the project's hex color palette
+$_gif-warning-rgb: 210 153 34;        // --color-warning  #D29922
+$_gif-warning-light-rgb: 240 160 80;  // lighter tint for gradient start
+$_gif-playhead-rgb: 255 107 107;      // --color-playhead #FF6B6B
+
+/* Slider color theme (structure from global slider-base) */
+.slider {
+  background: linear-gradient(to right, var(--color-warning), var(--color-accent-light));
+}
+
+.slider::-webkit-slider-thumb {
+  border: 2px solid var(--color-warning);
+  box-shadow: 0 0 8px rgb($_gif-warning-light-rgb / 0.4);
+}
+
+/* ---- Timeline ---- */
+.timeline-track {
+  position: relative;
+  width: 100%;
+  height: 40px;
+  background: hsl(var(--background));
+  border-radius: var(--radius-md, 8px);
+  display: flex;
+  overflow: visible;
+  cursor: pointer;
+  user-select: none;
+}
+
+.timeline-dimmed-l,
+.timeline-dimmed-r {
+  height: 100%;
+  background: hsl(var(--background) / 0.8);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.timeline-selected {
+  position: relative;
+  height: 100%;
+  background: linear-gradient(90deg, rgb($_gif-warning-light-rgb / 0.3), rgb($_gif-warning-rgb / 0.35));
+  border-left: 2px solid var(--color-warning);
+  border-right: 2px solid var(--color-accent-light);
+  flex-shrink: 0;
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--color-playhead);
+  outline: 1px solid rgb($_gif-playhead-rgb / 0.3);
+  z-index: 5;
+  transition: left 0.1s linear;
+  pointer-events: none;
+}
+
+/* Quality preset buttons */
+.quality-preset-btn {
+  border-width: 1px;
+  border-style: solid;
+}
+
+/* Trim handle */
+.trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  background: var(--color-warning);
+  opacity: 0.8;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.trim-handle-start {
+  left: -5px;
+  border-radius: var(--radius-sm, 4px) 0 0 var(--radius-sm, 4px);
+}
+
+.trim-handle-end {
+  right: -5px;
+  border-radius: 0 var(--radius-sm, 4px) var(--radius-sm, 4px) 0;
+}
+
+@media (max-width: 768px) {
+  .slider {
+    height: 8px;
+  }
+}

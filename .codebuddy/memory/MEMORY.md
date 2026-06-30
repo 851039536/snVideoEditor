@@ -1,61 +1,35 @@
-# SN Video Editor 项目记忆
+# Project Memory
 
-## 项目概述
-- **名称**: SN Video Editor - 模块化视频编辑桌面工具
-- **技术栈**: Electron 31 + Vite 5 + Vue 3.4 + TypeScript 5 + Pinia + Vue Router 4 + TailwindCSS
-- **框架**: electron-vite 2.x（三进程分离架构：main/preload/renderer）
-- **视频处理**: fluent-ffmpeg + ffmpeg-static + ffprobe-static
-- **加密**: Node.js crypto (AES-256-CTR 流式加密)
+## Code Style
+- if 语句必须有花括号 `{}`，即使只有一行
+- 禁止执行 `npm run build` 或 `dotnet build`，由用户自行验证
+- Vue 组件使用 `<script setup lang="ts">` + Composition API
 
-## 项目结构
-```
-snVideoEditor/
-├── src/
-│   ├── main/           # 主进程 - FFmpeg 调度、加密、文件操作 + IPC handlers
-│   │   ├── index.ts    # 入口：创建窗口 + 注册所有 IPC
-│   │   └── modules/    # ffmpeg.ts / crypto.ts / file.ts
-│   ├── preload/        # 预加载 - contextBridge 安全 API
-│   │   └── index.ts + index.d.ts
-│   └── renderer/       # Vue 渲染进程
-│       └── src/
-│           ├── views/         # Home / SplitMerge / Compress / Encrypt
-│           ├── components/    # SideNav / FileDropZone / ProgressPanel / VideoPreview
-│           ├── stores/        # progress.ts / settings.ts
-│           └── router/
-```
+## Architecture Rules (6 Principles)
+1. 功能模块化：每个视图独立目录，含主视图 + `types/index.ts`
+2. 注册完整性：新增视图需同步更新 router + feature config
+3. 类型安全单一数据源
+4. 统一入口：跨功能操作通过 IPC 或 Pinia stores
+5. 设计 Token：禁止硬编码颜色/间距/字体
+6. 样式分离：`.vue` `<style>` 禁止内联 >10 行，提取到 SCSS partial
 
-## 三大功能模块
-1. **SplitMerge（分割合并）**: 时间点分割 / 多视频合并 / 拖拽排序
-2. **Compress（压缩）**: 4级预设 + 自定义CRF/分辨率/码率/编码 / 批量处理
-3. **Encrypt（加密解密）**: AES-256-CTR 流式加解密 / 密码强度检测 / 文件夹批量
+## Key Files
+- `src/renderer/src/config/features.ts` — 功能元数据单一数据源
+- `src/renderer/src/assets/styles/global.scss` — CSS 变量 + 全局 class
+- `src/renderer/src/composables/useInfoTooltip.ts` — 信息提示气泡 composable
 
-## 文件组织规则
-- **views 子目录规则**：完整功能模块放在 `views/<功能名>/` 子目录下，主页面命名为 `<功能名>View.vue`，子组件放同目录
-  - 示例：SplitMerge 功能 → `views/SplitMerge/SplitMergeView.vue` + `views/SplitMerge/ClipList.vue`
-- **components 目录**：仅放跨模块共享的通用组件
-- 新增功能页面时同步更新 `router/index.ts`、HomeView 入口卡片
+## CSS Variables
+- Color tokens: `--color-warning` (#D29922), `--color-playhead` (#FF6B6B), `--color-accent-light` (#A78BFA)
+- Design tokens: `--radius-sm` 4px, `--radius-base` 6px, `--radius-md` 8px, `--radius-lg` 12px
+- Transition: `--transition-fast` 0.12s, `--transition-normal` 0.2s, `--transition-slow` 0.3s
 
-## 代码风格
-- if 语句必须带花括号 `{}`
-- 主进程模块用 function 导出，通过 ipcMain.handle/handle 注册
-- 预加载通过 contextBridge 暴露 typed API
-- Vue 组件使用 Composition API + `<script setup lang="ts">`
-
-## 设计风格
-- 深色科技风（Dark Tech），支持一键切换浅色主题（Sun/Moon 按钮）
-- 主题通过 `<html>.light` class + CSS 变量双体系驱动，localStorage 持久化
-- 深色配色: bg #0D1117/#161B22/#21262D, text #E6EDF3/#8B949E
-- 浅色配色: bg #FFFFFF/#F6F8FA/#EBEDF0, text #1F2328/#656D76
-- 渐变: accent-blue #5B8DEF → accent-purple #A78BFA
-- 霓虹蓝紫光晕卡片 + 微动效
-
-## 启动说明
-```bash
-npm install   # 安装依赖（包含 ffmpeg-static 二进制下载）
-npm run dev   # 启动开发模式
-```
-
-## 注意事项
-- 禁止私自执行构建命令（太慢），修改代码后由用户自行验证
-- ffmpeg-static 和 ffprobe-static 通过 require() 动态加载
-- electron-builder 打包时 ffmpeg 二进制需随 app 分发
+## 2026-06-30: GifConvertView 代码审查与修复
+- 创建 `views/Gif/types/index.ts`（QualityPreset + WidthOption 接口）
+- 提取 58 行内联样式到 `assets/styles/_gif.scss`，@use 导入
+- 修复硬编码颜色→SCSS `rgb()` 变量、`border-radius:10px`→`var(--radius-md)`
+- 用 `hmsToSeconds()` 替代手动 h/m/s→秒计算
+- 用 `getFileName()` 替代手动 `split().pop()`（2处）
+- 用 lucide `Play`/`Pause` 图标替代内联 SVG
+- `preset-btn` 死 class→`quality-preset-btn`，移除硬编码 `style=`
+- `estimateOutputSize` 16:9 硬编码→使用视频实际宽高比，回退 16:9
+- 验证通过：types/index.ts + _gif.scss 零 lint error，GifConvertView.vue 仅 pre-existing `@use` CSS 误报
