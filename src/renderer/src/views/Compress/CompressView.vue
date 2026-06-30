@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { FileVideo, Folder, X, Zap, Monitor, Download, FolderOpen, Info, HelpCircle } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import VideoDetailModal from './VideoDetailModal.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
-import { formatSize, getDirName } from '@/utils/format'
+import { formatSize, getDirName, getFileName } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
 import { useInfoTooltip } from '@/composables/useInfoTooltip'
 import type { FileEntry } from '@/types/file'
@@ -36,6 +36,8 @@ const errorMsg = ref('')
 let isUnmounted = false
 
 // Persist changes back to store
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+
 function savePreset(): void {
   settingsStore.setCompressPreset({
     crfValue: crfValue.value,
@@ -48,6 +50,11 @@ function savePreset(): void {
   })
 }
 
+function savePresetDebounced(): void {
+  if (saveTimer) { clearTimeout(saveTimer) }
+  saveTimer = setTimeout(savePreset, 300)
+}
+
 // Video detail modal
 const detailEntry = ref<FileEntry | null>(null)
 const detailModalRef = ref<InstanceType<typeof VideoDetailModal> | null>(null)
@@ -55,10 +62,8 @@ const detailModalRef = ref<InstanceType<typeof VideoDetailModal> | null>(null)
 function openDetail(entry: FileEntry): void {
   detailEntry.value = entry
   // Defer meta fetch to modal's onOpen via nextTick
-  import('vue').then(({ nextTick }) => {
-    nextTick(() => {
-      detailModalRef.value?.onOpen()
-    })
+  nextTick(() => {
+    detailModalRef.value?.onOpen()
   })
 }
 
@@ -142,9 +147,14 @@ watch(resolution, (res) => {
   bitrate.value = RESOLUTION_BITRATE[res] || ''
 })
 
-// Auto-persist preset on any param change
+// Reset 2-Pass when switching back to CRF mode (bitrate becomes empty)
+watch(bitrate, (val) => {
+  if (!val) { twoPass.value = false }
+})
+
+// Auto-persist preset on any param change (debounced to avoid localStorage spam on slider drag)
 watch([crfValue, resolution, bitrate, codec, audioBitrate, preset, twoPass], () => {
-  savePreset()
+  savePresetDebounced()
 }, { deep: false })
 
 function estimateOutputSize(entry: FileEntry): string {
@@ -198,24 +208,32 @@ async function startCompress(): Promise<void> {
     }
     if (result.failed.length === 0) {
       progressStore.finish()
-      // Build comparison data
-      for (const outputPath of result.successFiles) {
-        try {
-          const fileInfo = await window.electronAPI.getFileInfo(outputPath)
-          const original = files.value.find((f) => f.outputPath === outputPath)
+      // Build comparison data (concurrent file-info fetches)
+      const results = await Promise.all(
+        result.successFiles.map(async (outputPath) => {
+          try {
+            const fileInfo = await window.electronAPI.getFileInfo(outputPath)
+            return { outputPath, fileInfo }
+          } catch { return null }
+        })
+      )
+      if (!isUnmounted) {
+        for (const r of results) {
+          if (!r) { continue }
+          const original = files.value.find((f) => f.outputPath === r.outputPath)
           if (original && original.meta) {
             compressResult.value.push({
-              fileName: outputPath.split(/[/\\]/).pop() || outputPath,
+              fileName: getFileName(r.outputPath),
               originalSize: original.meta.size,
-              compressedSize: fileInfo.size
+              compressedSize: r.fileInfo.size
             })
           }
-        } catch { /* skip files that can't be read */ }
+        }
       }
     } else {
       const failedNames = result.failed.map((_p) => {
         const f = files.value.find((x) => x.path === _p)
-        return f ? (f.path.split(/[/\\]/).pop() || _p) : _p
+        return f ? getFileName(f.path) : _p
       }).join(', ')
       errorMsg.value = `${result.failed.length} 个文件压缩失败: ${failedNames}`
       progressStore.reset()
@@ -290,7 +308,7 @@ onUnmounted(() => {
                   <div class="flex items-center gap-2">
                     <FileVideo :size="16" class="text-accent-purple flex-shrink-0" />
                     <span class="truncate max-w-[200px]" :title="entry.path">
-                      {{ entry.path.split(/[/\\]/).pop() }}
+                      {{ getFileName(entry.path) }}
                     </span>
                   </div>
                 </td>
@@ -658,7 +676,7 @@ onUnmounted(() => {
                 {{ formatSize(item.originalSize) }} → {{ formatSize(item.compressedSize) }}
               </span>
               <span class="text-xs font-mono text-success whitespace-nowrap">
-                -{{ Math.round((1 - item.compressedSize / item.originalSize) * 100) }}%
+                -{{ item.originalSize > 0 ? Math.round((1 - item.compressedSize / item.originalSize) * 100) : 0 }}%
               </span>
             </div>
           </div>
