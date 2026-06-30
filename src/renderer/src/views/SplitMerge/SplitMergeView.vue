@@ -251,6 +251,7 @@ watch(mode, (newMode) => {
     outputName.value = ''
     outputDir.value = ''
     errorMsg.value = ''
+    files.value = []
   }
 })
 
@@ -502,8 +503,15 @@ function moveClip(index: number, direction: -1 | 1): void {
 function getMergeOutputName(): string {
   const now = new Date()
   const pad = (n: number): string => String(n).padStart(2, '0')
-  const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  return `SN_${ts}.mp4`
+  const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+
+  // 优先使用裁剪片段对应的原视频名称
+  if (clips.value.length > 0) {
+    const baseName = clips.value[0].sourceFileName.replace(/\.[^.]+$/, '')
+    return `${baseName}_${dateStr}.mp4`
+  }
+
+  return `SN_${dateStr}.mp4`
 }
 
 async function selectOutputPath(): Promise<void> {
