@@ -7,6 +7,11 @@ export interface PlayerEntry {
   tempPath: string | null
 }
 
+export interface ScreenshotMarker {
+  time: number    // seconds
+  label: string   // e.g. "截图 #1"
+}
+
 /** Data persisted to localStorage across app restarts */
 export interface PersistedPlayerData {
   /** Absolute paths of playlist files */
@@ -19,6 +24,8 @@ export interface PersistedPlayerData {
   lastIndex: number
   /** Playback position in seconds for the last played file */
   playbackTime: number
+  /** Screenshot markers for the progress bar */
+  screenshotMarkers: ScreenshotMarker[]
 }
 
 export const DEFAULT_PLAYER_DATA: PersistedPlayerData = {
@@ -26,5 +33,6 @@ export const DEFAULT_PLAYER_DATA: PersistedPlayerData = {
   lastFolder: '',
   autoDecrypt: true,
   lastIndex: -1,
-  playbackTime: 0
+  playbackTime: 0,
+  screenshotMarkers: []
 }

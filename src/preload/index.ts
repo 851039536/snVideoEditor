@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 export interface ProgressInfo {
-  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot'
+  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail'
   percent: number
   currentFile: number
   totalFiles: number
@@ -163,6 +163,17 @@ const electronAPI = {
   // Screenshot
   captureScreenshot: (opts: { input: string; output: string; time: number }): Promise<boolean> =>
     ipcRenderer.invoke('video:screenshot', opts),
+
+  // Thumbnails
+  generateThumbnails: (opts: {
+    input: string
+    outputDir: string
+    thumbWidth?: number
+    thumbHeight?: number
+    interval?: number
+    cols?: number
+  }): Promise<{ spriteUrl: string; vttUrl: string; count: number; interval: number }> =>
+    ipcRenderer.invoke('video:generateThumbnails', opts),
 
   // Progress
   onProgress: (callback: (info: ProgressInfo) => void): void => {

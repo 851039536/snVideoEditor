@@ -102,6 +102,27 @@
   }
 }
 
+// ---- Player Toolbar (below video) ----
+.player-toolbar {
+  user-select: none;
+}
+
+// ---- Plyr markers (screenshot points) ----
+.plyr__progress__marker {
+  width: 6px !important;
+  height: 6px !important;
+  background: var(--plyr-color-main, hsl(220, 70%, 55%)) !important;
+  border: 2px solid hsl(var(--background));
+  border-radius: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  transition: transform var(--transition-fast, 0.12s);
+
+  &:hover {
+    transform: translate(-50%, -50%) scale(1.5);
+  }
+}
+
 // ---- Responsive: small screen collapse sidebar ----
 @media (max-width: 1024px) {
   .player-layout {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { Play, Lock, LockKeyholeOpen, FileVideo, FolderOpen, Trash2, Camera, Loader, Image, X } from 'lucide-vue-next'
+import { Play, Lock, LockKeyholeOpen, FileVideo, FolderOpen, Trash2, Camera, Loader, Image, X, Eye, EyeOff, Gauge } from 'lucide-vue-next'
 // @ts-ignore - Plyr ESM default export
 import Plyr from 'plyr'
 import 'plyr/dist/plyr.css'
@@ -8,7 +8,7 @@ import { formatSize, getFileName } from '@/utils/format'
 import { secondsToHMS, parseTimeInput } from '@/utils/time'
 import type { VideoMeta } from '@/types/file'
 import { DEFAULT_ENCRYPT_KEY } from '@/config/crypto'
-import type { PlayerEntry } from './types'
+import type { PlayerEntry, ScreenshotMarker } from './types'
 import { useSettingsStore } from '@/stores/settings'
 import PlaylistPanel from './PlaylistPanel.vue'
 
@@ -68,6 +68,104 @@ const capturing = ref(false)
 const captureProgress = ref({ current: 0, total: 0 })
 const screenshotMode = ref<'current' | 'custom' | 'batch'>('current')
 
+// ---- Markers (screenshot positions on progress bar) ----
+const screenshotMarkers = ref<ScreenshotMarker[]>([])
+
+function addMarker(timeSec: number): void {
+  const rounded = Math.round(timeSec)
+  if (screenshotMarkers.value.some((m) => Math.abs(m.time - rounded) < 1)) { return }
+  const label = `截图 ${screenshotMarkers.value.length + 1}`
+  screenshotMarkers.value.push({ time: rounded, label })
+}
+
+// ---- Toolbar controls ----
+const showControlsOverlay = ref(false)     // force-show controls bar
+const autoHideControls = ref(true)          // auto-hide toggle
+const currentSpeed = ref(1)                 // synced with Plyr speed
+const speedOptions = [0.5, 0.75, 1, 1.25, 1.5, 2]
+
+function setSpeed(speed: number): void {
+  if (!player) { return }
+  currentSpeed.value = speed
+  player.speed = speed
+}
+
+function toggleControlsOverlay(): void {
+  if (!player) { return }
+  showControlsOverlay.value = !showControlsOverlay.value
+  if (showControlsOverlay.value) {
+    player.toggleControls(true)
+  } else {
+    player.toggleControls(false)
+  }
+}
+
+function toggleAutoHide(): void {
+  autoHideControls.value = !autoHideControls.value
+}
+
+// ---- Thumbnails ----
+const thumbnailGenerating = ref(false)
+const thumbnailData = ref<{ spriteUrl: string; vttUrl: string } | null>(null)
+const thumbnailHash = ref('')
+
+function getThumbnailCacheDir(): string {
+  if (!tempDir.value) { return '' }
+  // Use video path hash as unique cache key
+  const hash = hashPath(currentFile.value?.path || '')
+  const cacheDir = tempDir.value + '/thumbnails_' + hash
+  return cacheDir
+}
+
+function hashPath(p: string): string {
+  let hash = 0
+  for (let i = 0; i < p.length; i++) {
+    const ch = p.charCodeAt(i)
+    hash = ((hash << 5) - hash) + ch
+    hash |= 0 // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString(16)
+}
+
+async function generateThumbnailsIfNeeded(): Promise<void> {
+  if (!currentFile.value || !tempDir.value) { return }
+
+  const input = getScreenshotInputPath()
+  if (!input) { return }
+
+  const cacheDir = getThumbnailCacheDir()
+  const h = hashPath(currentFile.value.path)
+
+  // Already loaded for this video
+  if (thumbnailHash.value === h && thumbnailData.value) { return }
+
+  thumbnailHash.value = h
+  thumbnailData.value = null
+
+  thumbnailGenerating.value = true
+  try {
+    const dur = currentFile.value.meta?.duration || 0
+    if (dur < 5) { return } // Too short, skip
+
+    const result = await window.electronAPI.generateThumbnails({
+      input,
+      outputDir: cacheDir,
+      thumbWidth: 160,
+      thumbHeight: 90,
+      interval: Math.max(5, Math.ceil(dur / 100)), // ~100 thumbnails total
+      cols: 10
+    })
+    if (result.vttUrl) {
+      thumbnailData.value = { spriteUrl: result.spriteUrl, vttUrl: result.vttUrl }
+    }
+  } catch (_e) {
+    // Silently skip — thumbnail generation is best-effort
+    console.warn('Thumbnail generation failed:', _e)
+  } finally {
+    thumbnailGenerating.value = false
+  }
+}
+
 function getScreenshotInputPath(): string {
   const cf = currentFile.value
   if (!cf) { return '' }
@@ -110,7 +208,10 @@ async function doSingleCapture(timeSec: number): Promise<void> {
   capturing.value = true
   try {
     const output = `${getScreenshotBasePath()}_screenshot_${new Date().toTimeString().slice(0, 8).replace(COLON_RE, '-')}.png`
-    await doCapture(timeSec, output)
+    const ok = await doCapture(timeSec, output)
+    if (ok) {
+      addMarker(timeSec)
+    }
   } catch (e) {
     errorMsg.value = `截图失败: ${e}`
   } finally {
@@ -147,7 +248,10 @@ async function batchCapture(): Promise<void> {
     const timeSec = i * batchInterval.value
     const output = `${getScreenshotBasePath()}_frame_${String(i + 1).padStart(Math.max(3, String(total).length), '0')}.png`
     try {
-      await doCapture(timeSec, output)
+      const ok = await doCapture(timeSec, output)
+      if (ok) {
+        addMarker(timeSec)
+      }
     } catch {
       // continue to next frame
     }
@@ -176,7 +280,8 @@ function saveToStore(): void {
     lastFolder: lastFolder.value,
     autoDecrypt: autoDecrypt.value,
     lastIndex: currentIndex.value,
-    playbackTime: player ? player.currentTime || 0 : 0
+    playbackTime: player ? player.currentTime || 0 : 0,
+    screenshotMarkers: screenshotMarkers.value
   })
 }
 
@@ -198,6 +303,11 @@ onMounted(async () => {
   // Restore last folder
   lastFolder.value = pd.lastFolder
 
+  // Restore screenshot markers
+  if (pd.screenshotMarkers?.length > 0) {
+    screenshotMarkers.value = pd.screenshotMarkers
+  }
+
   // Restore file list
   if (pd.filePaths.length > 0) {
     await addFilesAndLoadMeta(pd.filePaths)
@@ -215,6 +325,27 @@ watch(
   () => { saveToStore() },
   { deep: true }
 )
+
+// Reactively toggle Plyr auto-hide when user changes the switch
+let controlsHiddenHandler: (() => void) | null = null
+watch(autoHideControls, (val) => {
+  if (!player) { return }
+  if (!val) {
+    player.toggleControls(true)
+    controlsHiddenHandler = () => {
+      if (!autoHideControls.value && player) {
+        player.toggleControls(true)
+      }
+    }
+    player.on('controlshidden', controlsHiddenHandler)
+  } else {
+    if (controlsHiddenHandler) {
+      player.off('controlshidden', controlsHiddenHandler)
+      controlsHiddenHandler = null
+    }
+    player.toggleControls(false)
+  }
+})
 
 // ---- Computed ----
 const currentFile = computed((): PlayerEntry | null => {
@@ -386,6 +517,7 @@ async function playFile(index: number): Promise<void> {
     if (file.tempPath) {
       await nextTick()
       initAndPlay()
+      void generateThumbnailsIfNeeded()
     } else if (autoDecrypt.value) {
       await decryptAndPlay(file, DEFAULT_ENCRYPT_KEY)
     } else {
@@ -400,6 +532,7 @@ async function playFile(index: number): Promise<void> {
     }
     await nextTick()
     initAndPlay()
+    void generateThumbnailsIfNeeded()
   }
 }
 
@@ -433,13 +566,32 @@ function initAndPlay(): void {
       'fullscreen'
     ],
     settings: ['speed'],
-    speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
+    speed: { selected: currentSpeed.value, options: speedOptions },
     tooltips: { controls: true, seek: true },
     keyboard: { focused: true, global: true },
     fullscreen: { enabled: true, fallback: true },
-    hideControls: true,
-    resetOnEnd: false
+    hideControls: autoHideControls.value,
+    resetOnEnd: false,
+    markers: { enabled: screenshotMarkers.value.length > 0, points: screenshotMarkers.value },
+    previewThumbnails: thumbnailData.value
+      ? { enabled: true, src: thumbnailData.value.vttUrl }
+      : { enabled: false, src: '' }
   })
+
+  player.on('ratechange', () => {
+    if (player) {
+      currentSpeed.value = player.speed
+    }
+  })
+
+  // Keep controls visible when auto-hide is disabled
+  if (!autoHideControls.value) {
+    player.on('controlshidden', () => {
+      if (!autoHideControls.value && player) {
+        player.toggleControls(true)
+      }
+    })
+  }
 
   player.on('play', () => {
     isPlaying.value = true
@@ -514,6 +666,7 @@ async function decryptAndPlay(file: PlayerEntry, password: string): Promise<void
     await loadMeta(file)
     await nextTick()
     initAndPlay()
+    void generateThumbnailsIfNeeded()
   } finally {
     decrypting = false
   }
@@ -704,6 +857,54 @@ onUnmounted(async () => {
                 </p>
               </div>
             </div>
+          </div>
+
+          <!-- Player Toolbar (below video) -->
+          <div
+            v-if="videoSrc"
+            class="player-toolbar flex items-center gap-1 px-3 py-2 border-t border-bg-tertiary/60"
+          >
+            <!-- Controls Overlay Toggle -->
+            <button
+              @click="toggleControlsOverlay"
+              :class="showControlsOverlay ? 'text-accent-blue bg-accent-blue/10' : 'text-text-muted hover:text-text-secondary'"
+              class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors"
+              :title="showControlsOverlay ? '隐藏控件栏' : '显示控件栏'"
+            >
+              <Eye v-if="!showControlsOverlay" :size="13" />
+              <EyeOff v-else :size="13" />
+              <span class="hidden sm:inline">控件栏</span>
+            </button>
+
+            <span class="w-px h-4 bg-bg-tertiary" />
+
+            <!-- Speed Quick Selector -->
+            <div class="flex items-center gap-0.5">
+              <Gauge :size="12" class="text-text-muted mr-1" />
+              <button
+                v-for="s in speedOptions"
+                :key="s"
+                @click="setSpeed(s)"
+                :class="currentSpeed === s
+                  ? 'text-accent-blue bg-accent-blue/10 border-accent-blue/30'
+                  : 'text-text-muted border-transparent hover:text-text-secondary'"
+                class="px-1.5 py-0.5 rounded text-xs font-mono font-medium transition-all border"
+              >
+                {{ s }}×
+              </button>
+            </div>
+
+            <span class="w-px h-4 bg-bg-tertiary ml-auto" />
+
+            <!-- Auto-Hide Controls Toggle -->
+            <button
+              @click="toggleAutoHide"
+              :class="autoHideControls ? 'text-text-muted' : 'text-accent-blue bg-accent-blue/10'"
+              class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors hover:bg-bg-tertiary/40"
+              :title="autoHideControls ? '自动隐藏控件：开' : '自动隐藏控件：关'"
+            >
+              <span>{{ autoHideControls ? '自动隐藏：开' : '自动隐藏：关' }}</span>
+            </button>
           </div>
         </div>
         </div>

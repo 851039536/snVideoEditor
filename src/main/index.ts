@@ -3,7 +3,7 @@ import { join } from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, convertToGif, batchConvertToGif, captureScreenshot, cancelFfmpegOperation, getAvailableEncoders } from './modules/ffmpeg'
+import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, convertToGif, batchConvertToGif, captureScreenshot, generateThumbnailSprite, cancelFfmpegOperation, getAvailableEncoders } from './modules/ffmpeg'
 import { downloadM3u8, fetchM3u8Variants } from './modules/download'
 import { fetchPageM3u8ViaBrowser } from './modules/page-fetcher'
 import { DownloadQueueManager } from './modules/download-queue'
@@ -254,6 +254,18 @@ function registerPlayerHandlers(): void {
   wrapOperation<{ input: string; output: string; time: number }>(
     'video:screenshot', 'screenshot', 'screenshot',
     (opts, onProgress) => captureScreenshot({ ...opts, onProgress })
+  )
+
+  wrapOperation<{
+    input: string
+    outputDir: string
+    thumbWidth?: number
+    thumbHeight?: number
+    interval?: number
+    cols?: number
+  }>(
+    'video:generateThumbnails', 'thumbnail', 'thumbnail',
+    (opts, onProgress) => generateThumbnailSprite({ ...opts, onProgress })
   )
 }
 
