@@ -1,6 +1,8 @@
 # SN Video Editor 加密文件解密指南
 
 > 本文档面向需要在第三方程序中解密 SN Video Editor 加密文件（`.enc`）的开发者。
+>
+> **当前格式版本：v2（0x02）**，PBKDF2 迭代 10,000 次。
 
 ---
 
@@ -9,10 +11,11 @@
 | 项 | 值 |
 |----|-----|
 | 加密算法 | AES-256-CTR（计数器模式） |
-| 密钥派生 | PBKDF2-HMAC-SHA256，10 万次迭代 |
+| 密钥派生 | PBKDF2-HMAC-SHA256，**1 万次迭代** |
 | 派生密钥长度 | 32 字节（256 位） |
 | IV 长度 | 16 字节（128 位），每次加密随机生成 |
 | Salt 长度 | 16 字节（128 位），每次加密随机生成 |
+| 格式版本 | `0x02`（v2） |
 | 文件头长度 | 64 字节 |
 | 密文起始偏移 | 第 65 字节起（跳过头部） |
 | 加密文件扩展名 | `.enc` |
@@ -26,10 +29,11 @@
 ──────    ────    ────────────
  0        16      IV（初始化向量）
 16        16      Salt（PBKDF2 盐值）
-32        32      保留（全 0 填充）
+32        1       格式版本号（0x02 = v2）
+33        31      保留（全 0 填充）
 ```
 
-> 解密时需从头部提取 IV（偏移 0~15）和 Salt（偏移 16~31），偏移 32~63 的 32 字节保留区域忽略即可。
+> 解密时需从头部提取 IV（偏移 0~15）、Salt（偏移 16~31）和版本号（偏移 32）。偏移 33~63 的 31 字节保留区域忽略即可。版本号必须为 `0x02`，否则应拒绝解密。
 
 ---
 
@@ -37,11 +41,11 @@
 
 ```
 PBKDF2(
-  password = "SN-Video-Editor-2026-Default-Key!",   // 默认密码
-  salt     = <从文件头偏移 16 处读取的 16 字节>,
-  iterations = 100000,
-  keyLen   = 32,                                      // 256 位
-  digest   = SHA-256
+  password   = "SN-Video-Editor-2026-Default-Key!",   // 默认密码
+  salt       = <从文件头偏移 16 处读取的 16 字节>,
+  iterations = 10000,                                   // v2: 1 万次迭代
+  keyLen     = 32,                                      // 256 位
+  digest     = SHA-256
 )
 ```
 
@@ -64,10 +68,11 @@ SN-Video-Editor-2026-Default-Key!
 2. 读取前 64 字节头部
 3. 提取 IV = header[0:16]
 4. 提取 Salt = header[16:32]
-5. 使用 PBKDF2(password, Salt, 100000, SHA-256) 派生 32 字节 Key
-6. 创建 AES-256-CTR 解密器（Key, IV）
-7. 从文件偏移 64 处开始读取密文
-8. 通过解密器解密，写入输出文件
+5. 检查版本号 header[32] == 0x02，不匹配则拒绝
+6. 使用 PBKDF2(password, Salt, 10000, SHA-256) 派生 32 字节 Key
+7. 创建 AES-256-CTR 解密器（Key, IV）
+8. 从文件偏移 64 处开始读取密文
+9. 通过解密器解密，写入输出文件
 ```
 
 ---
@@ -98,9 +103,14 @@ function decryptFile(inputPath, outputPath, password = DEFAULT_PASSWORD) {
   // 提取 IV 和 Salt
   const iv = header.subarray(0, 16)
   const salt = header.subarray(16, 32)
+  const version = header.readUInt8(32)
 
-  // PBKDF2 派生密钥
-  const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256')
+  if (version !== 0x02) {
+    throw new Error(`不支持的格式版本: 0x${version.toString(16)}`)
+  }
+
+  // PBKDF2 派生密钥 (v2: 1 万次迭代)
+  const key = crypto.pbkdf2Sync(password, salt, 10000, 32, 'sha256')
 
   // 创建解密器
   const decipher = crypto.createDecipheriv('aes-256-ctr', key, iv)
@@ -148,13 +158,17 @@ def decrypt_file(input_path: str, output_path: str, password: bytes = DEFAULT_PA
 
     iv = header[0:16]
     salt = header[16:32]
+    version = header[32]
 
-    # PBKDF2 派生密钥
+    if version != 0x02:
+        raise ValueError(f"不支持的格式版本: 0x{version:02x}")
+
+    # PBKDF2 派生密钥 (v2: 1 万次迭代)
     kdf = PBKDF2HMAC(
         algorithm=hashlib.sha256(),
         length=32,
         salt=salt,
-        iterations=100000,
+        iterations=10000,
         backend=default_backend(),
     )
     key = kdf.derive(password)
@@ -206,12 +220,16 @@ static void DecryptFile(string inputPath, string outputPath)
     // 提取 IV 和 Salt
     byte[] iv = header[0..16];
     byte[] salt = header[16..32];
+    byte version = header[32];
 
-    // PBKDF2 派生密钥
+    if (version != 0x02)
+        throw new InvalidDataException($"不支持的格式版本: 0x{version:x2}");
+
+    // PBKDF2 派生密钥 (v2: 1 万次迭代)
     using var pbkdf2 = new Rfc2898DeriveBytes(
         DefaultPassword,
         salt,
-        100000,
+        10000,
         HashAlgorithmName.SHA256
     );
     byte[] key = pbkdf2.GetBytes(32);

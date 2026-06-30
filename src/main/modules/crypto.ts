@@ -20,7 +20,9 @@ export interface BatchCryptoOptions {
 }
 
 const ALGORITHM = 'aes-256-ctr'
-const HEADER_LENGTH = 64 // 16 bytes IV + 16 bytes salt + 32 bytes for future use
+const FORMAT_VERSION_V2 = 0x02
+const PBKDF2_ITERATIONS = 10000
+const HEADER_LENGTH = 64 // v2: 16B IV + 16B salt + 1B version + 31B reserved
 const CHUNK_SIZE = 64 * 1024 // 64KB chunks
 
 // ---- Cancellation support ----
@@ -40,7 +42,7 @@ export function cancelCryptoOperation(): void {
  * Derive a 32-byte key from password and salt using PBKDF2
  */
 function deriveKey(password: string, salt: Buffer): Buffer {
-  return crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256')
+  return crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 32, 'sha256')
 }
 
 /**
@@ -72,10 +74,11 @@ export function encryptFile(opts: CryptoOptions): Promise<boolean> {
     const outputStream = fs.createWriteStream(opts.output)
     activeStreams = { input: inputStream, output: outputStream }
 
-    // Write header: IV + Salt + padding
+    // Write header: IV + Salt + version + reserved
     const header = Buffer.alloc(HEADER_LENGTH)
     iv.copy(header, 0)
     salt.copy(header, 16)
+    header.writeUInt8(FORMAT_VERSION_V2, 32)
     outputStream.write(header)
 
     let processed = 0
@@ -179,6 +182,12 @@ export function decryptFile(opts: CryptoOptions): Promise<boolean> {
 
     const iv = headerBuf.subarray(0, 16)
     const salt = headerBuf.subarray(16, 32)
+    const version = headerBuf.readUInt8(32)
+
+    if (version !== FORMAT_VERSION_V2) {
+      reject(new Error(`不支持的加密格式版本: 0x${version.toString(16)}，需要 0x${FORMAT_VERSION_V2.toString(16)}`))
+      return
+    }
 
     const key = deriveKey(opts.password, salt)
     const decipher = crypto.createDecipheriv(ALGORITHM, key, iv)
