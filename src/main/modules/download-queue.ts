@@ -15,6 +15,10 @@ export interface QueueItem {
   error?: string
   addedAt: number
   fileName: string
+  /** Progress percentage at the moment of pause, used for resume offset. */
+  pausedAtPercent?: number
+  /** Total video duration in seconds recorded during the last download attempt. */
+  cachedDurationSec?: number
 }
 
 export interface QueueStatus {
@@ -193,14 +197,14 @@ export class DownloadQueueManager {
   }
 
   /** Resume a paused item: set it back to pending so scheduleTasks picks it up.
-   *  Note: download restarts from scratch (partial output is overwritten by -y flag). */
+   *  Passes the paused-at progress so ffmpeg can seek past already-downloaded content. */
   resumeItem(id: string): boolean {
     const item = this.items.find((i) => i.id === id)
     if (!item) { return false }
     if (item.status !== 'paused') { return false }
 
     item.status = 'pending'
-    item.progress = { percent: 0, speed: '', eta: '' }
+    // Keep existing progress display — don't flash to 0
     item.error = undefined
     this.notifyStatus()
     this.scheduleTasks()
@@ -233,6 +237,10 @@ export class DownloadQueueManager {
   ): void {
     // Mark target status first so .then/.catch guards in startDownload won't overwrite
     item.status = targetStatus
+    // Save progress snapshot for resume (pause only, not cancel)
+    if (targetStatus === 'paused') {
+      item.pausedAtPercent = item.progress.percent
+    }
     // Kill the ffmpeg process for this item
     const proc = this.activeProcs.get(item.id)
     if (proc) {
@@ -303,6 +311,9 @@ export class DownloadQueueManager {
       url: item.url,
       output: item.output,
       headers: item.headers,
+      startTime: item.pausedAtPercent !== undefined && item.cachedDurationSec
+        ? (item.pausedAtPercent / 100) * item.cachedDurationSec
+        : undefined,
       onProgress: (data) => {
         item.progress = {
           percent: data.percent,
@@ -313,6 +324,9 @@ export class DownloadQueueManager {
       },
       onProcCreated: (proc) => {
         this.activeProcs.set(item.id, proc)
+      },
+      onDurationDetected: (sec) => {
+        item.cachedDurationSec = sec
       }
     })
       .then(() => {

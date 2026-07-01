@@ -14,6 +14,8 @@ export interface DownloadOptions {
   url: string
   output: string
   headers?: Record<string, string>
+  /** Resume offset in seconds. When set, ffmpeg will use -ss to skip already-downloaded content. */
+  startTime?: number
   onProgress?: (data: {
     percent: number
     currentFile: number
@@ -23,6 +25,8 @@ export interface DownloadOptions {
   }) => void
   /** Callback with the spawned ffmpeg process, so the caller can cancel it. */
   onProcCreated?: (proc: import('child_process').ChildProcess) => void
+  /** Callback when total video duration is first detected from ffmpeg stderr. */
+  onDurationDetected?: (durationSec: number) => void
 }
 
 export interface PageFetchResult {
@@ -203,6 +207,12 @@ export function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
       '-reconnect_delay_max', '5'
     )
 
+    // Resume support: skip already-downloaded content via input seeking.
+    // Using -ss BEFORE -i ensures ffmpeg skips TS segments efficiently.
+    if (opts.startTime && opts.startTime > 0) {
+      args.push('-ss', opts.startTime.toFixed(3))
+    }
+
     args.push(
       '-i', opts.url,
       '-c', 'copy',
@@ -221,6 +231,8 @@ export function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
     const stderrLines: string[] = []
     const MAX_STDERR_LINES = 50
     let durationSec = 0
+    /** Percent offset when resuming from a paused state (0 for fresh downloads). */
+    let startPercent = 0
 
     proc.stderr.on('data', (data: Buffer) => {
       const chunk = data.toString()
@@ -235,6 +247,12 @@ export function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
         const durMatch = chunk.match(/Duration: (\d{2}:\d{2}:\d{2}\.\d{2})/)
         if (durMatch) {
           durationSec = timeToSeconds(durMatch[1])
+          if (opts.startTime && opts.startTime > 0 && durationSec > 0) {
+            startPercent = Math.round((opts.startTime / durationSec) * 100)
+          }
+          if (opts.onDurationDetected) {
+            opts.onDurationDetected(durationSec)
+          }
         }
       }
 
@@ -242,7 +260,14 @@ export function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
       if (parsed && opts.onProgress) {
         const current = timeToSeconds(parsed.time)
         if (durationSec > 0) {
-          const percent = Math.min(Math.round((current / durationSec) * 100), 99)
+          const effectiveDuration = durationSec - (opts.startTime || 0)
+          const segmentPercent = effectiveDuration > 0
+            ? Math.round((current / effectiveDuration) * 100)
+            : 0
+          const percent = Math.min(
+            startPercent + Math.round((segmentPercent * (100 - startPercent)) / 100),
+            99
+          )
           opts.onProgress({
             percent,
             currentFile: 1,
