@@ -12,6 +12,45 @@ import {
   type VideoMeta
 } from './ffmpeg-shared'
 
+/**
+ * Extract actionable error lines from ffmpeg stderr.
+ * Prioritizes encoder/driver errors; falls back to last non-progress lines.
+ */
+function extractErrorSummary(stderrLines: string[]): string {
+  const all = stderrLines.join('')
+  const lines = all.split('\n')
+  const errorPattern = /(?:nvenc|qsv|amf|vaapi)\s*@|Error while opening|Error initializing|Driver does not|not support|incorrect parameters|Conversion failed|Invalid|Unknown encoder|No such file/i
+
+  // Find lines matching known error patterns
+  const errorIdxs: number[] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (errorPattern.test(lines[i])) {
+      errorIdxs.push(i)
+    }
+  }
+
+  if (errorIdxs.length > 0) {
+    // Collect error lines + 1 line of surrounding context
+    const contextSet = new Set<number>()
+    for (const idx of errorIdxs) {
+      for (let j = Math.max(0, idx - 1); j <= Math.min(lines.length - 1, idx + 1); j++) {
+        contextSet.add(j)
+      }
+    }
+    const sorted = [...contextSet].sort((a, b) => a - b)
+    return sorted.map((i) => lines[i].trim()).filter(Boolean).join('\n')
+  }
+
+  // Fallback: last lines that aren't progress noise
+  const meaningful = lines.filter((l) => {
+    const t = l.trim()
+    if (!t) { return false }
+    if (/^(frame=|size=|bitrate=|Metadata:|Duration:|Stream #|compatible_brands|major_brand|encoder\s*:)/.test(t)) { return false }
+    return true
+  })
+  return meaningful.slice(-20).join('\n').trim()
+}
+
 export interface CompressOptions {
   input: string
   output: string
@@ -155,7 +194,7 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
       try {
         const pass1Result = await runCompressPass(pass1Args, opts, 'pass1')
         if (!pass1Result.success) {
-          reject(new Error(`FFmpeg 2-pass (pass 1) 失败: ${pass1Result.stderrLines.join('').slice(-500)}`))
+          reject(new Error(`FFmpeg 2-pass (pass 1) 失败:\n${extractErrorSummary(pass1Result.stderrLines)}`))
           return
         }
       } catch (e) {
@@ -178,7 +217,7 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
         }
 
         if (!pass2Result.success) {
-          reject(new Error(`FFmpeg 2-pass (pass 2) 失败 (code: ${pass2Result.stderrLines.length ? 'error' : 'unknown'}): ${pass2Result.stderrLines.join('').slice(-500)}`))
+          reject(new Error(`FFmpeg 2-pass (pass 2) 失败:\n${extractErrorSummary(pass2Result.stderrLines)}`))
           return
         }
 
@@ -190,24 +229,41 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
         reject(e)
       }
     } else {
-      // Single-pass
-      const args = [...buildCompressArgs(opts), opts.output]
-      try {
-        const result = await runCompressPass(args, opts)
-        if (isCancelled) {
-          resolve(false)
-          return
-        }
+      // Single-pass (with NVENC driver compatibility auto-fallback)
+      const doSinglePass = async (codecOpts: CompressOptions): Promise<boolean> => {
+        const args = [...buildCompressArgs(codecOpts), codecOpts.output]
+        const result = await runCompressPass(args, codecOpts)
+        if (isCancelled) { return false }
         if (result.success) {
-          if (opts.onProgress) {
-            opts.onProgress({ percent: 100, currentFile: 1, totalFiles: 1, speed: '完成', eta: '0:00' })
+          if (codecOpts.onProgress) {
+            codecOpts.onProgress({ percent: 100, currentFile: 1, totalFiles: 1, speed: '完成', eta: '0:00' })
           }
-          resolve(true)
-        } else {
-          reject(new Error(`FFmpeg 压缩失败: ${result.stderrLines.join('').slice(-500)}`))
+          return true
         }
+        throw new Error(`FFmpeg 压缩失败:\n${extractErrorSummary(result.stderrLines)}`)
+      }
+
+      try {
+        const ok = await doSinglePass(opts)
+        if (!ok) { resolve(false); return }
+        resolve(true)
       } catch (e) {
-        reject(e)
+        const msg = e instanceof Error ? e.message : String(e)
+        const isNvenc = (opts.codec || '').includes('nvenc')
+        const isDriverErr = /Driver does not support|minimum required/i.test(msg)
+        if (isNvenc && isDriverErr) {
+          console.warn('[Compress] NVENC 驱动不兼容，自动回退 libx264:', msg.slice(0, 200))
+          try {
+            const fallbackOpts = { ...opts, codec: 'libx264', preset: opts.preset || 'fast' }
+            const ok = await doSinglePass(fallbackOpts)
+            if (!ok) { resolve(false); return }
+            resolve(true)
+          } catch (e2) {
+            reject(e2)
+          }
+        } else {
+          reject(e)
+        }
       }
     }
   })
@@ -216,10 +272,10 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
 /**
  * Batch compress multiple video files
  */
-export async function batchCompress(opts: BatchCompressOptions): Promise<{ success: number; successFiles: string[]; failed: string[] }> {
+export async function batchCompress(opts: BatchCompressOptions): Promise<{ success: number; successFiles: string[]; failed: { input: string; error: string }[] }> {
   let success = 0
   const successFiles: string[] = []
-  const failed: string[] = []
+  const failed: { input: string; error: string }[] = []
 
   resetCancelled()
 
@@ -245,7 +301,8 @@ export async function batchCompress(opts: BatchCompressOptions): Promise<{ succe
       successFiles.push(file.output)
     } catch (e) {
       if (isCancelled) { break }
-      failed.push(file.input)
+      const msg = e instanceof Error ? e.message : String(e)
+      failed.push({ input: file.input, error: msg })
     }
   }
 

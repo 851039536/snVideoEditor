@@ -118,9 +118,15 @@ onMounted(async () => {
     const encoders = await window.electronAPI.getAvailableEncoders()
     if (!isUnmounted) {
       availableEncoders.value = encoders
+      // 校验持久化的 codec 是否在可用编码器列表中，防止跨机器 nvenc 残留
+      if (encoders.length > 0 && !encoders.includes(codec.value)) {
+        codec.value = 'libx264'
+      } else if (encoders.length === 0) {
+        console.warn('[Compress] 未能获取可用编码器列表，ffmpeg 可能启动失败或被安全软件拦截')
+      }
     }
   } catch (_e) {
-    // leave empty
+    console.warn('[Compress] 获取编码器列表异常:', _e)
   }
 })
 
@@ -281,14 +287,15 @@ async function startCompress(): Promise<void> {
 
     // Handle failures
     if (result.failed.length > 0) {
-      for (const failedPath of result.failed) {
-        fileStatuses.value[failedPath] = 'failed'
+      for (const item of result.failed) {
+        fileStatuses.value[item.input] = 'failed'
       }
-      const failedNames = result.failed.map((_p) => {
-        const f = files.value.find((x) => x.path === _p)
-        return f ? getFileName(f.path) : _p
-      }).join(', ')
-      errorMsg.value = `${result.failed.length} 个文件压缩失败: ${failedNames}`
+      const failedDetails = result.failed.map((item) => {
+        const f = files.value.find((x) => x.path === item.input)
+        const name = f ? getFileName(f.path) : item.input
+        return `${name}: ${item.error.slice(0, 500)}`
+      }).join('\n')
+      errorMsg.value = `${result.failed.length} 个文件压缩失败:\n${failedDetails}`
       if (result.successFiles.length === 0) {
         progressStore.reset()
       }

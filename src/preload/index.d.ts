@@ -69,7 +69,7 @@ export interface ElectronAPI {
 
   batchCompress: (opts: {
     files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; twoPass?: boolean }[]
-  }) => Promise<{ success: number; successFiles: string[]; failed: string[] }>
+  }) => Promise<{ success: number; successFiles: string[]; failed: { input: string; error: string }[] }>
 
   // GIF conversion
   convertToGif: (opts: {
