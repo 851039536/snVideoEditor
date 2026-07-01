@@ -1,6 +1,9 @@
 import { downloadM3u8, type DownloadOptions } from './download'
-import { killFfmpegProc } from './ffmpeg'
+import { killFfmpegProc, setFfmpegProc } from './ffmpeg'
 import type { ChildProcess } from 'child_process'
+
+/** Maximum number of items allowed in the download queue. */
+const MAX_QUEUE_SIZE = 100
 
 export interface QueueItem {
   id: string
@@ -62,6 +65,13 @@ export class DownloadQueueManager {
   }
 
   enqueue(opts: DownloadOptions & { fileName?: string }): QueueItem {
+    // Reject if queue is at capacity
+    if (this.items.length >= MAX_QUEUE_SIZE) {
+      throw new Error(
+        `下载队列已满 (上限 ${MAX_QUEUE_SIZE} 个)。请等待部分任务完成或清空已完成项后再添加。`
+      )
+    }
+
     let fileName = opts.fileName || ''
     if (!fileName) {
       const parts = opts.output.replace(/\\/g, '/').split('/')
@@ -139,6 +149,7 @@ export class DownloadQueueManager {
     }
     this.activeProcs.clear()
     this.activeIds.clear()
+    setFfmpegProc(null)
 
     // Mark all pending items as cancelled
     for (const item of this.items) {
@@ -163,24 +174,7 @@ export class DownloadQueueManager {
     }
 
     if (item.status === 'downloading') {
-      // Mark cancelled first so .then/.catch guards won't overwrite
-      item.status = 'cancelled'
-      // Kill the ffmpeg process for this item
-      const proc = this.activeProcs.get(id)
-      if (proc) {
-        killFfmpegProc(proc)
-      }
-      this.activeIds.delete(id)
-      this.activeProcs.delete(id)
-      this.notifyStatus()
-
-      // Release the slot: try to start next pending task
-      this.scheduleTasks()
-
-      // If nothing active and nothing pending, mark idle
-      if (this.activeIds.size === 0 && !this.items.some((i) => i.status === 'pending')) {
-        this.isProcessing = false
-      }
+      this.killAndRelease(item, 'cancelled')
       return true
     }
 
@@ -194,24 +188,7 @@ export class DownloadQueueManager {
     if (!item) { return false }
     if (item.status !== 'downloading') { return false }
 
-    // Mark paused first so .then/.catch guards won't overwrite
-    item.status = 'paused'
-    // Kill the ffmpeg process for this item
-    const proc = this.activeProcs.get(id)
-    if (proc) {
-      killFfmpegProc(proc)
-    }
-    this.activeIds.delete(id)
-    this.activeProcs.delete(id)
-    this.notifyStatus()
-
-    // Release the slot: try to start next pending task
-    this.scheduleTasks()
-
-    // If nothing active and nothing pending, mark idle
-    if (this.activeIds.size === 0 && !this.items.some((i) => i.status === 'pending')) {
-      this.isProcessing = false
-    }
+    this.killAndRelease(item, 'paused')
     return true
   }
 
@@ -244,6 +221,40 @@ export class DownloadQueueManager {
   }
 
   // ─── Private ──────────────────────────────────────────────────────────────
+
+  /**
+   * Kill the ffmpeg process for an active item and release the concurrency slot.
+   * Called by both cancelItem and pauseItem to avoid ~20 lines of duplication.
+   * Also synchronises ffmpeg-shared's currentProc to prevent zombie references.
+   */
+  private killAndRelease(
+    item: QueueItem,
+    targetStatus: 'cancelled' | 'paused'
+  ): void {
+    // Mark target status first so .then/.catch guards in startDownload won't overwrite
+    item.status = targetStatus
+    // Kill the ffmpeg process for this item
+    const proc = this.activeProcs.get(item.id)
+    if (proc) {
+      killFfmpegProc(proc)
+    }
+    this.activeIds.delete(item.id)
+    this.activeProcs.delete(item.id)
+    setFfmpegProc(null)
+    this.notifyStatus()
+
+    // Release the slot: try to start next pending task
+    this.scheduleTasks()
+
+    this.checkIdle()
+  }
+
+  /** Mark isProcessing=false if nothing active and nothing pending. */
+  private checkIdle(): void {
+    if (this.activeIds.size === 0 && !this.items.some((i) => i.status === 'pending')) {
+      this.isProcessing = false
+    }
+  }
 
   private notifyStatus(): void {
     if (this.statusCb) {
@@ -321,16 +332,14 @@ export class DownloadQueueManager {
       .finally(() => {
         this.activeIds.delete(item.id)
         this.activeProcs.delete(item.id)
+        setFfmpegProc(null)
         this.notifyProgress(item.id, item.progress)
         this.notifyStatus()
 
         // Release slot: try to dispatch next pending item
         this.scheduleTasks()
 
-        // If no active downloads and nothing pending, mark idle
-        if (this.activeIds.size === 0 && !this.items.some((i) => i.status === 'pending')) {
-          this.isProcessing = false
-        }
+        this.checkIdle()
       })
   }
 }

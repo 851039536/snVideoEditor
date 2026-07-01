@@ -277,8 +277,10 @@ async function selectFetchedUrl(url: string): Promise<void> {
 
 const justEnqueued = ref(false)
 let justEnqueuedTimer: ReturnType<typeof setTimeout> | null = null
+const isEnqueueing = ref(false) // 幂等保护：防止快速双击重复入队
 
 async function enqueueDownload(): Promise<void> {
+  if (isEnqueueing.value) { return }
   errorMsg.value = ''
   hintMsg.value = ''
 
@@ -297,6 +299,7 @@ async function enqueueDownload(): Promise<void> {
     hintMsg.value = '⚠ 当前输入看起来像网页地址而非 m3u8 流地址，建议先点击"从网页提取"获取真实播放链接。'
   }
 
+  isEnqueueing.value = true
   try {
     await window.electronAPI.enqueueDownload({
       url,
@@ -309,6 +312,8 @@ async function enqueueDownload(): Promise<void> {
     justEnqueuedTimer = setTimeout(() => { justEnqueued.value = false }, 1800)
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    isEnqueueing.value = false
   }
 }
 
@@ -584,7 +589,7 @@ onUnmounted(() => {
           <!-- Enqueue / Start Download -->
           <button
             @click="enqueueDownload"
-            :disabled="!canStart || justEnqueued"
+            :disabled="!canStart || justEnqueued || isEnqueueing"
             class="btn-primary w-full py-3 text-base transition-all duration-200"
             :class="canStart
               ? 'bg-gradient-to-r from-accent-blue to-accent-purple'

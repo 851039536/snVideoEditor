@@ -73,30 +73,50 @@ function httpGetText(
       timeout: timeoutMs
     }
 
+    let settled = false
+
     const req = client.request(options, (res) => {
+      if (settled) { return }
+
       if (
         res.statusCode !== undefined &&
         REDIRECT_CODES.has(res.statusCode) &&
         res.headers.location
       ) {
+        settled = true
         const redirectUrl = new URL(res.headers.location, url).href
         return resolve(httpGetText(redirectUrl, extraHeaders, timeoutMs, redirectCount + 1))
       }
 
       if (res.statusCode !== 200) {
+        settled = true
         return reject(new Error(`HTTP ${res.statusCode}`))
       }
 
       const chunks: Buffer[] = []
-      res.on('data', (chunk: Buffer) => chunks.push(chunk))
+      res.on('data', (chunk: Buffer) => {
+        if (!settled) { chunks.push(chunk) }
+      })
       res.on('end', () => {
+        if (settled) { return }
+        settled = true
         resolve(Buffer.concat(chunks).toString('utf-8'))
       })
-      res.on('error', (err: Error) => reject(err))
+      res.on('error', (err: Error) => {
+        if (settled) { return }
+        settled = true
+        reject(err)
+      })
     })
 
-    req.on('error', (err: Error) => reject(err))
+    req.on('error', (err: Error) => {
+      if (settled) { return }
+      settled = true
+      reject(err)
+    })
     req.setTimeout(timeoutMs, () => {
+      if (settled) { return }
+      settled = true
       req.destroy()
       reject(new Error('ETIMEDOUT'))
     })
@@ -206,8 +226,8 @@ export function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
       const chunk = data.toString()
       stderrLines.push(chunk)
       // 防止长时间下载时 stderr 输出无界增长：仅保留最近 50 行
-      while (stderrLines.length > MAX_STDERR_LINES) {
-        stderrLines.shift()
+      if (stderrLines.length > MAX_STDERR_LINES) {
+        stderrLines.splice(0, stderrLines.length - MAX_STDERR_LINES)
       }
 
       // Extract total duration from FFmpeg's initial analysis
@@ -417,6 +437,7 @@ function parseMasterPlaylist(content: string, baseUrl: string): M3u8Variant[] {
  * Map vertical resolution to standard label (360p, 480p, 720p, 1080p, etc.)
  */
 function getStandardLabel(height: number): string {
+  if (height <= 0) { return '未知' }
   if (height <= 144) { return '144p' }
   if (height <= 240) { return '240p' }
   if (height <= 360) { return '360p' }

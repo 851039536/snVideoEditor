@@ -402,8 +402,9 @@ function registerCancelHandler(): void {
     if (activeType === 'crypto') {
       cancelCryptoOperation()
     } else if (activeType === 'download') {
-      // Delegate to queue manager for download cancellation
+      // Cancel both queue items AND standalone download (video:download via wrapOperation)
       DownloadQueueManager.getInstance().cancelAll()
+      cancelFfmpegOperation()
     } else {
       cancelFfmpegOperation()
     }
