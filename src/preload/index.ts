@@ -7,6 +7,7 @@ export interface ProgressInfo {
   totalFiles: number
   speed: string
   eta: string
+  currentFileName?: string
 }
 
 export interface VideoMeta {

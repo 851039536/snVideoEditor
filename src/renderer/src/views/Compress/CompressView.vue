@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { FileVideo, Folder, X, Zap, Monitor, Download, FolderOpen, Info, HelpCircle } from 'lucide-vue-next'
+import { FileVideo, Folder, X, Zap, Monitor, Download, FolderOpen, Info, Loader2, CheckCircle2, XCircle } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import VideoDetailModal from './VideoDetailModal.vue'
+import InfoTooltip from '@/components/InfoTooltip.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
 import { formatSize, getDirName, getFileName } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
 import { useInfoTooltip } from '@/composables/useInfoTooltip'
 import type { FileEntry } from '@/types/file'
-import type { CompressResultItem } from './types'
+import type { CompressResultItem, BatchFileStatus } from './types'
 
 const progressStore = useProgressStore()
 const settingsStore = useSettingsStore()
@@ -18,10 +19,6 @@ const settingsStore = useSettingsStore()
 const { files, addFiles, removeFile, selectOutputDir, setOutputDir } = useFileList()
 
 const twoPassTip = useInfoTooltip()
-const codecTip = useInfoTooltip()
-const bitrateTip = useInfoTooltip()
-const audioBitrateTip = useInfoTooltip()
-const presetTip = useInfoTooltip()
 
 // Compression params — initialized from persisted preset
 const preset = ref(settingsStore.compressPreset.preset)
@@ -61,7 +58,6 @@ const detailModalRef = ref<InstanceType<typeof VideoDetailModal> | null>(null)
 
 function openDetail(entry: FileEntry): void {
   detailEntry.value = entry
-  // Defer meta fetch to modal's onOpen via nextTick
   nextTick(() => {
     detailModalRef.value?.onOpen()
   })
@@ -99,7 +95,6 @@ async function selectQuickDir(type: 'desktop' | 'downloads' | 'source'): Promise
     dir = sourceDir.value
   } else {
     loadingPath.value = type
-    // Use cached path if available, otherwise fetch
     if (!commonPaths.value.desktop) {
       await fetchCommonPaths()
     }
@@ -116,7 +111,7 @@ async function selectQuickDir(type: 'desktop' | 'downloads' | 'source'): Promise
   setOutputDir(dir, '_compressed.mp4')
 }
 
-// Pre-fetch common paths on mount for snappier first click
+// Pre-fetch common paths on mount
 onMounted(async () => {
   fetchCommonPaths()
   try {
@@ -143,41 +138,75 @@ const RESOLUTION_BITRATE: Record<string, string> = {
 
 const crfActive = computed(() => !bitrate.value)
 
+// resolution → bitrate linkage
 watch(resolution, (res) => {
   bitrate.value = RESOLUTION_BITRATE[res] || ''
 })
 
-// Reset 2-Pass when switching back to CRF mode (bitrate becomes empty)
-watch(bitrate, (val) => {
-  if (!val) { twoPass.value = false }
-})
-
-// Auto-persist preset on any param change (debounced to avoid localStorage spam on slider drag)
+// Persist preset on any param change + disable twoPass when bitrate cleared
 watch([crfValue, resolution, bitrate, codec, audioBitrate, preset, twoPass], () => {
+  if (!bitrate.value) { twoPass.value = false }
   savePresetDebounced()
-}, { deep: false })
+})
 
 function estimateOutputSize(entry: FileEntry): string {
   if (!entry.meta || entry.meta.size === 0) { return '未知' }
+
+  if (bitrate.value && entry.meta.duration > 0) {
+    // Fixed bitrate mode: size ≈ bitrate × duration / 8
+    const bpsMatch = bitrate.value.match(/^(\d+)k?$/)
+    if (bpsMatch) {
+      const kbps = parseInt(bpsMatch[1], 10)
+      const audioKbps = parseInt(audioBitrate.value) || 32
+      const totalKbps = kbps + audioKbps
+      const estMB = (totalKbps * 1000 * entry.meta.duration) / 8 / (1024 * 1024)
+      return `${Math.max(1, Math.round(estMB))} MB`
+    }
+  }
+
+  // CRF mode with codec factor
   const originalMB = entry.meta.size / (1024 * 1024)
-  // Rough estimate based on CRF
   const ratios: Record<number, number> = { 18: 0.7, 23: 0.4, 28: 0.2, 32: 0.12 }
   const ratio = ratios[crfValue.value] || 0.4
-  const estMB = originalMB * ratio
-  return `${Math.round(estMB)} MB`
+  // H.265/HEVC ~30% more efficient than H.264
+  const codecFactor = (codec.value || '').includes('265') || (codec.value || '').includes('hevc') ? 0.7 : 1.0
+  const estMB = originalMB * ratio * codecFactor
+  return `${Math.max(1, Math.round(estMB))} MB`
 }
+
+// Batch file status tracking
+const fileStatuses = ref<Record<string, BatchFileStatus>>({})
+
+function getStatusIcon(status: BatchFileStatus | undefined): string {
+  if (status === 'processing') { return 'processing' }
+  if (status === 'completed') { return 'completed' }
+  if (status === 'failed') { return 'failed' }
+  return 'none'
+}
+
+const canStart = computed((): boolean => {
+  return files.value.length > 0
+    && files.value.every((f) => !!f.outputPath)
+    && !progressStore.isProcessing
+})
+
+// Compression result comparison
+const compressResult = ref<CompressResultItem[]>([])
+
+const availableEncoders = ref<string[]>([])
+
+const hasNvidiaEncoders = computed((): boolean => {
+  return availableEncoders.value.some((e) => e.includes('nvenc'))
+})
+
+const hasQsvEncoders = computed((): boolean => {
+  return availableEncoders.value.some((e) => e.includes('qsv'))
+})
 
 async function startCompress(): Promise<void> {
   errorMsg.value = ''
   compressResult.value = []
   if (files.value.length === 0) { return }
-
-  for (const entry of files.value) {
-    if (!entry.outputPath) {
-      await selectOutputDir('_compressed.mp4')
-      break
-    }
-  }
 
   const unresolved = files.value.filter((f) => !f.outputPath)
   if (unresolved.length > 0) {
@@ -185,9 +214,23 @@ async function startCompress(): Promise<void> {
     return
   }
 
+  // Set all files to pending
+  for (const entry of files.value) {
+    fileStatuses.value[entry.path] = 'pending'
+  }
+
   progressStore.start('compress')
   window.electronAPI.onProgress((info) => {
     progressStore.update(info)
+    // Update file status based on current file name from progress
+    if (info.currentFileName) {
+      for (const entry of files.value) {
+        if (getFileName(entry.path) === info.currentFileName) {
+          fileStatuses.value[entry.path] = 'processing'
+          break
+        }
+      }
+    }
   })
 
   try {
@@ -206,9 +249,9 @@ async function startCompress(): Promise<void> {
     if (!progressStore.isProcessing) {
       return
     }
-    if (result.failed.length === 0) {
-      progressStore.finish()
-      // Build comparison data (concurrent file-info fetches)
+
+    // Handle successes
+    if (result.successFiles.length > 0) {
       const results = await Promise.all(
         result.successFiles.map(async (outputPath) => {
           try {
@@ -221,47 +264,47 @@ async function startCompress(): Promise<void> {
         for (const r of results) {
           if (!r) { continue }
           const original = files.value.find((f) => f.outputPath === r.outputPath)
-          if (original && original.meta) {
-            compressResult.value.push({
-              fileName: getFileName(r.outputPath),
-              originalSize: original.meta.size,
-              compressedSize: r.fileInfo.size
-            })
+          if (original) {
+            if (original.meta) {
+              compressResult.value.push({
+                fileName: getFileName(r.outputPath),
+                originalSize: original.meta.size,
+                compressedSize: r.fileInfo.size
+              })
+            }
+            fileStatuses.value[original.path] = 'completed'
           }
         }
       }
-    } else {
+      progressStore.finish()
+    }
+
+    // Handle failures
+    if (result.failed.length > 0) {
+      for (const failedPath of result.failed) {
+        fileStatuses.value[failedPath] = 'failed'
+      }
       const failedNames = result.failed.map((_p) => {
         const f = files.value.find((x) => x.path === _p)
         return f ? getFileName(f.path) : _p
       }).join(', ')
       errorMsg.value = `${result.failed.length} 个文件压缩失败: ${failedNames}`
-      progressStore.reset()
+      if (result.successFiles.length === 0) {
+        progressStore.reset()
+      }
     }
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
+    for (const entry of files.value) {
+      if (fileStatuses.value[entry.path] === 'pending') {
+        fileStatuses.value[entry.path] = 'failed'
+      }
+    }
     progressStore.reset()
   } finally {
     window.electronAPI.removeProgressListener()
   }
 }
-
-const canStart = computed((): boolean => {
-  return files.value.length > 0 && !progressStore.isProcessing
-})
-
-// Compression result comparison
-const compressResult = ref<CompressResultItem[]>([])
-
-const availableEncoders = ref<string[]>([])
-
-const hasNvidiaEncoders = computed((): boolean => {
-  return availableEncoders.value.some((e) => e.includes('nvenc'))
-})
-
-const hasQsvEncoders = computed((): boolean => {
-  return availableEncoders.value.some((e) => e.includes('qsv'))
-})
 
 onUnmounted(() => {
   isUnmounted = true
@@ -279,7 +322,7 @@ onUnmounted(() => {
         </div>
         <h1 class="text-2xl font-bold text-text-primary">视频压缩</h1>
       </div>
-      <p class="text-text-secondary text-sm">智能压缩视频文件大小，支持 H.264 / H.265 编码</p>
+      <p class="text-text-secondary text-sm">智能压缩视频文件大小，支持 H.264 / H.265 编码，批量处理</p>
     </header>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -295,6 +338,7 @@ onUnmounted(() => {
                 <th class="text-left p-3 font-medium">文件名</th>
                 <th class="text-right p-3 font-medium">大小</th>
                 <th class="text-right p-3 font-medium">预估</th>
+                <th class="text-center p-3 font-medium w-16">状态</th>
                 <th class="text-right p-3 font-medium w-20" />
               </tr>
             </thead>
@@ -317,6 +361,18 @@ onUnmounted(() => {
                 </td>
                 <td class="p-3 text-right text-accent-light font-mono">
                   {{ entry.meta ? estimateOutputSize(entry) : '...' }}
+                </td>
+                <td class="p-3 text-center">
+                  <span v-if="getStatusIcon(fileStatuses[entry.path]) === 'processing'" title="处理中">
+                    <Loader2 :size="14" class="text-accent-blue animate-spin inline-block" />
+                  </span>
+                  <span v-else-if="getStatusIcon(fileStatuses[entry.path]) === 'completed'" title="已完成">
+                    <CheckCircle2 :size="14" class="text-success inline-block" />
+                  </span>
+                  <span v-else-if="getStatusIcon(fileStatuses[entry.path]) === 'failed'" title="失败">
+                    <XCircle :size="14" class="text-danger inline-block" />
+                  </span>
+                  <span v-else class="text-text-muted text-xs">-</span>
                 </td>
                 <td class="p-3 text-right">
                   <div class="flex items-center justify-end gap-0.5">
@@ -362,35 +418,23 @@ onUnmounted(() => {
 
             <!-- Bitrate -->
             <div>
-              <div class="relative flex items-center gap-1 mb-2">
-                <label class="text-sm text-text-secondary">视频码率限制</label>
-                <button
-                  type="button"
-                  class="p-0.5 rounded hover:bg-bg-tertiary transition-colors"
-                  @click.stop="bitrateTip.toggle()"
-                  title="视频码率是什么？"
-                >
-                  <HelpCircle :size="14" class="text-text-muted hover:text-text-secondary transition-colors" />
-                </button>
-                <transition name="tooltip-fade">
-                  <div
-                    v-if="bitrateTip.isOpen.value"
-                    :ref="bitrateTip.elRef"
-                    class="absolute left-0 bottom-full mb-2 w-72 p-3 rounded-lg bg-bg-secondary border border-bg-tertiary shadow-lg z-50 text-xs leading-relaxed text-text-secondary"
-                  >
-                    <p class="mb-2"><strong class="text-text-primary">视频码率</strong> 表示每秒传输的视频数据量：</p>
-                    <ul class="list-disc list-inside space-y-1">
-                      <li>码率越高 → 画质越好，文件越大</li>
-                      <li>码率越低 → 文件越小，画质越差</li>
-                    </ul>
-                    <p class="mt-2 text-text-muted">
-                      <span class="text-accent-blue font-medium">CRF 模式</span>（选"自动"）：以画质为目标，编码器自行决定码率。<br/>
-                      <span class="text-accent-purple font-medium">固定码率</span>：精确控制输出文件大小，适合有体积要求的场景。
-                    </p>
-                    <p class="mt-1 text-text-muted">选择固定码率后可开启 <span class="text-accent-blue">2-Pass</span> 进一步提升画质。</p>
-                  </div>
-                </transition>
-              </div>
+              <InfoTooltip title="视频码率是什么？" widthClass="w-72">
+                <template #label>
+                  <label class="text-sm text-text-secondary">视频码率限制</label>
+                </template>
+                <template #content>
+                  <p class="mb-2"><strong class="text-text-primary">视频码率</strong> 表示每秒传输的视频数据量：</p>
+                  <ul class="list-disc list-inside space-y-1">
+                    <li>码率越高 → 画质越好，文件越大</li>
+                    <li>码率越低 → 文件越小，画质越差</li>
+                  </ul>
+                  <p class="mt-2 text-text-muted">
+                    <span class="text-accent-blue font-medium">CRF 模式</span>（选"自动"）：以画质为目标，编码器自行决定码率。<br/>
+                    <span class="text-accent-purple font-medium">固定码率</span>：精确控制输出文件大小，适合有体积要求的场景。
+                  </p>
+                  <p class="mt-1 text-text-muted">选择固定码率后可开启 <span class="text-accent-blue">2-Pass</span> 进一步提升画质。</p>
+                </template>
+              </InfoTooltip>
               <select v-model="bitrate" class="select-input w-full">
                 <option value="">自动 (CRF 模式)</option>
                 <option value="4000k">4 Mbps</option>
@@ -423,34 +467,22 @@ onUnmounted(() => {
 
             <!-- Codec -->
             <div>
-              <div class="relative flex items-center gap-1 mb-2">
-                <label class="text-sm text-text-secondary">编码格式</label>
-                <button
-                  type="button"
-                  class="p-0.5 rounded hover:bg-bg-tertiary transition-colors"
-                  @click.stop="codecTip.toggle()"
-                  title="编码格式有什么区别？"
-                >
-                  <HelpCircle :size="14" class="text-text-muted hover:text-text-secondary transition-colors" />
-                </button>
-                <transition name="tooltip-fade">
-                  <div
-                    v-if="codecTip.isOpen.value"
-                    :ref="codecTip.elRef"
-                    class="absolute left-0 bottom-full mb-2 w-80 p-3 rounded-lg bg-bg-secondary border border-bg-tertiary shadow-lg z-50 text-xs leading-relaxed text-text-secondary"
-                  >
-                    <p class="mb-2"><strong class="text-text-primary">编码格式</strong> 决定视频的兼容性与压缩效率：</p>
-                    <ul class="list-disc list-inside space-y-1.5">
-                      <li><span class="text-accent-blue font-medium">H.264</span>：兼容性最好，几乎所有设备都能播放，文件适中。</li>
-                      <li><span class="text-accent-purple font-medium">H.265 / HEVC</span>：比 H.264 压缩率高约 30%~50%，同等画质文件更小，但老设备可能不兼容。</li>
-                      <li><span class="text-accent-yellow font-medium">VP9</span>：YouTube/Web 优化，开源免费，压缩比接近 HEVC，适合网页播放。</li>
-                    </ul>
-                    <p class="mt-2 pt-2 border-t border-bg-tertiary text-text-muted">
-                      <span class="font-medium text-text-primary">GPU 加速</span>（NVENC / QSV）：编码速度极快，但同码率下画质略逊于 CPU 软编码。
-                    </p>
-                  </div>
-                </transition>
-              </div>
+              <InfoTooltip title="编码格式有什么区别？" widthClass="w-80">
+                <template #label>
+                  <label class="text-sm text-text-secondary">编码格式</label>
+                </template>
+                <template #content>
+                  <p class="mb-2"><strong class="text-text-primary">编码格式</strong> 决定视频的兼容性与压缩效率：</p>
+                  <ul class="list-disc list-inside space-y-1.5">
+                    <li><span class="text-accent-blue font-medium">H.264</span>：兼容性最好，几乎所有设备都能播放，文件适中。</li>
+                    <li><span class="text-accent-purple font-medium">H.265 / HEVC</span>：比 H.264 压缩率高约 30%~50%，同等画质文件更小，但老设备可能不兼容。</li>
+                    <li><span class="text-accent-yellow font-medium">VP9</span>：YouTube/Web 优化，开源免费，压缩比接近 HEVC，适合网页播放。</li>
+                  </ul>
+                  <p class="mt-2 pt-2 border-t border-bg-tertiary text-text-muted">
+                    <span class="font-medium text-text-primary">GPU 加速</span>（NVENC / QSV）：编码速度极快，但同码率下画质略逊于 CPU 软编码。
+                  </p>
+                </template>
+              </InfoTooltip>
               <select v-model="codec" class="select-input w-full">
                 <optgroup label="CPU 软编码">
                   <option value="libx264">H.264 (兼容性最好)</option>
@@ -470,32 +502,20 @@ onUnmounted(() => {
 
             <!-- Audio Bitrate -->
             <div>
-              <div class="relative flex items-center gap-1 mb-2">
-                <label class="text-sm text-text-secondary">音频码率</label>
-                <button
-                  type="button"
-                  class="p-0.5 rounded hover:bg-bg-tertiary transition-colors"
-                  @click.stop="audioBitrateTip.toggle()"
-                  title="音频码率是什么？"
-                >
-                  <HelpCircle :size="14" class="text-text-muted hover:text-text-secondary transition-colors" />
-                </button>
-                <transition name="tooltip-fade">
-                  <div
-                    v-if="audioBitrateTip.isOpen.value"
-                    :ref="audioBitrateTip.elRef"
-                    class="absolute left-0 bottom-full mb-2 w-72 p-3 rounded-lg bg-bg-secondary border border-bg-tertiary shadow-lg z-50 text-xs leading-relaxed text-text-secondary"
-                  >
-                    <p class="mb-2"><strong class="text-text-primary">音频码率</strong> 决定音频的清晰度：</p>
-                    <ul class="list-disc list-inside space-y-1">
-                      <li><span class="text-accent-blue font-medium">32~64 Kbps</span>：语音/ podcast 足够，极小体积</li>
-                      <li><span class="text-accent-purple font-medium">96~128 Kbps</span>：常规视频够用，音质与体积平衡</li>
-                      <li><span class="text-accent-yellow font-medium">192 Kbps</span>：接近无损，适合音乐/高音质需求</li>
-                    </ul>
-                    <p class="mt-2 text-text-muted">音频通常只占视频总大小的 5%~15%，降低音频码率对总文件大小影响有限。</p>
-                  </div>
-                </transition>
-              </div>
+              <InfoTooltip title="音频码率是什么？" widthClass="w-72">
+                <template #label>
+                  <label class="text-sm text-text-secondary">音频码率</label>
+                </template>
+                <template #content>
+                  <p class="mb-2"><strong class="text-text-primary">音频码率</strong> 决定音频的清晰度：</p>
+                  <ul class="list-disc list-inside space-y-1">
+                    <li><span class="text-accent-blue font-medium">32~64 Kbps</span>：语音/ podcast 足够，极小体积</li>
+                    <li><span class="text-accent-purple font-medium">96~128 Kbps</span>：常规视频够用，音质与体积平衡</li>
+                    <li><span class="text-accent-yellow font-medium">192 Kbps</span>：接近无损，适合音乐/高音质需求</li>
+                  </ul>
+                  <p class="mt-2 text-text-muted">音频通常只占视频总大小的 5%~15%，降低音频码率对总文件大小影响有限。</p>
+                </template>
+              </InfoTooltip>
               <select v-model="audioBitrate" class="select-input w-full">
                 <option value="32k">32 Kbps</option>
                 <option value="64k">64 Kbps</option>
@@ -507,35 +527,23 @@ onUnmounted(() => {
 
             <!-- Encoding Preset (CPU only) -->
             <div v-if="!isGpuEncoder">
-              <div class="relative flex items-center gap-1 mb-2">
-                <label class="text-sm text-text-secondary">编码速度预设</label>
-                <button
-                  type="button"
-                  class="p-0.5 rounded hover:bg-bg-tertiary transition-colors"
-                  @click.stop="presetTip.toggle()"
-                  title="编码预设是什么意思？"
-                >
-                  <HelpCircle :size="14" class="text-text-muted hover:text-text-secondary transition-colors" />
-                </button>
-                <transition name="tooltip-fade">
-                  <div
-                    v-if="presetTip.isOpen.value"
-                    :ref="presetTip.elRef"
-                    class="absolute left-0 bottom-full mb-2 w-72 p-3 rounded-lg bg-bg-secondary border border-bg-tertiary shadow-lg z-50 text-xs leading-relaxed text-text-secondary"
-                  >
-                    <p class="mb-2"><strong class="text-text-primary">编码速度预设</strong> 是速度与画质的权衡：</p>
-                    <ul class="list-disc list-inside space-y-1">
-                      <li><span class="text-accent-blue font-medium">ultrafast → fast</span>：编码快，但同码率下画质略差，文件更大</li>
-                      <li><span class="text-accent-purple font-medium">medium → veryslow</span>：编码慢，但用更复杂的算法压缩，同码率下画质更好，文件更小</li>
-                    </ul>
-                    <p class="mt-2 text-text-muted">
-                      越慢的预设意味着编码器会花更多时间分析视频，用更智能的方式分配码率。<br/>
-                      推荐日常使用 <span class="text-accent-blue">medium</span>，追求画质用 <span class="text-accent-purple">slow</span> 或 <span class="text-accent-purple">veryslow</span>。
-                    </p>
-                    <p class="mt-1 text-text-muted">仅 CPU 编码可用，GPU 加速编码不受此影响。</p>
-                  </div>
-                </transition>
-              </div>
+              <InfoTooltip title="编码预设是什么意思？" widthClass="w-72">
+                <template #label>
+                  <label class="text-sm text-text-secondary">编码速度预设</label>
+                </template>
+                <template #content>
+                  <p class="mb-2"><strong class="text-text-primary">编码速度预设</strong> 是速度与画质的权衡：</p>
+                  <ul class="list-disc list-inside space-y-1">
+                    <li><span class="text-accent-blue font-medium">ultrafast → fast</span>：编码快，但同码率下画质略差，文件更大</li>
+                    <li><span class="text-accent-purple font-medium">medium → veryslow</span>：编码慢，但用更复杂的算法压缩，同码率下画质更好，文件更小</li>
+                  </ul>
+                  <p class="mt-2 text-text-muted">
+                    越慢的预设意味着编码器会花更多时间分析视频，用更智能的方式分配码率。<br/>
+                    推荐日常使用 <span class="text-accent-blue">medium</span>，追求画质用 <span class="text-accent-purple">slow</span> 或 <span class="text-accent-purple">veryslow</span>。
+                  </p>
+                  <p class="mt-1 text-text-muted">仅 CPU 编码可用，GPU 加速编码不受此影响。</p>
+                </template>
+              </InfoTooltip>
               <select v-model="preset" class="select-input w-full">
                 <option value="ultrafast">ultrafast (极速)</option>
                 <option value="superfast">superfast</option>
@@ -559,7 +567,9 @@ onUnmounted(() => {
                   @click.stop="twoPassTip.toggle()"
                   title="什么是 2-Pass？"
                 >
-                  <HelpCircle :size="14" class="text-text-muted hover:text-text-secondary transition-colors" />
+                  <span class="text-text-muted hover:text-text-secondary transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                  </span>
                 </button>
                 <!-- Tooltip -->
                 <transition name="tooltip-fade">
@@ -655,6 +665,7 @@ onUnmounted(() => {
           :class="canStart
             ? 'bg-gradient-to-r from-accent-purple to-pink-500'
             : 'bg-bg-tertiary text-text-muted'"
+          :title="files.length > 0 && !files.every(f => !!f.outputPath) ? '请先选择输出目录' : ''"
         >
           <Zap :size="18" />
           开始压缩 ({{ files.length }} 个文件)

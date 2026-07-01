@@ -96,16 +96,3 @@
 .modal-fade-leave-to .detail-modal {
   transform: scale(0.95) translateY(4px);
 }
-
-/* 2-Pass tooltip transition */
-.tooltip-fade-enter-active,
-.tooltip-fade-leave-active {
-  transition: opacity var(--transition-fast, 0.12s) ease,
-              transform var(--transition-fast, 0.12s) ease;
-}
-
-.tooltip-fade-enter-from,
-.tooltip-fade-leave-to {
-  opacity: 0;
-  transform: translateY(4px);
-}

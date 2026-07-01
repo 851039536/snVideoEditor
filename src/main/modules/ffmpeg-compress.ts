@@ -234,7 +234,8 @@ export async function batchCompress(opts: BatchCompressOptions): Promise<{ succe
             opts.onProgress({
               ...data,
               currentFile: i + 1,
-              totalFiles: opts.files.length
+              totalFiles: opts.files.length,
+              currentFileName: path.basename(file.input)
             })
           }
         }

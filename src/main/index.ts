@@ -89,6 +89,7 @@ type ProgressData = {
   totalFiles: number
   speed: string
   eta: string
+  currentFileName?: string
 }
 
 /**

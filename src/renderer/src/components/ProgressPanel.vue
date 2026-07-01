@@ -74,9 +74,12 @@ const statusText = computed((): string => {
         <div class="flex items-center gap-4">
           <span v-if="store.totalFiles > 1">
             文件 {{ store.currentFile }}/{{ store.totalFiles }}
+            <span v-if="store.progress?.currentFileName" class="text-accent-blue ml-1">
+              {{ store.progress.currentFileName }}
+            </span>
           </span>
-          <span>{{ store.progress.speed }}</span>
-          <span>{{ store.progress.eta }}</span>
+          <span>{{ store.progress?.speed }}</span>
+          <span>{{ store.progress?.eta }}</span>
         </div>
       </div>
     </div>

@@ -155,7 +155,7 @@ export function setFfmpegProc(proc: ChildProcess | null): void {
 
 // ---- Shared interfaces ----
 export interface ProgressCallback {
-  (data: { percent: number; currentFile: number; totalFiles: number; speed: string; eta: string }): void
+  (data: { percent: number; currentFile: number; totalFiles: number; speed: string; eta: string; currentFileName?: string }): void
 }
 
 export interface VideoMeta {
