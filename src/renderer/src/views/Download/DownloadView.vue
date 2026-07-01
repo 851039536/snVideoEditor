@@ -35,6 +35,7 @@ const variants = ref<QualityVariant[]>([])
 const selectedVariantIndex = ref(-1) // -1 = use original URL (direct download)
 const isFetchingVariants = ref(false)
 const showQualitySelector = ref(false)
+let fetchVariantsVersion = 0 // 防止竞态条件：每次新请求递增，旧请求结果被丢弃
 
 /** The actual URL to download — could be a variant URL or the original */
 const effectiveUrl = computed((): string => {
@@ -74,9 +75,12 @@ async function fetchQualityVariants(): Promise<void> {
   const url = m3u8Url.value.trim()
   if (!isValidUrl(url)) { return }
 
+  const version = ++fetchVariantsVersion
   isFetchingVariants.value = true
   try {
     const result = await window.electronAPI.fetchM3u8Variants(url, buildHeaders())
+    // 竞态保护：如果 URL 已变化（新版本号已递增），丢弃过时结果
+    if (version !== fetchVariantsVersion) { return }
     variants.value = result
     if (result.length > 0) {
       autoSelect480p(result)
@@ -86,24 +90,16 @@ async function fetchQualityVariants(): Promise<void> {
       showQualitySelector.value = false
     }
   } catch {
+    if (version !== fetchVariantsVersion) { return }
     variants.value = []
     selectedVariantIndex.value = -1
     showQualitySelector.value = false
   } finally {
-    isFetchingVariants.value = false
+    if (version === fetchVariantsVersion) {
+      isFetchingVariants.value = false
+    }
   }
 }
-
-// Auto-detect quality when user pastes or selects an m3u8 URL
-watch(m3u8Url, (url) => {
-  if (url && isValidUrl(url) && url.includes('.m3u8')) {
-    fetchQualityVariants()
-  } else {
-    showQualitySelector.value = false
-    variants.value = []
-    selectedVariantIndex.value = -1
-  }
-})
 
 // ─── Headers ──────────────────────────────────────────────────────────────────
 
@@ -124,11 +120,14 @@ async function fetchCommonPaths(): Promise<void> {
 
 async function selectQuickDir(type: 'desktop' | 'downloads'): Promise<void> {
   loadingPath.value = type
-  if (!commonPaths.value.desktop) { await fetchCommonPaths() }
-  loadingPath.value = ''
-  const dir = commonPaths.value[type]
-  if (dir) { outputDir.value = dir }
-  else { errorMsg.value = '无法获取系统路径，请使用自定义目录' }
+  try {
+    if (!commonPaths.value.desktop) { await fetchCommonPaths() }
+    const dir = commonPaths.value[type]
+    if (dir) { outputDir.value = dir }
+    else { errorMsg.value = '无法获取系统路径，请使用自定义目录' }
+  } finally {
+    loadingPath.value = ''
+  }
 }
 
 async function selectCustomDir(): Promise<void> {
@@ -155,9 +154,16 @@ const autoFileName = computed((): string => {
   }
 })
 
-// Auto-fill filename from URL
-watch(m3u8Url, () => {
+// Auto-detect quality + auto-fill filename when m3u8 URL changes
+watch(m3u8Url, (url) => {
   fileName.value = autoFileName.value
+  if (url && isValidUrl(url) && url.includes('.m3u8')) {
+    fetchQualityVariants()
+  } else {
+    showQualitySelector.value = false
+    variants.value = []
+    selectedVariantIndex.value = -1
+  }
 })
 
 const outputPath = computed((): string => {

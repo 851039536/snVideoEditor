@@ -30,7 +30,7 @@ export function fetchPageM3u8ViaBrowser(pageUrl: string): Promise<PageFetchResul
 
     const cleanup = (): void => {
       if (win && !win.isDestroyed()) {
-        try { win.close() } catch { /* ignore */ }
+        try { win.destroy() } catch { /* ignore */ }
       }
     }
 

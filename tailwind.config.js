@@ -29,7 +29,8 @@ export default {
         'fade-in': 'fadeIn 0.3s ease-out',
         'slide-up': 'slideUp 0.4s ease-out',
         'pulse-glow': 'pulseGlow 2s ease-in-out infinite',
-        'float': 'float 3s ease-in-out infinite'
+        'float': 'float 3s ease-in-out infinite',
+        'shimmer': 'shimmer 1.5s infinite'
       },
       keyframes: {
         fadeIn: {
@@ -47,6 +48,10 @@ export default {
         float: {
           '0%, 100%': { transform: 'translateY(0)' },
           '50%': { transform: 'translateY(-6px)' }
+        },
+        shimmer: {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(100%)' }
         }
       }
     }

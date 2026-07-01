@@ -189,13 +189,4 @@ const hasTerminalItems = computed((): boolean => {
   background: hsl(var(--border));
   border-radius: 2px;
 }
-
-@keyframes shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
-
-.animate-shimmer {
-  animation: shimmer 1.5s infinite;
-}
 </style>

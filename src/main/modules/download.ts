@@ -42,12 +42,20 @@ const REDIRECT_CODES = new Set([301, 302, 307, 308])
  * Perform a simple HTTP GET request, following redirects, and return the
  * response body as a UTF-8 string.
  */
+/** Maximum number of HTTP redirects to follow before bailing out. */
+const MAX_REDIRECTS = 10
+
 function httpGetText(
   url: string,
   extraHeaders?: Record<string, string>,
-  timeoutMs = 15000
+  timeoutMs = 15000,
+  redirectCount = 0
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    if (redirectCount > MAX_REDIRECTS) {
+      return reject(new Error('重定向次数过多，可能存在循环重定向'))
+    }
+
     const parsedUrl = new URL(url)
     const client = parsedUrl.protocol === 'https:' ? https : http
 
@@ -72,7 +80,7 @@ function httpGetText(
         res.headers.location
       ) {
         const redirectUrl = new URL(res.headers.location, url).href
-        return resolve(httpGetText(redirectUrl, extraHeaders, timeoutMs))
+        return resolve(httpGetText(redirectUrl, extraHeaders, timeoutMs, redirectCount + 1))
       }
 
       if (res.statusCode !== 200) {
@@ -163,11 +171,16 @@ export function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
     }
 
     const stderrLines: string[] = []
+    const MAX_STDERR_LINES = 50
     let durationSec = 0
 
     proc.stderr.on('data', (data: Buffer) => {
       const chunk = data.toString()
       stderrLines.push(chunk)
+      // 防止长时间下载时 stderr 输出无界增长：仅保留最近 50 行
+      while (stderrLines.length > MAX_STDERR_LINES) {
+        stderrLines.shift()
+      }
 
       // Extract total duration from FFmpeg's initial analysis
       if (durationSec === 0) {
@@ -191,6 +204,11 @@ export function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
           })
         }
       }
+    })
+
+    proc.stderr.on('error', (err: Error) => {
+      // 非致命：stderr 流错误只记录，不影响下载继续
+      console.error('[downloadM3u8] stderr error:', err.message)
     })
 
     proc.on('close', (code: number | null) => {
