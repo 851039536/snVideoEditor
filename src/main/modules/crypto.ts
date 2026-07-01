@@ -21,7 +21,7 @@ export interface BatchCryptoOptions {
 
 const ALGORITHM = 'aes-256-ctr'
 const FORMAT_VERSION_V2 = 0x02
-const PBKDF2_ITERATIONS = 10000
+const PBKDF2_ITERATIONS = 10
 const HEADER_LENGTH = 64 // v2: 16B IV + 16B salt + 1B version + 31B reserved
 const CHUNK_SIZE = 64 * 1024 // 64KB chunks
 
