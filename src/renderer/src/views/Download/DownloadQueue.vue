@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useProgressStore } from '@/stores/progress'
 import {
-  Download, Check, X, AlertTriangle, Clock, Trash2, RotateCcw, ListOrdered, ListChecks, Eraser
+  Download, Check, X, AlertTriangle, Clock, Trash2, RotateCcw, ListOrdered, ListChecks, Eraser, Pause, Play
 } from 'lucide-vue-next'
 import { truncateUrl } from '@/utils/format'
 
@@ -12,6 +12,8 @@ const emit = defineEmits<{
   retry: [id: string]
   remove: [id: string]
   cancel: [id: string]
+  pause: [id: string]
+  resume: [id: string]
   clearTerminal: []
 }>()
 
@@ -20,16 +22,18 @@ const STATUS_CONFIG = {
   downloading: { icon: Download, class: 'text-accent-blue animate-pulse', bg: 'bg-accent-blue/10', label: '下载中' },
   completed: { icon: Check, class: 'text-success', bg: 'bg-success/10', label: '已完成' },
   failed: { icon: AlertTriangle, class: 'text-danger', bg: 'bg-danger/10', label: '失败' },
-  cancelled: { icon: X, class: 'text-text-muted', bg: 'bg-text-muted/10', label: '已取消' }
+  cancelled: { icon: X, class: 'text-text-muted', bg: 'bg-text-muted/10', label: '已取消' },
+  paused: { icon: Pause, class: 'text-warning', bg: 'bg-warning/10', label: '已暂停' }
 } as const
 
 const statusCounts = computed(() => {
-  const counts = { pending: 0, completed: 0, failed: 0 }
+  const counts = { pending: 0, completed: 0, failed: 0, paused: 0 }
   for (const item of store.queueItems) {
     const s = item.status
     if (s === 'pending') { counts.pending++ }
     else if (s === 'completed') { counts.completed++ }
     else if (s === 'failed') { counts.failed++ }
+    else if (s === 'paused') { counts.paused++ }
   }
   return counts
 })
@@ -55,6 +59,10 @@ const hasTerminalItems = computed((): boolean => {
           <span v-if="statusCounts.pending > 0" class="flex items-center gap-1">
             <span class="w-1.5 h-1.5 rounded-full bg-yellow-400" />
             等待 {{ statusCounts.pending }}
+          </span>
+          <span v-if="statusCounts.paused > 0" class="flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-warning" />
+            暂停 {{ statusCounts.paused }}
           </span>
           <span v-if="statusCounts.completed > 0" class="flex items-center gap-1">
             <span class="w-1.5 h-1.5 rounded-full bg-success" />
@@ -88,6 +96,7 @@ const hasTerminalItems = computed((): boolean => {
         :class="{
           'border-accent-blue/30 bg-accent-blue/5': item.status === 'downloading',
           'border-bg-tertiary bg-bg-secondary/50': item.status === 'pending',
+          'border-warning/30 bg-warning/5': item.status === 'paused',
           'border-bg-tertiary bg-bg-secondary/30 opacity-70': item.status === 'completed',
           'border-danger/40 bg-danger/5': item.status === 'failed',
           'border-bg-tertiary/50 bg-bg-secondary/20 opacity-50': item.status === 'cancelled'
@@ -125,19 +134,21 @@ const hasTerminalItems = computed((): boolean => {
             </div>
             <p class="text-[11px] text-text-muted truncate mb-1">{{ item.fileName }}</p>
 
-            <!-- Progress bar (only for downloading) -->
-            <div v-if="item.status === 'downloading'" class="relative h-1.5 bg-bg-tertiary rounded-full overflow-hidden mb-1">
+            <!-- Progress bar (for downloading or paused) -->
+            <div v-if="item.status === 'downloading' || item.status === 'paused'" class="relative h-1.5 bg-bg-tertiary rounded-full overflow-hidden mb-1">
               <div
-                class="absolute top-0 left-0 h-full rounded-full bg-gradient-to-r from-accent-blue to-accent-purple transition-all duration-300"
+                class="absolute top-0 left-0 h-full rounded-full transition-all duration-300"
+                :class="item.status === 'paused' ? 'bg-warning' : 'bg-gradient-to-r from-accent-blue to-accent-purple'"
                 :style="{ width: `${item.progress.percent}%` }"
               >
-                <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer" />
+                <div v-if="item.status === 'downloading'" class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer" />
               </div>
             </div>
 
             <!-- Progress text -->
             <div class="flex items-center gap-3 text-[10px] text-text-muted">
               <span v-if="item.status === 'downloading'">{{ item.progress.percent }}%</span>
+              <span v-if="item.status === 'paused'">已暂停 ({{ item.progress.percent }}%)</span>
               <span v-if="item.status === 'downloading' && item.progress.speed">{{ item.progress.speed }}</span>
               <span v-if="item.status === 'failed' && item.error" class="text-danger truncate" :title="item.error">
                 {{ item.error.slice(0, 60) }}{{ item.error.length > 60 ? '...' : '' }}
@@ -149,6 +160,22 @@ const hasTerminalItems = computed((): boolean => {
           <div class="flex items-center gap-1 flex-shrink-0">
             <button
               v-if="item.status === 'downloading'"
+              @click="emit('pause', item.id)"
+              class="p-1.5 rounded-md hover:bg-warning/20 text-text-muted hover:text-warning transition-colors"
+              title="暂停下载"
+            >
+              <Pause :size="13" />
+            </button>
+            <button
+              v-if="item.status === 'paused'"
+              @click="emit('resume', item.id)"
+              class="p-1.5 rounded-md hover:bg-accent-blue/20 text-text-muted hover:text-accent-blue transition-colors"
+              title="继续下载"
+            >
+              <Play :size="13" />
+            </button>
+            <button
+              v-if="item.status === 'downloading' || item.status === 'paused'"
               @click="emit('cancel', item.id)"
               class="p-1.5 rounded-md hover:bg-danger/20 text-text-muted hover:text-danger transition-colors"
               title="取消下载"

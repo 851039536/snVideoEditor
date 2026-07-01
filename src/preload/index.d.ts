@@ -186,6 +186,10 @@ export interface ElectronAPI {
 
   cancelQueueItem: (id: string) => Promise<boolean>
 
+  pauseQueueItem: (id: string) => Promise<boolean>
+
+  resumeQueueItem: (id: string) => Promise<boolean>
+
   removeQueueItem: (id: string) => Promise<boolean>
 
   clearQueueTerminal: () => Promise<number>
@@ -198,7 +202,7 @@ export interface ElectronAPI {
       url: string
       output: string
       headers?: Record<string, string>
-      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused'
       progress: { percent: number; speed: string; eta: string }
       error?: string
       addedAt: number
@@ -224,7 +228,7 @@ export interface ElectronAPI {
       url: string
       output: string
       headers?: Record<string, string>
-      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused'
       progress: { percent: number; speed: string; eta: string }
       error?: string
       addedAt: number

@@ -170,15 +170,17 @@ export interface VideoMeta {
 // ---- Progress parsing utilities ----
 export function parseProgressLine(
   line: string
-): { time: string; speed: string } | null {
+): { time: string; speed: string; bitrate?: string } | null {
   const timeMatch = line.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/)
   const speedMatch = line.match(/speed=\s*(\S+)x/)
+  const bitrateMatch = line.match(/bitrate=\s*(\S+)/)
   if (!timeMatch) {
     return null
   }
   return {
     time: timeMatch[1],
-    speed: speedMatch ? `${speedMatch[1]}x` : '计算中...'
+    speed: speedMatch ? `${speedMatch[1]}x` : '计算中...',
+    bitrate: bitrateMatch ? bitrateMatch[1] : undefined
   }
 }
 

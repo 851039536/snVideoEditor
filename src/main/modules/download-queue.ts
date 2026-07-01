@@ -7,7 +7,7 @@ export interface QueueItem {
   url: string
   output: string
   headers?: Record<string, string>
-  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused'
   progress: { percent: number; speed: string; eta: string }
   error?: string
   addedAt: number
@@ -103,7 +103,7 @@ export class DownloadQueueManager {
   clearTerminal(): number {
     const before = this.items.length
     this.items = this.items.filter(
-      (i) => i.status === 'pending' || i.status === 'downloading'
+      (i) => i.status === 'pending' || i.status === 'downloading' || i.status === 'paused'
     )
     const removed = before - this.items.length
     if (removed > 0) {
@@ -142,7 +142,7 @@ export class DownloadQueueManager {
 
     // Mark all pending items as cancelled
     for (const item of this.items) {
-      if (item.status === 'pending') {
+      if (item.status === 'pending' || item.status === 'paused') {
         item.status = 'cancelled'
       }
     }
@@ -156,7 +156,7 @@ export class DownloadQueueManager {
     const item = this.items.find((i) => i.id === id)
     if (!item) { return false }
 
-    if (item.status === 'pending') {
+    if (item.status === 'pending' || item.status === 'paused') {
       item.status = 'cancelled'
       this.notifyStatus()
       return true
@@ -185,6 +185,49 @@ export class DownloadQueueManager {
     }
 
     return false // can't cancel completed/failed/already-cancelled
+  }
+
+  /** Pause a downloading item: kill the ffmpeg process and mark as paused.
+   *  The partial output file is discarded; resume will restart from scratch. */
+  pauseItem(id: string): boolean {
+    const item = this.items.find((i) => i.id === id)
+    if (!item) { return false }
+    if (item.status !== 'downloading') { return false }
+
+    // Mark paused first so .then/.catch guards won't overwrite
+    item.status = 'paused'
+    // Kill the ffmpeg process for this item
+    const proc = this.activeProcs.get(id)
+    if (proc) {
+      killFfmpegProc(proc)
+    }
+    this.activeIds.delete(id)
+    this.activeProcs.delete(id)
+    this.notifyStatus()
+
+    // Release the slot: try to start next pending task
+    this.scheduleTasks()
+
+    // If nothing active and nothing pending, mark idle
+    if (this.activeIds.size === 0 && !this.items.some((i) => i.status === 'pending')) {
+      this.isProcessing = false
+    }
+    return true
+  }
+
+  /** Resume a paused item: set it back to pending so scheduleTasks picks it up.
+   *  Note: download restarts from scratch (partial output is overwritten by -y flag). */
+  resumeItem(id: string): boolean {
+    const item = this.items.find((i) => i.id === id)
+    if (!item) { return false }
+    if (item.status !== 'paused') { return false }
+
+    item.status = 'pending'
+    item.progress = { percent: 0, speed: '', eta: '' }
+    item.error = undefined
+    this.notifyStatus()
+    this.scheduleTasks()
+    return true
   }
 
   getStatus(): QueueStatus {

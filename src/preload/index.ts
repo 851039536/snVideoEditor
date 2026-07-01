@@ -262,6 +262,12 @@ const electronAPI = {
   cancelQueueItem: (id: string): Promise<boolean> =>
     ipcRenderer.invoke('download:cancelItem', id),
 
+  pauseQueueItem: (id: string): Promise<boolean> =>
+    ipcRenderer.invoke('download:pauseItem', id),
+
+  resumeQueueItem: (id: string): Promise<boolean> =>
+    ipcRenderer.invoke('download:resumeItem', id),
+
   removeQueueItem: (id: string): Promise<boolean> =>
     ipcRenderer.invoke('download:removeQueueItem', id),
 
@@ -277,7 +283,7 @@ const electronAPI = {
       url: string
       output: string
       headers?: Record<string, string>
-      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused'
       progress: { percent: number; speed: string; eta: string }
       error?: string
       addedAt: number
@@ -309,7 +315,7 @@ const electronAPI = {
       url: string
       output: string
       headers?: Record<string, string>
-      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+      status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused'
       progress: { percent: number; speed: string; eta: string }
       error?: string
       addedAt: number

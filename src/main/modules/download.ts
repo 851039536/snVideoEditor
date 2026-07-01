@@ -120,6 +120,34 @@ function formatHeaders(headers: Record<string, string>): string {
 }
 
 /**
+ * 格式化 ffmpeg bitrate 输出为可读的下载速率。
+ * 输入如 "1677.7kbits/s" 或 "3.2Mbits/s"，输出如 "1.6 Mbps"。
+ * 如果 bitrate 不可用，回退显示编码速度倍率（如 "2.5x"）。
+ */
+function formatRateForDisplay(bitrate?: string, fallbackSpeed?: string): string {
+  if (bitrate) {
+    // ffmpeg 输出格式: 1677.7kbits/s 或 3.2Mbits/s
+    const match = bitrate.match(/^([\d.]+)\s*(k|M|G)?bits\/s$/i)
+    if (match) {
+      const value = parseFloat(match[1])
+      const unit = (match[2] || '').toUpperCase()
+      if (unit === 'G') {
+        return `${(value * 1000).toFixed(0)} Mbps`
+      }
+      if (unit === 'M') {
+        return `${value.toFixed(1)} Mbps`
+      }
+      if (unit === 'K') {
+        return `${(value / 1000).toFixed(1)} Mbps`
+      }
+      return `${(value / 1_000_000).toFixed(2)} Mbps`
+    }
+    return bitrate
+  }
+  return fallbackSpeed || '计算中...'
+}
+
+/**
  * Download a m3u8 stream using FFmpeg and save as MP4.
  */
 export function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
@@ -199,7 +227,7 @@ export function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
             percent,
             currentFile: 1,
             totalFiles: 1,
-            speed: parsed.speed,
+            speed: formatRateForDisplay(parsed.bitrate, parsed.speed),
             eta: parsed.time
           })
         }

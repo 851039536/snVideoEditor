@@ -304,6 +304,16 @@ function registerDownloadHandlers(): void {
     return queueManager.cancelItem(id)
   })
 
+  // Pause a downloading item
+  ipcMain.handle('download:pauseItem', async (_event, id: string) => {
+    return queueManager.pauseItem(id)
+  })
+
+  // Resume a paused item
+  ipcMain.handle('download:resumeItem', async (_event, id: string) => {
+    return queueManager.resumeItem(id)
+  })
+
   // Cancel all downloads and clear queue
   ipcMain.handle('download:cancelQueue', async () => {
     queueManager.cancelAll()

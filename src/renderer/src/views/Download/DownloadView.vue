@@ -181,10 +181,10 @@ const canStart = computed((): boolean => {
   )
 })
 
-// Whether the queue has any active items (pending or downloading)
+// Whether the queue has any active items (pending, downloading, or paused)
 const hasActiveQueue = computed((): boolean => {
   return progressStore.queueItems.some(
-    (i) => i.status === 'pending' || i.status === 'downloading'
+    (i) => i.status === 'pending' || i.status === 'downloading' || i.status === 'paused'
   )
 })
 
@@ -335,6 +335,14 @@ async function handleQueueCancel(id: string): Promise<void> {
       progressStore.queueIsProcessing = status.isProcessing
     } catch { /* ignore */ }
   }
+}
+
+async function handleQueuePause(id: string): Promise<void> {
+  await window.electronAPI.pauseQueueItem(id)
+}
+
+async function handleQueueResume(id: string): Promise<void> {
+  await window.electronAPI.resumeQueueItem(id)
 }
 
 async function handleClearTerminal(): Promise<void> {
@@ -611,6 +619,8 @@ onUnmounted(() => {
           @retry="handleQueueRetry"
           @remove="handleQueueRemove"
           @cancel="handleQueueCancel"
+          @pause="handleQueuePause"
+          @resume="handleQueueResume"
           @clear-terminal="handleClearTerminal"
         />
 
