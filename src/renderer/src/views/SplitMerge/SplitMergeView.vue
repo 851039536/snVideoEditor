@@ -35,8 +35,8 @@ const dragging = ref<'start' | 'end' | null>(null)
 const scrubbing = ref(false)
 const lastDragClientX = ref(0)
 
-// Fine-tune: how many times finer when holding Shift (higher = finer)
-const FINE_DRAG_SCALE = 5
+// Fine-tune: absolute seconds per pixel when holding Shift (lower = finer)
+const FINE_SECONDS_PER_PX = 0.1
 
 // Trim times in seconds (normalized 0..duration)
 const trimStartSec = ref(0)
@@ -453,12 +453,9 @@ const MAX_SECONDS_PER_PX = 2
 function onGlobalPointerMove(e: PointerEvent): void {
   if (scrubbing.value) {
     if (e.shiftKey) {
-      // Fine mode: delta-based, FINE_DRAG_SCALE× finer
-      const el = timelineRef.value
-      if (!el || duration.value <= 0) { return }
-      const rect = el.getBoundingClientRect()
-      const nativeRes = duration.value / rect.width
-      const delta = (e.clientX - lastDragClientX.value) * nativeRes / FINE_DRAG_SCALE
+      // Fine mode: absolute 0.1s per pixel, independent of video duration
+      if (duration.value <= 0) { return }
+      const delta = (e.clientX - lastDragClientX.value) * FINE_SECONDS_PER_PX
       lastDragClientX.value = e.clientX
       seekVideoPlayer(clamp(currentTime.value + delta, 0, duration.value))
     } else {
@@ -479,9 +476,9 @@ function onGlobalPointerMove(e: PointerEvent): void {
   let updateLastX = false
 
   if (e.shiftKey) {
-    // Shift + drag: delta-based, FINE_DRAG_SCALE× finer than native
+    // Shift + drag: absolute fine resolution, independent of video duration
     const base = dragging.value === 'start' ? trimStartSec.value : trimEndSec.value
-    rawT = base + (e.clientX - lastDragClientX.value) * nativeRes / FINE_DRAG_SCALE
+    rawT = base + (e.clientX - lastDragClientX.value) * FINE_SECONDS_PER_PX
     updateLastX = true
   } else if (nativeRes > MAX_SECONDS_PER_PX) {
     // Long video: delta mode capped at MAX_SECONDS_PER_PX for smooth control
