@@ -32,6 +32,7 @@ const duration = ref(0)
 // ---- Timeline drag state ----
 const timelineRef = ref<HTMLDivElement | null>(null)
 const dragging = ref<'start' | 'end' | null>(null)
+const scrubbing = ref(false)
 const lastDragClientX = ref(0)
 
 // Fine-tune: how many times finer when holding Shift (higher = finer)
@@ -432,9 +433,16 @@ function onHandleWheel(handle: 'start' | 'end', e: WheelEvent): void {
   }
 }
 
-function onTimelineClick(e: MouseEvent): void {
-  // Only seek on direct timeline click (not handle drag)
-  if (dragging.value) { return }
+function startScrub(e: PointerEvent): void {
+  if (duration.value <= 0) { return }
+  scrubbing.value = true
+  lastDragClientX.value = e.clientX
+  const el = timelineRef.value
+  if (el) { el.setPointerCapture(e.pointerId) }
+  // Pause video during scrub
+  videoPlayer.value?.pause()
+  isPlaying.value = false
+  // Seek immediately to click position
   seekVideoPlayer(getTimelineTime(e.clientX))
 }
 
@@ -443,6 +451,23 @@ const MAX_SECONDS_PER_PX = 2
 
 // Global pointer move/up for seamless drag tracking (pointer events required for setPointerCapture)
 function onGlobalPointerMove(e: PointerEvent): void {
+  if (scrubbing.value) {
+    if (e.shiftKey) {
+      // Fine mode: delta-based, FINE_DRAG_SCALE× finer
+      const el = timelineRef.value
+      if (!el || duration.value <= 0) { return }
+      const rect = el.getBoundingClientRect()
+      const nativeRes = duration.value / rect.width
+      const delta = (e.clientX - lastDragClientX.value) * nativeRes / FINE_DRAG_SCALE
+      lastDragClientX.value = e.clientX
+      seekVideoPlayer(clamp(currentTime.value + delta, 0, duration.value))
+    } else {
+      // Normal mode: absolute position, playhead follows mouse
+      seekVideoPlayer(getTimelineTime(e.clientX))
+    }
+    return
+  }
+
   if (!dragging.value) { return }
 
   const el = timelineRef.value
@@ -487,6 +512,11 @@ function onGlobalPointerMove(e: PointerEvent): void {
 }
 
 function onGlobalPointerUp(e: PointerEvent): void {
+  if (scrubbing.value) {
+    scrubbing.value = false
+    return
+  }
+
   if (!dragging.value) { return }
   (e.target as HTMLElement)?.releasePointerCapture?.(e.pointerId)
   dragging.value = null
@@ -883,7 +913,7 @@ onUnmounted(() => {
           <div
             ref="timelineRef"
             class="timeline-track"
-            @click="onTimelineClick"
+            @pointerdown="startScrub"
           >
             <!-- Left dimmed area -->
             <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
