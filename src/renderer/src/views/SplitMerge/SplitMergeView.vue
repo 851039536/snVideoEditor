@@ -174,13 +174,6 @@ function swapArrayElements<T>(arr: T[], index: number, direction: -1 | 1): boole
   return true
 }
 
-// Watch trimEndSec to clamp it when duration loads
-watch(duration, (newDur) => {
-  if (newDur > 0 && trimEndSec.value > newDur) {
-    trimEndSec.value = newDur
-  }
-})
-
 // ---- File operations ----
 
 async function addFiles(newFiles: string[]): Promise<void> {
@@ -245,6 +238,12 @@ watch(mode, (newMode) => {
     }
   } else if (newMode === 'merge') {
     releaseVideoResource()
+    videoMeta.value = null
+    duration.value = 0
+    trimStartSec.value = 0
+    trimEndSec.value = 30
+    currentTime.value = 0
+    isPlaying.value = false
     outputName.value = ''
     outputDir.value = ''
     errorMsg.value = ''
@@ -440,11 +439,12 @@ async function cutToClipList(): Promise<void> {
   // 暂停视频播放器，避免裁剪期间及完成后 video 持续解码占用渲染线程
   videoPlayer.value?.pause()
 
+  let outputFile = ''
   try {
     const tempDir = await window.electronAPI.getTempDir()
     clipIdCounter++
     const clipId = `clip_${Date.now()}_${clipIdCounter}`
-    const outputFile = `${tempDir}/${clipId}.mp4`
+    outputFile = `${tempDir}/${clipId}.mp4`
 
     const success = await window.electronAPI.splitVideo({
       input: files.value[0],
@@ -467,9 +467,16 @@ async function cutToClipList(): Promise<void> {
       // 前手柄保持当前位置不动，仅重置后手柄到视频末尾，便于继续裁剪后续片段
       trimEndSec.value = duration.value
       seekVideoPlayer(trimStartSec.value)
+    } else {
+      // 裁剪取消：清理可能已部分写入的临时片段文件
+      window.electronAPI.deleteFile(outputFile).catch(() => {})
     }
   } catch (e) {
     errorMsg.value = `裁切失败: ${e instanceof Error ? e.message : String(e)}`
+    // 裁剪失败：清理临时片段文件（outputFile 可能为空，如 getTempDir 抛错）
+    if (outputFile) {
+      window.electronAPI.deleteFile(outputFile).catch(() => {})
+    }
   } finally {
     cuttingInProgress.value = false
   }
@@ -486,7 +493,10 @@ function removeClip(index: number): void {
 }
 
 function toggleClipSelection(index: number): void {
-  clips.value[index].selected = !clips.value[index].selected
+  const clip = clips.value[index]
+  if (clip) {
+    clip.selected = !clip.selected
+  }
 }
 
 function moveClip(index: number, direction: -1 | 1): void {
@@ -555,12 +565,15 @@ async function startProcess(): Promise<void> {
       // Remove merged clips from list to avoid stale references
       clips.value = clips.value.filter((c) => !c.selected)
       store.finish()
+      window.electronAPI.removeProgressListener()
     } else {
       store.reset()
+      window.electronAPI.removeProgressListener()
     }
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
     store.reset()
+    window.electronAPI.removeProgressListener()
   }
 }
 
