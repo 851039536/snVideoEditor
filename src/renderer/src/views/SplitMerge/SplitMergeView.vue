@@ -534,7 +534,9 @@ async function cutToClipList(): Promise<void> {
         outputFile,
         selected: true
       })
-      // 前手柄保持当前位置不动，仅重置后手柄到视频末尾，便于继续裁剪后续片段
+      // 前手柄重置到本次裁剪结束位置，后手柄重置到视频末尾，便于连续裁剪后续片段
+      const clipEnd = trimEndSec.value
+      trimStartSec.value = Math.min(clipEnd, Math.max(0, duration.value - 0.1))
       trimEndSec.value = duration.value
       seekVideoPlayer(trimStartSec.value)
     } else {
