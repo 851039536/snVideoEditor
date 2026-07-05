@@ -155,6 +155,16 @@ function seekVideoPlayer(t: number): void {
   }
 }
 
+/** 显式释放 video 元素资源（文件句柄 + 解码线程），避免 file:/// 延迟释放导致线程残留占用 */
+function releaseVideoResource(): void {
+  const vp = videoPlayer.value
+  if (vp) {
+    vp.pause()
+    vp.removeAttribute('src')
+    vp.load()
+  }
+}
+
 function swapArrayElements<T>(arr: T[], index: number, direction: -1 | 1): boolean {
   const newIndex = index + direction
   if (newIndex < 0 || newIndex >= arr.length) { return false }
@@ -215,6 +225,7 @@ async function loadVideoMeta(filePath: string): Promise<void> {
 function removeFile(index: number): void {
   files.value.splice(index, 1)
   if (mode.value === 'split' && files.value.length === 0) {
+    releaseVideoResource()
     videoMeta.value = null
     duration.value = 0
   }
@@ -233,6 +244,7 @@ watch(mode, (newMode) => {
       loadVideoMeta(files.value[0])
     }
   } else if (newMode === 'merge') {
+    releaseVideoResource()
     outputName.value = ''
     outputDir.value = ''
     errorMsg.value = ''
@@ -573,6 +585,7 @@ if (typeof window !== 'undefined') {
 onUnmounted(() => {
   document.removeEventListener('pointermove', onGlobalPointerMove)
   document.removeEventListener('pointerup', onGlobalPointerUp)
+  releaseVideoResource()
   // Clean up temporary clip files
   for (const c of clips.value) {
     window.electronAPI.deleteFile(c.outputFile).catch(() => {})
