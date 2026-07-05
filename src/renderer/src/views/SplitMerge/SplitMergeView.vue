@@ -40,7 +40,6 @@ const FINE_DRAG_SCALE = 5
 // Trim times in seconds (normalized 0..duration)
 const trimStartSec = ref(0)
 const trimEndSec = ref(30)
-const isInitialTrimEnd = ref(true)
 
 // ---- Manual time inputs (for fine-tuning) ----
 // Derived from trim times via computed getter; setters write back with clamping + seek
@@ -54,7 +53,6 @@ function hmsFieldSetter(field: 'start' | 'end', h: string, m: string, s: string)
     seekVideoPlayer(trimStartSec.value)
   } else {
     const max = duration.value || 99999
-    isInitialTrimEnd.value = false
     trimEndSec.value = clamp(total, trimStartSec.value + 0.1, max)
     seekVideoPlayer(trimEndSec.value)
   }
@@ -110,14 +108,6 @@ const videoSrc = computed((): string => {
   return `file:///${files.value[0].replace(/\\/g, '/')}`
 })
 
-const startTimeStr = computed((): string => {
-  return secondsToHMS(trimStartSec.value)
-})
-
-const endTimeStr = computed((): string => {
-  return secondsToHMS(trimEndSec.value)
-})
-
 const clipDurationSec = computed((): number => {
   return Math.max(0, trimEndSec.value - trimStartSec.value)
 })
@@ -126,13 +116,12 @@ const clipDurationStr = computed((): string => {
   return secondsToHMS(clipDurationSec.value)
 })
 
-const canMerge = computed((): boolean => {
-  const selectedClips = clips.value.filter((c) => c.selected)
-  return (selectedClips.length + files.value.length) >= 2
-})
-
 const selectedClipCount = computed((): number => {
   return clips.value.filter((c) => c.selected).length
+})
+
+const canMerge = computed((): boolean => {
+  return selectedClipCount.value + files.value.length >= 2
 })
 
 // Timeline bar percentages
@@ -177,10 +166,8 @@ function swapArrayElements<T>(arr: T[], index: number, direction: -1 | 1): boole
 
 // Watch trimEndSec to clamp it when duration loads
 watch(duration, (newDur) => {
-  if (newDur > 0) {
-    if (trimEndSec.value > newDur || isInitialTrimEnd.value) {
-      trimEndSec.value = newDur
-    }
+  if (newDur > 0 && trimEndSec.value > newDur) {
+    trimEndSec.value = newDur
   }
 })
 
@@ -215,12 +202,10 @@ async function loadVideoMeta(filePath: string): Promise<void> {
     duration.value = meta.duration
     trimStartSec.value = 0
     trimEndSec.value = meta.duration
-    isInitialTrimEnd.value = false
     currentTime.value = 0
     await nextTick()
     if (videoPlayer.value) {
       videoPlayer.value.load()
-      videoPlayer.value.currentTime = 0
     }
   } catch (e) {
     errorMsg.value = '无法读取视频信息'
@@ -330,7 +315,6 @@ function snapStartHere(): void {
 }
 
 function snapEndHere(): void {
-  isInitialTrimEnd.value = false
   trimEndSec.value = clamp(currentTime.value, trimStartSec.value + 0.1, duration.value)
 }
 
@@ -362,7 +346,6 @@ function onHandleWheel(handle: 'start' | 'end', e: WheelEvent): void {
     trimStartSec.value = clamp(trimStartSec.value + delta, 0, trimEndSec.value - 0.1)
     seekVideoPlayer(trimStartSec.value)
   } else {
-    isInitialTrimEnd.value = false
     trimEndSec.value = clamp(trimEndSec.value + delta, trimStartSec.value + 0.1, duration.value)
     seekVideoPlayer(trimEndSec.value)
   }
@@ -416,7 +399,6 @@ function onGlobalPointerMove(e: PointerEvent): void {
   } else {
     const clamped = clamp(rawT, trimStartSec.value + 0.1, duration.value)
     if (trimEndSec.value !== clamped) {
-      isInitialTrimEnd.value = false
       trimEndSec.value = clamped
       seekVideoPlayer(clamped)
     }
@@ -443,6 +425,8 @@ async function cutToClipList(): Promise<void> {
 
   errorMsg.value = ''
   cuttingInProgress.value = true
+  // 暂停视频播放器，避免裁剪期间及完成后 video 持续解码占用渲染线程
+  videoPlayer.value?.pause()
 
   try {
     const tempDir = await window.electronAPI.getTempDir()
@@ -453,7 +437,7 @@ async function cutToClipList(): Promise<void> {
     const success = await window.electronAPI.splitVideo({
       input: files.value[0],
       output: outputFile,
-      startTime: startTimeStr.value,
+      startTime: secondsToHMS(trimStartSec.value),
       duration: clipDurationStr.value
     })
 
@@ -814,9 +798,9 @@ onUnmounted(() => {
 
           <!-- Time markers -->
           <div class="flex justify-between mt-1.5 px-1">
-            <span class="text-xs font-mono text-accent-blue">{{ startTimeStr }}</span>
+            <span class="text-xs font-mono text-accent-blue">{{ secondsToHMS(trimStartSec) }}</span>
             <span class="text-xs font-mono text-text-muted">{{ secondsToHMS(duration) }}</span>
-            <span class="text-xs font-mono text-accent-purple">{{ endTimeStr }}</span>
+            <span class="text-xs font-mono text-accent-purple">{{ secondsToHMS(trimEndSec) }}</span>
           </div>
 
         </div>
