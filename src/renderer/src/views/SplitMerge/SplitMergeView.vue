@@ -2,7 +2,7 @@
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import {
   Scissors, X, ArrowUp, ArrowDown, Folder, Play, Pause,
-  SkipBack, SkipForward, Video, ChevronsLeft, ChevronsRight
+  SkipBack, SkipForward, Video, ChevronsLeft, ChevronsRight, RefreshCw
 } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import VideoPreview from '@/components/VideoPreview.vue'
@@ -94,6 +94,10 @@ const stepSeconds = ref(2)
 const outputName = ref('')
 const outputDir = ref('')
 const errorMsg = ref('')
+
+// ---- Replace video (split mode) ----
+const isDraggingReplace = ref(false)
+const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp']
 
 // ---- Clip list ----
 const clips = ref<ClipItem[]>([])
@@ -221,6 +225,72 @@ function removeFile(index: number): void {
     releaseVideoResource()
     videoMeta.value = null
     duration.value = 0
+  }
+}
+
+async function replaceVideo(newPath: string): Promise<void> {
+  releaseVideoResource()
+  // Clean up old clip temp files
+  for (const c of clips.value) {
+    window.electronAPI.deleteFile(c.outputFile).catch(() => {})
+  }
+  clips.value = []
+  // Reset state
+  videoMeta.value = null
+  duration.value = 0
+  trimStartSec.value = 0
+  trimEndSec.value = 30
+  currentTime.value = 0
+  isPlaying.value = false
+  errorMsg.value = ''
+  // Replace file
+  files.value = [newPath]
+  // Reset output name
+  const name = newPath.split(/[/\\]/).pop() || ''
+  outputName.value = name.replace(/\.[^.]+$/, '') + '_output'
+  // Load new meta
+  await loadVideoMeta(newPath)
+}
+
+async function pickReplaceVideo(): Promise<void> {
+  const selected = await window.electronAPI.selectVideoFiles()
+  if (selected.length > 0) {
+    await replaceVideo(selected[0])
+  }
+}
+
+function isVideoExtension(filename: string): boolean {
+  const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'))
+  return VIDEO_EXTENSIONS.includes(ext)
+}
+
+function onReplaceDragOver(event: DragEvent): void {
+  event.preventDefault()
+  isDraggingReplace.value = true
+}
+
+function onReplaceDragLeave(event: DragEvent): void {
+  // Only set false if relatedTarget is not inside the container
+  const container = event.currentTarget as HTMLElement
+  if (!event.relatedTarget || !container.contains(event.relatedTarget as HTMLElement)) {
+    isDraggingReplace.value = false
+  }
+}
+
+async function onReplaceDrop(event: DragEvent): Promise<void> {
+  isDraggingReplace.value = false
+  const fileList = event.dataTransfer?.files
+  if (!fileList) { return }
+  for (let i = 0; i < fileList.length; i++) {
+    const file = fileList[i]
+    if (file.type.startsWith('video/') || isVideoExtension(file.name)) {
+      // @ts-ignore - Electron returns the path
+      const path = file.path || file.name
+      if (path) {
+        await replaceVideo(path)
+        return
+      }
+    }
   }
 }
 
@@ -649,7 +719,23 @@ onUnmounted(() => {
       <!-- Has file => full editor -->
       <template v-else>
         <!-- Video Player -->
-        <div class="video-player-container glass-card">
+        <div
+          class="video-player-container glass-card relative"
+          @drop.prevent="onReplaceDrop"
+          @dragover.prevent="onReplaceDragOver"
+          @dragleave="onReplaceDragLeave"
+        >
+          <!-- Replace overlay when dragging -->
+          <div
+            v-if="isDraggingReplace"
+            class="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-gradient-to-r from-accent-blue/20 to-accent-purple/20 animate-pulse-glow pointer-events-none"
+          >
+            <div class="text-center">
+              <RefreshCw :size="40" class="text-accent-purple mx-auto mb-2 animate-spin" />
+              <p class="text-accent-purple font-semibold text-sm">松开以替换视频</p>
+            </div>
+          </div>
+
           <video
             v-if="videoSrc"
             ref="videoPlayer"
@@ -700,6 +786,13 @@ onUnmounted(() => {
               <span v-if="videoMeta">{{ videoMeta.width }}×{{ videoMeta.height }}</span>
               <span v-if="videoMeta">{{ formatSize(videoMeta.size) }}</span>
               <span class="text-accent-blue font-mono">{{ getFileName(files[0]) }}</span>
+              <button
+                @click="pickReplaceVideo"
+                class="p-1 rounded hover:bg-accent-blue/10"
+                title="替换视频"
+              >
+                <RefreshCw :size="14" class="text-accent-blue" />
+              </button>
               <button
                 @click="removeFile(0)"
                 class="p-1 rounded"
