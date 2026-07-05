@@ -452,10 +452,9 @@ async function cutToClipList(): Promise<void> {
         outputFile,
         selected: true
       })
-      // Reset trim handles to default (full video range)
-      trimStartSec.value = 0
+      // 前手柄保持当前位置不动，仅重置后手柄到视频末尾，便于继续裁剪后续片段
       trimEndSec.value = duration.value
-      seekVideoPlayer(0)
+      seekVideoPlayer(trimStartSec.value)
     }
   } catch (e) {
     errorMsg.value = `裁切失败: ${e instanceof Error ? e.message : String(e)}`
