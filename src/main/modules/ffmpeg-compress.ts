@@ -9,6 +9,7 @@ import {
   setFfmpegProc,
   parseProgressLine,
   timeToSeconds,
+  isGpuCodec,
   type VideoMeta
 } from './ffmpeg-shared'
 
@@ -62,11 +63,15 @@ export interface CompressOptions {
   preset?: string
   twoPass?: boolean
   onProgress?: ProgressCallback
+  /** Called when NVENC driver is incompatible and falls back to CPU encoding */
+  onFallback?: (original: string, fallback: string) => void
 }
 
 export interface BatchCompressOptions {
   files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; twoPass?: boolean }[]
   onProgress?: ProgressCallback
+  /** Called when NVENC driver is incompatible and falls back to CPU encoding */
+  onFallback?: (original: string, fallback: string) => void
 }
 
 /**
@@ -79,7 +84,7 @@ function buildCompressArgs(opts: CompressOptions): string[] {
     '-c:v', opts.codec || 'libx264'
   ]
 
-  const isGpu = (opts.codec || '').includes('nvenc') || (opts.codec || '').includes('qsv')
+  const isGpu = isGpuCodec(opts.codec || '')
   if (opts.bitrate) {
     args.push('-b:v', opts.bitrate)
   } else if (opts.codec?.includes('nvenc')) {
@@ -183,14 +188,15 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
 
     resetCancelled()
 
-    const isGpu = (opts.codec || '').includes('nvenc') || (opts.codec || '').includes('qsv')
+    const isGpu = isGpuCodec(opts.codec || '')
     const useTwoPass = opts.twoPass && !!opts.bitrate && !isGpu
 
     if (useTwoPass) {
       const baseArgs = buildCompressArgs(opts)
+      const passLogPrefix = path.join(path.dirname(opts.output), 'ffmpeg2pass')
 
       // Pass 1: analysis
-      const pass1Args = [...baseArgs, '-pass', '1', '-f', 'null', process.platform === 'win32' ? 'NUL' : '/dev/null']
+      const pass1Args = [...baseArgs, '-pass', '1', '-passlogfile', passLogPrefix, '-f', 'null', process.platform === 'win32' ? 'NUL' : '/dev/null']
       try {
         const pass1Result = await runCompressPass(pass1Args, opts, 'pass1')
         if (!pass1Result.success) {
@@ -208,12 +214,11 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
       }
 
       // Pass 2: actual encode
-      const pass2Args = [...baseArgs, '-pass', '2', opts.output]
+      const pass2Args = [...baseArgs, '-pass', '2', '-passlogfile', passLogPrefix, opts.output]
       try {
         const pass2Result = await runCompressPass(pass2Args, opts, 'pass2')
-        const logDir = path.dirname(opts.output)
-        for (const logName of ['ffmpeg2pass-0.log', 'ffmpeg2pass-0.log.mbtree']) {
-          try { fs.unlinkSync(path.join(logDir, logName)) } catch { /* ok */ }
+        for (const suffix of ['-0.log', '-0.log.mbtree']) {
+          try { fs.unlinkSync(passLogPrefix + suffix) } catch { /* ok */ }
         }
 
         if (!pass2Result.success) {
@@ -253,6 +258,9 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
         const isDriverErr = /Driver does not support|minimum required/i.test(msg)
         if (isNvenc && isDriverErr) {
           console.warn('[Compress] NVENC 驱动不兼容，自动回退 libx264:', msg.slice(0, 200))
+          if (opts.onFallback) {
+            opts.onFallback(opts.codec, 'libx264')
+          }
           try {
             const fallbackOpts = { ...opts, codec: 'libx264', preset: opts.preset || 'fast' }
             const ok = await doSinglePass(fallbackOpts)
@@ -272,10 +280,11 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
 /**
  * Batch compress multiple video files
  */
-export async function batchCompress(opts: BatchCompressOptions): Promise<{ success: number; successFiles: string[]; failed: { input: string; error: string }[] }> {
+export async function batchCompress(opts: BatchCompressOptions): Promise<{ success: number; successFiles: string[]; failed: { input: string; error: string }[]; fallbacks: { input: string; originalCodec: string; fallbackCodec: string }[] }> {
   let success = 0
   const successFiles: string[] = []
   const failed: { input: string; error: string }[] = []
+  const fallbacks: { input: string; originalCodec: string; fallbackCodec: string }[] = []
 
   resetCancelled()
 
@@ -294,6 +303,9 @@ export async function batchCompress(opts: BatchCompressOptions): Promise<{ succe
               currentFileName: path.basename(file.input)
             })
           }
+        },
+        onFallback: (original, fallback) => {
+          fallbacks.push({ input: file.input, originalCodec: original, fallbackCodec: fallback })
         }
       })
       if (!result) { break }
@@ -306,5 +318,5 @@ export async function batchCompress(opts: BatchCompressOptions): Promise<{ succe
     }
   }
 
-  return { success, successFiles, failed }
+  return { success, successFiles, failed, fallbacks }
 }

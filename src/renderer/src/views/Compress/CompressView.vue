@@ -8,6 +8,7 @@ import InfoTooltip from '@/components/InfoTooltip.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
 import { formatSize, getDirName, getFileName } from '@/utils/format'
+import { isGpuCodec } from '@/utils/codec'
 import { useFileList } from '@/composables/useFileList'
 import { useInfoTooltip } from '@/composables/useInfoTooltip'
 import type { FileEntry } from '@/types/file'
@@ -31,6 +32,7 @@ const twoPass = ref(settingsStore.compressPreset.twoPass)
 
 const errorMsg = ref('')
 let isUnmounted = false
+let runId = 0
 
 // Persist changes back to store
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -81,7 +83,10 @@ const selectedOutputDir = computed(() => {
 
 async function fetchCommonPaths(): Promise<boolean> {
   try {
-    commonPaths.value = await window.electronAPI.getCommonPaths()
+    const paths = await window.electronAPI.getCommonPaths()
+    if (!isUnmounted) {
+      commonPaths.value = paths
+    }
     return true
   } catch (_e) {
     return false
@@ -123,6 +128,9 @@ onMounted(async () => {
         codec.value = 'libx264'
       } else if (encoders.length === 0) {
         console.warn('[Compress] 未能获取可用编码器列表，ffmpeg 可能启动失败或被安全软件拦截')
+        if (isGpuEncoder.value) {
+          codec.value = 'libx264'
+        }
       }
     }
   } catch (_e) {
@@ -131,22 +139,22 @@ onMounted(async () => {
 })
 
 // GPU encoder detection
-const isGpuEncoder = computed(() => {
-  return (codec.value || '').includes('nvenc') || (codec.value || '').includes('qsv')
-})
+const isGpuEncoder = computed(() => isGpuCodec(codec.value))
 
 const RESOLUTION_BITRATE: Record<string, string> = {
   '1920:1080': '4000k',
-  '1280:720': '500k',
+  '1280:720': '2500k',
   '854:480': '320k',
-  '640:360': '320k'
+  '640:360': '200k'
 }
 
 const crfActive = computed(() => !bitrate.value)
 
-// resolution → bitrate linkage
+// resolution → bitrate linkage (does not clear bitrate for 'original')
 watch(resolution, (res) => {
-  bitrate.value = RESOLUTION_BITRATE[res] || ''
+  if (res && res !== 'original' && RESOLUTION_BITRATE[res]) {
+    bitrate.value = RESOLUTION_BITRATE[res]
+  }
 })
 
 // Persist preset on any param change + disable twoPass when bitrate cleared
@@ -172,6 +180,8 @@ function estimateOutputSize(entry: FileEntry): string {
 
   // CRF mode with codec factor
   const originalMB = entry.meta.size / (1024 * 1024)
+  // CRF < 18 (near-lossless / lossless) typically produces larger or equal files
+  if (crfValue.value < 18) { return '≥ 原文件' }
   const ratios: Record<number, number> = { 18: 0.7, 23: 0.4, 28: 0.2, 32: 0.12 }
   const ratio = ratios[crfValue.value] || 0.4
   // H.265/HEVC ~30% more efficient than H.264
@@ -183,11 +193,21 @@ function estimateOutputSize(entry: FileEntry): string {
 // Batch file status tracking
 const fileStatuses = ref<Record<string, BatchFileStatus>>({})
 
-function getStatusIcon(status: BatchFileStatus | undefined): string {
-  if (status === 'processing') { return 'processing' }
-  if (status === 'completed') { return 'completed' }
-  if (status === 'failed') { return 'failed' }
-  return 'none'
+function pruneFileStatuses(): void {
+  const currentPaths = new Set(files.value.map((f) => f.path))
+  for (const key of Object.keys(fileStatuses.value)) {
+    if (!currentPaths.has(key)) {
+      delete fileStatuses.value[key]
+    }
+  }
+}
+
+function handleRemoveFile(index: number): void {
+  const entry = files.value[index]
+  if (entry) {
+    delete fileStatuses.value[entry.path]
+  }
+  removeFile(index)
 }
 
 const canStart = computed((): boolean => {
@@ -220,7 +240,8 @@ async function startCompress(): Promise<void> {
     return
   }
 
-  // Set all files to pending
+  // Set all files to pending and prune stale entries
+  pruneFileStatuses()
   for (const entry of files.value) {
     fileStatuses.value[entry.path] = 'pending'
   }
@@ -228,14 +249,10 @@ async function startCompress(): Promise<void> {
   progressStore.start('compress')
   window.electronAPI.onProgress((info) => {
     progressStore.update(info)
-    // Update file status based on current file name from progress
-    if (info.currentFileName) {
-      for (const entry of files.value) {
-        if (getFileName(entry.path) === info.currentFileName) {
-          fileStatuses.value[entry.path] = 'processing'
-          break
-        }
-      }
+    // Update file status using currentFile index (avoids basename collision)
+    if (info.currentFile > 0 && info.currentFile <= files.value.length) {
+      const entry = files.value[info.currentFile - 1]
+      fileStatuses.value[entry.path] = 'processing'
     }
   })
 
@@ -251,8 +268,9 @@ async function startCompress(): Promise<void> {
       preset: preset.value,
       twoPass: twoPass.value
     }))
+    const currentRunId = ++runId
     const result = await window.electronAPI.batchCompress({ files: batchFiles })
-    if (!progressStore.isProcessing) {
+    if (currentRunId !== runId || isUnmounted) {
       return
     }
 
@@ -266,23 +284,32 @@ async function startCompress(): Promise<void> {
           } catch { return null }
         })
       )
-      if (!isUnmounted) {
-        for (const r of results) {
-          if (!r) { continue }
-          const original = files.value.find((f) => f.outputPath === r.outputPath)
-          if (original) {
-            if (original.meta) {
-              compressResult.value.push({
-                fileName: getFileName(r.outputPath),
-                originalSize: original.meta.size,
-                compressedSize: r.fileInfo.size
-              })
-            }
-            fileStatuses.value[original.path] = 'completed'
+      if (currentRunId !== runId || isUnmounted) { return }
+      for (const r of results) {
+        if (!r) { continue }
+        const original = files.value.find((f) => f.outputPath === r.outputPath)
+        if (original) {
+          let originalSize = original.meta?.size ?? 0
+          if (!original.meta) {
+            try {
+              const info = await window.electronAPI.getFileInfo(original.path)
+              originalSize = info.size
+            } catch { /* keep 0 */ }
           }
+          compressResult.value.push({
+            fileName: getFileName(r.outputPath),
+            originalSize,
+            compressedSize: r.fileInfo.size
+          })
+          fileStatuses.value[original.path] = 'completed'
         }
       }
-      progressStore.finish()
+      if (result.failed.length > 0) {
+        // Partial success: mark progress done but show failure details
+        progressStore.finish()
+      } else {
+        progressStore.finish()
+      }
     }
 
     // Handle failures
@@ -295,10 +322,19 @@ async function startCompress(): Promise<void> {
         const name = f ? getFileName(f.path) : item.input
         return `${name}: ${item.error.slice(0, 500)}`
       }).join('\n')
-      errorMsg.value = `${result.failed.length} 个文件压缩失败:\n${failedDetails}`
-      if (result.successFiles.length === 0) {
+      if (result.successFiles.length > 0) {
+        errorMsg.value = `部分完成：${result.successFiles.length} 个成功，${result.failed.length} 个失败:\n${failedDetails}`
+      } else {
+        errorMsg.value = `${result.failed.length} 个文件压缩失败:\n${failedDetails}`
         progressStore.reset()
       }
+    }
+
+    // NVENC driver-incompatible fallback warning
+    if (result.fallbacks && result.fallbacks.length > 0) {
+      const fallbackNames = result.fallbacks.map((fb) => getFileName(fb.input)).join('、')
+      errorMsg.value = (errorMsg.value ? errorMsg.value + '\n' : '')
+        + `⚠️ ${result.fallbacks.length} 个文件因 GPU 驱动不兼容已自动回退 CPU 编码: ${fallbackNames}`
     }
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
@@ -315,6 +351,10 @@ async function startCompress(): Promise<void> {
 
 onUnmounted(() => {
   isUnmounted = true
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
   window.electronAPI?.removeProgressListener()
 })
 </script>
@@ -370,13 +410,13 @@ onUnmounted(() => {
                   {{ entry.meta ? estimateOutputSize(entry) : '...' }}
                 </td>
                 <td class="p-3 text-center">
-                  <span v-if="getStatusIcon(fileStatuses[entry.path]) === 'processing'" title="处理中">
+                  <span v-if="fileStatuses[entry.path] === 'processing'" title="处理中">
                     <Loader2 :size="14" class="text-accent-blue animate-spin inline-block" />
                   </span>
-                  <span v-else-if="getStatusIcon(fileStatuses[entry.path]) === 'completed'" title="已完成">
+                  <span v-else-if="fileStatuses[entry.path] === 'completed'" title="已完成">
                     <CheckCircle2 :size="14" class="text-success inline-block" />
                   </span>
-                  <span v-else-if="getStatusIcon(fileStatuses[entry.path]) === 'failed'" title="失败">
+                  <span v-else-if="fileStatuses[entry.path] === 'failed'" title="失败">
                     <XCircle :size="14" class="text-danger inline-block" />
                   </span>
                   <span v-else class="text-text-muted text-xs">-</span>
@@ -391,7 +431,7 @@ onUnmounted(() => {
                       <Info :size="14" class="text-accent-blue" />
                     </button>
                     <button
-                      @click="removeFile(idx)"
+                      @click="handleRemoveFile(idx)"
                       class="p-1 rounded hover:bg-bg-tertiary transition-colors"
                       title="移除文件"
                     >
@@ -445,8 +485,10 @@ onUnmounted(() => {
               <select v-model="bitrate" class="select-input w-full">
                 <option value="">自动 (CRF 模式)</option>
                 <option value="4000k">4 Mbps</option>
+                <option value="2500k">2.5 Mbps</option>
                 <option value="500k">500 Kbps</option>
                 <option value="320k">320 Kbps</option>
+                <option value="200k">200 Kbps</option>
               </select>
             </div>
 

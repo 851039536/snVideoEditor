@@ -153,6 +153,16 @@ export function setFfmpegProc(proc: ChildProcess | null): void {
   currentProc = proc
 }
 
+// ---- Shared utilities ----
+
+/**
+ * Check if a codec string refers to a GPU-accelerated encoder.
+ * 渲染进程侧在 src/renderer/src/utils/codec.ts 中有同逻辑副本，保持一致。
+ */
+export function isGpuCodec(codec: string): boolean {
+  return codec.includes('nvenc') || codec.includes('qsv')
+}
+
 // ---- Shared interfaces ----
 export interface ProgressCallback {
   (data: { percent: number; currentFile: number; totalFiles: number; speed: string; eta: string; currentFileName?: string }): void
