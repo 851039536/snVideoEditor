@@ -138,8 +138,8 @@ const isGpuEncoder = computed(() => {
 const RESOLUTION_BITRATE: Record<string, string> = {
   '1920:1080': '4000k',
   '1280:720': '500k',
-  '854:480': '300k',
-  '640:360': '300k'
+  '854:480': '320k',
+  '640:360': '320k'
 }
 
 const crfActive = computed(() => !bitrate.value)
@@ -446,7 +446,7 @@ onUnmounted(() => {
                 <option value="">自动 (CRF 模式)</option>
                 <option value="4000k">4 Mbps</option>
                 <option value="500k">500 Kbps</option>
-                <option value="300k">300 Kbps</option>
+                <option value="320k">320 Kbps</option>
               </select>
             </div>
 
