@@ -6,6 +6,7 @@ import { DEFAULT_PLAYER_DATA } from '@/views/Player/types'
 const THEME_KEY = 'snve-theme'
 const COMPRESS_PRESET_KEY = 'snve-compress-preset'
 const PLAYER_DATA_KEY = 'snve-player-data'
+const OUTPUT_DIR_KEY = 'snve-output-dir'
 
 export interface CompressPreset {
   crfValue: number
@@ -57,12 +58,18 @@ function loadPlayerData(): PersistedPlayerData {
   return { ...DEFAULT_PLAYER_DATA }
 }
 
+function loadOutputDir(): string {
+  try {
+    return localStorage.getItem(OUTPUT_DIR_KEY) || ''
+  } catch { return '' }
+}
+
 function applyTheme(theme: 'dark' | 'light'): void {
   document.documentElement.classList.toggle('light', theme === 'light')
 }
 
 export const useSettingsStore = defineStore('settings', () => {
-  const outputDirectory = ref<string>('')
+  const outputDirectory = ref<string>(loadOutputDir())
   const theme = ref<'dark' | 'light'>(loadTheme())
   const compressPreset = ref<CompressPreset>(loadCompressPreset())
   const playerData = ref<PersistedPlayerData>(loadPlayerData())
@@ -85,6 +92,11 @@ export const useSettingsStore = defineStore('settings', () => {
   function setPlayerData(data: PersistedPlayerData): void {
     playerData.value = data
   }
+
+  // Persist output directory
+  watch(outputDirectory, (val) => {
+    try { localStorage.setItem(OUTPUT_DIR_KEY, val) } catch { /* ignore */ }
+  })
 
   // Persist theme and apply to DOM
   watch(theme, (val) => {

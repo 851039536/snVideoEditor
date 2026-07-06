@@ -1,13 +1,25 @@
 import { ref } from 'vue'
 import type { FileEntry } from '@/types/file'
+import { useSettingsStore } from '@/stores/settings'
 
-export function useFileList() {
+export function useFileList(defaultSuffix?: string) {
   const files = ref<FileEntry[]>([])
+  const settingsStore = useSettingsStore()
+
+  function makeOutputPath(inputPath: string, dir: string, suffix: string): string {
+    const name = inputPath.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'output'
+    return `${dir.replace(/\\/g, '/').replace(/\/$/, '')}/${name}${suffix}`
+  }
 
   async function addFiles(paths: string[]): Promise<void> {
+    const storedDir = defaultSuffix ? settingsStore.outputDirectory : ''
     for (const p of paths) {
       if (files.value.some((f) => f.path === p)) { continue }
-      const entry: FileEntry = { path: p, outputPath: '', meta: null }
+      const entry: FileEntry = {
+        path: p,
+        outputPath: storedDir ? makeOutputPath(p, storedDir, defaultSuffix) : '',
+        meta: null
+      }
       files.value.push(entry)
       getMeta(entry)
     }
@@ -32,9 +44,9 @@ export function useFileList() {
 
   function setOutputDir(dir: string | null, suffix: string): void {
     if (!dir) { return }
+    settingsStore.setOutputDirectory(dir)
     for (const entry of files.value) {
-      const name = entry.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || 'output'
-      entry.outputPath = `${dir.replace(/\\/g, '/').replace(/\/$/, '')}/${name}${suffix}`
+      entry.outputPath = makeOutputPath(entry.path, dir, suffix)
     }
   }
 

@@ -17,7 +17,7 @@ import type { CompressResultItem, BatchFileStatus } from './types'
 const progressStore = useProgressStore()
 const settingsStore = useSettingsStore()
 
-const { files, addFiles, removeFile, selectOutputDir, setOutputDir } = useFileList()
+const { files, addFiles, removeFile, selectOutputDir, setOutputDir } = useFileList('_compressed.mp4')
 
 const twoPassTip = useInfoTooltip()
 
