@@ -163,6 +163,14 @@ export function isGpuCodec(codec: string): boolean {
   return codec.includes('nvenc') || codec.includes('qsv')
 }
 
+/**
+ * Check if a codec string refers to VP9 encoder.
+ * 渲染进程侧在 src/renderer/src/utils/codec.ts 中有同逻辑副本，保持一致。
+ */
+export function isVp9Codec(codec: string): boolean {
+  return codec.includes('vp9')
+}
+
 // ---- Shared interfaces ----
 export interface ProgressCallback {
   (data: { percent: number; currentFile: number; totalFiles: number; speed: string; eta: string; currentFileName?: string }): void

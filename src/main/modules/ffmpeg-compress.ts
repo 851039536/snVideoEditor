@@ -10,6 +10,7 @@ import {
   parseProgressLine,
   timeToSeconds,
   isGpuCodec,
+  isVp9Codec,
   type VideoMeta
 } from './ffmpeg-shared'
 
@@ -101,7 +102,7 @@ function buildCompressArgs(opts: CompressOptions): string[] {
 
   args.push('-c:a', 'aac', '-b:a', opts.audioBitrate || '32k')
 
-  if (!isGpu) {
+  if (!isGpu && !isVp9Codec(opts.codec || '')) {
     args.push('-preset', opts.preset || 'fast')
   }
 

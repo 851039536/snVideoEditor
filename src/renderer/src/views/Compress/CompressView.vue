@@ -8,7 +8,7 @@ import InfoTooltip from '@/components/InfoTooltip.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useSettingsStore } from '@/stores/settings'
 import { formatSize, getDirName, getFileName } from '@/utils/format'
-import { isGpuCodec } from '@/utils/codec'
+import { isGpuCodec, isVp9Codec } from '@/utils/codec'
 import { useFileList } from '@/composables/useFileList'
 import { useInfoTooltip } from '@/composables/useInfoTooltip'
 import type { FileEntry } from '@/types/file'
@@ -140,6 +140,18 @@ onMounted(async () => {
 
 // GPU encoder detection
 const isGpuEncoder = computed(() => isGpuCodec(codec.value))
+const isVp9 = computed(() => isVp9Codec(codec.value))
+
+// CRF range adapts per codec: H.264/H.265 use 0-51, VP9 uses 0-63
+const crfMax = computed(() => isVp9.value ? 63 : 51)
+const showPreset = computed(() => !isGpuEncoder.value && !isVp9.value)
+
+// Clamp crfValue when switching to a codec with a lower max
+watch(crfMax, (max) => {
+  if (crfValue.value > max) {
+    crfValue.value = max
+  }
+})
 
 const RESOLUTION_BITRATE: Record<string, string> = {
   '1920:1080': '4000k',
@@ -157,9 +169,9 @@ watch(resolution, (res) => {
   }
 })
 
-// Persist preset on any param change + disable twoPass when bitrate cleared
+// Persist preset on any param change + disable twoPass when inapplicable
 watch([crfValue, resolution, bitrate, codec, audioBitrate, preset, twoPass], () => {
-  if (!bitrate.value) { twoPass.value = false }
+  if (!bitrate.value || isGpuEncoder.value) { twoPass.value = false }
   savePresetDebounced()
 })
 
@@ -184,8 +196,8 @@ function estimateOutputSize(entry: FileEntry): string {
   if (crfValue.value < 18) { return '≥ 原文件' }
   const ratios: Record<number, number> = { 18: 0.7, 23: 0.4, 28: 0.2, 32: 0.12 }
   const ratio = ratios[crfValue.value] || 0.4
-  // H.265/HEVC ~30% more efficient than H.264
-  const codecFactor = (codec.value || '').includes('265') || (codec.value || '').includes('hevc') ? 0.7 : 1.0
+  // H.265/HEVC/VP9 ~30% more efficient than H.264
+  const codecFactor = (codec.value || '').includes('265') || (codec.value || '').includes('hevc') || isVp9Codec(codec.value || '') ? 0.7 : 1.0
   const estMB = originalMB * ratio * codecFactor
   return `${Math.max(1, Math.round(estMB))} MB`
 }
@@ -502,7 +514,7 @@ onUnmounted(() => {
                 v-model.number="crfValue"
                 type="range"
                 min="0"
-                max="51"
+                :max="crfMax"
                 class="w-full mt-2 slider-base slider"
               />
               <div class="flex justify-between text-xs text-text-muted mt-1">
@@ -510,7 +522,7 @@ onUnmounted(() => {
                 <span>18 视觉无损</span>
                 <span>23 默认</span>
                 <span>28 标清</span>
-                <span>51 最差</span>
+                <span>{{ crfMax }} 最差</span>
               </div>
             </div>
 
@@ -574,8 +586,8 @@ onUnmounted(() => {
               </select>
             </div>
 
-            <!-- Encoding Preset (CPU only) -->
-            <div v-if="!isGpuEncoder">
+            <!-- Encoding Preset (CPU + non-VP9 only) -->
+            <div v-if="showPreset">
               <InfoTooltip title="编码预设是什么意思？" widthClass="w-72">
                 <template #label>
                   <label class="text-sm text-text-secondary">编码速度预设</label>
