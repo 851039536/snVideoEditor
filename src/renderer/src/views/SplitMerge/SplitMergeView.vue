@@ -38,6 +38,20 @@ const lastDragClientX = ref(0)
 // Fine-tune: absolute seconds per pixel when holding Shift (lower = finer)
 const FINE_SECONDS_PER_PX = 0.1
 
+// Whether to pause video while scrubbing the timeline (persisted)
+const SCRUB_PAUSE_KEY = 'snve-scrub-pause'
+function loadScrubPause(): boolean {
+  try {
+    const saved = localStorage.getItem(SCRUB_PAUSE_KEY)
+    if (saved !== null) { return saved !== 'false' }
+  } catch { /* ignore */ }
+  return true
+}
+const pauseOnScrub = ref<boolean>(loadScrubPause())
+watch(pauseOnScrub, (val) => {
+  try { localStorage.setItem(SCRUB_PAUSE_KEY, String(val)) } catch { /* ignore */ }
+})
+
 // Trim times in seconds (normalized 0..duration)
 const trimStartSec = ref(0)
 const trimEndSec = ref(30)
@@ -439,9 +453,11 @@ function startScrub(e: PointerEvent): void {
   lastDragClientX.value = e.clientX
   const el = timelineRef.value
   if (el) { el.setPointerCapture(e.pointerId) }
-  // Pause video during scrub
-  videoPlayer.value?.pause()
-  isPlaying.value = false
+  // Pause video during scrub (unless user opted to keep playing)
+  if (pauseOnScrub.value) {
+    videoPlayer.value?.pause()
+    isPlaying.value = false
+  }
   // Seek immediately to click position
   seekVideoPlayer(getTimelineTime(e.clientX))
 }
@@ -838,6 +854,14 @@ onUnmounted(() => {
           <div class="flex items-center justify-between mb-3 gap-2">
             <div class="flex items-center gap-2 flex-wrap">
               <h3 class="text-sm font-semibold text-text-primary">裁剪时间轴</h3>
+              <label class="flex items-center gap-1 cursor-pointer select-none" title="开启时拖动时间轴会暂停播放；关闭时拖动时视频继续播放">
+                <input
+                  type="checkbox"
+                  v-model="pauseOnScrub"
+                  class="w-3 h-3 accent-blue-500 cursor-pointer"
+                />
+                <span class="text-xs text-text-secondary">拖动时暂停</span>
+              </label>
               <!-- Step forward/backward -->
               <div class="flex items-center gap-1">
                 <button
