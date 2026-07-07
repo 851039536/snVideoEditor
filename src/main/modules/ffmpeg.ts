@@ -138,17 +138,46 @@ export function splitVideo(opts: SplitOptions): Promise<boolean> {
   })
 }
 
+/**
+ * Probe the duration (in seconds) of a single media file via ffprobe.
+ * Resolves to 0 on failure so merge progress can degrade gracefully.
+ * Does NOT touch the global `currentProc` slot (independent spawn).
+ */
+function probeDuration(filePath: string): Promise<number> {
+  return new Promise((resolve) => {
+    const proc = spawn(getFfprobePath(), [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      filePath
+    ])
+    let stdout = ''
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+    proc.on('close', () => {
+      const dur = parseFloat(stdout.trim())
+      resolve(isNaN(dur) || dur < 0 ? 0 : dur)
+    })
+    proc.on('error', () => { resolve(0) })
+  })
+}
+
 // ─── mergeVideos ──────────────────────────────────────────────────────────────
 
-export function mergeVideos(opts: MergeOptions): Promise<boolean> {
+export async function mergeVideos(opts: MergeOptions): Promise<boolean> {
+  if (opts.inputs.length === 0) {
+    throw new Error('没有提供要合并的视频文件')
+  }
+
+  resetCancelled()
+
+  // Pre-compute total duration for accurate progress calculation
+  let totalDurationSec = 0
+  try {
+    const durations = await Promise.all(opts.inputs.map(probeDuration))
+    totalDurationSec = durations.reduce((sum, d) => sum + d, 0)
+  } catch { /* ignore, fallback to 0 */ }
+
   return new Promise((resolve, reject) => {
-    if (opts.inputs.length === 0) {
-      reject(new Error('没有提供要合并的视频文件'))
-      return
-    }
-
-    resetCancelled()
-
     const concatDir = path.dirname(opts.output)
     const concatListPath = path.join(concatDir, `_concat_list_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`)
 
@@ -179,9 +208,10 @@ export function mergeVideos(opts: MergeOptions): Promise<boolean> {
       stderrLines.push(chunk)
       const parsed = parseProgressLine(chunk)
       if (parsed && opts.onProgress) {
-        const totalFrames = opts.inputs.length * 100
-        const current = Math.min(Math.round(timeToSeconds(parsed.time)), totalFrames)
-        const percent = Math.min(Math.round((current / totalFrames) * 100), 100)
+        const currentSec = timeToSeconds(parsed.time)
+        const percent = totalDurationSec > 0
+          ? Math.min(Math.round((currentSec / totalDurationSec) * 100), 100)
+          : 0
         opts.onProgress({
           percent,
           currentFile: 1,
