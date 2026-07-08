@@ -1,14 +1,10 @@
-import { spawn } from 'child_process'
 import * as https from 'https'
 import * as http from 'http'
 import { URL } from 'url'
 import {
-  getFfmpegPath,
-  parseProgressLine,
-  timeToSeconds,
-  setFfmpegProc,
   cancelFfmpegOperation
 } from './ffmpeg'
+import { downloadViaChromium } from './chromium-downloader'
 
 export interface DownloadOptions {
   url: string
@@ -29,10 +25,19 @@ export interface DownloadOptions {
   onDurationDetected?: (durationSec: number) => void
 }
 
+/** A single cookie entry extracted from the browser session. */
+export interface SessionCookie {
+  domain: string
+  name: string
+  value: string
+}
+
 export interface PageFetchResult {
   m3u8Urls: string[]
   pageTitle: string
   pageUrl: string
+  /** All cookies from the browser session, including their domain for filtering. */
+  cookies: SessionCookie[]
 }
 
 /** Default User-Agent string used across all HTTP requests. */
@@ -129,240 +134,32 @@ function httpGetText(
 }
 
 /**
- * Format headers object into FFmpeg -headers string format.
- * FFmpeg expects each header line terminated with \r\n, including the last line.
+ * Download a m3u8 stream and save as MP4.
+ *
+ * Uses Electron's Chromium network stack (net.fetch) to download the m3u8
+ * playlist and all TS segments — this bypasses Cloudflare anti-bot protection
+ * because the TLS fingerprint and cookies match a real browser.
+ *
+ * After local download, ffmpeg handles the local-only m3u8 → MP4 conversion.
  */
-function formatHeaders(headers: Record<string, string>): string {
-  const lines: string[] = []
-  for (const [key, value] of Object.entries(headers)) {
-    if (value.trim() !== '') {
-      lines.push(`${key}: ${value}`)
-    }
-  }
-  // Must end with \r\n for each line including the last
-  return lines.map((l) => l + '\r\n').join('')
-}
-
-/**
- * 格式化 ffmpeg bitrate 输出为可读的下载速率。
- * 输入如 "1677.7kbits/s" 或 "3.2Mbits/s"，输出如 "1.6 Mbps"。
- * 如果 bitrate 不可用，回退显示编码速度倍率（如 "2.5x"）。
- */
-function formatRateForDisplay(bitrate?: string, fallbackSpeed?: string): string {
-  if (bitrate) {
-    // ffmpeg 输出格式: 1677.7kbits/s 或 3.2Mbits/s
-    const match = bitrate.match(/^([\d.]+)\s*(k|M|G)?bits\/s$/i)
-    if (match) {
-      const value = parseFloat(match[1])
-      const unit = (match[2] || '').toUpperCase()
-      if (unit === 'G') {
-        return `${(value * 1000).toFixed(0)} Mbps`
-      }
-      if (unit === 'M') {
-        return `${value.toFixed(1)} Mbps`
-      }
-      if (unit === 'K') {
-        return `${(value / 1000).toFixed(1)} Mbps`
-      }
-      return `${(value / 1_000_000).toFixed(2)} Mbps`
-    }
-    return bitrate
-  }
-  return fallbackSpeed || '计算中...'
-}
-
-/**
- * Download a m3u8 stream using FFmpeg and save as MP4.
- */
-export function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    const headersStr = opts.headers ? formatHeaders(opts.headers) : ''
-    const args: string[] = []
-
-    // Protocol whitelist — required by newer ffmpeg versions
-    args.push(
-      '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,httpproxy'
-    )
-
-    // Add HTTP headers if provided
-    if (headersStr) {
-      args.push('-headers', headersStr)
-    }
-
-    // Override User-Agent if set separately (broader compatibility)
-    if (opts.headers?.['User-Agent']) {
-      args.push('-user_agent', opts.headers['User-Agent'])
-    }
-
-    // Override Referer if set separately
-    if (opts.headers?.['Referer']) {
-      args.push('-referer', opts.headers['Referer'])
-    }
-
-    // Reconnect options for robustness
-    args.push(
-      '-reconnect', '1',
-      '-reconnect_at_eof', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5'
-    )
-
-    // Resume support: skip already-downloaded content via input seeking.
-    // Using -ss BEFORE -i ensures ffmpeg skips TS segments efficiently.
-    if (opts.startTime && opts.startTime > 0) {
-      args.push('-ss', opts.startTime.toFixed(3))
-    }
-
-    args.push(
-      '-i', opts.url,
-      '-c', 'copy',
-      '-bsf:a', 'aac_adtstoasc',
-      '-movflags', '+faststart',
-      '-y',
-      opts.output
-    )
-
-    const proc = spawn(getFfmpegPath(), args)
-    setFfmpegProc(proc)
-    if (opts.onProcCreated) {
-      opts.onProcCreated(proc)
-    }
-
-    const stderrLines: string[] = []
-    const MAX_STDERR_LINES = 50
-    let durationSec = 0
-    /** Percent offset when resuming from a paused state (0 for fresh downloads). */
-    let startPercent = 0
-
-    proc.stderr.on('data', (data: Buffer) => {
-      const chunk = data.toString()
-      stderrLines.push(chunk)
-      // 防止长时间下载时 stderr 输出无界增长：仅保留最近 50 行
-      if (stderrLines.length > MAX_STDERR_LINES) {
-        stderrLines.splice(0, stderrLines.length - MAX_STDERR_LINES)
-      }
-
-      // Extract total duration from FFmpeg's initial analysis
-      if (durationSec === 0) {
-        const durMatch = chunk.match(/Duration: (\d{2}:\d{2}:\d{2}\.\d{2})/)
-        if (durMatch) {
-          durationSec = timeToSeconds(durMatch[1])
-          if (opts.startTime && opts.startTime > 0 && durationSec > 0) {
-            startPercent = Math.round((opts.startTime / durationSec) * 100)
-          }
-          if (opts.onDurationDetected) {
-            opts.onDurationDetected(durationSec)
-          }
-        }
-      }
-
-      const parsed = parseProgressLine(chunk)
-      if (parsed && opts.onProgress) {
-        const current = timeToSeconds(parsed.time)
-        if (durationSec > 0) {
-          const effectiveDuration = durationSec - (opts.startTime || 0)
-          const segmentPercent = effectiveDuration > 0
-            ? Math.round((current / effectiveDuration) * 100)
-            : 0
-          const percent = Math.min(
-            startPercent + Math.round((segmentPercent * (100 - startPercent)) / 100),
-            99
-          )
-          opts.onProgress({
-            percent,
+export async function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
+  return downloadViaChromium({
+    url: opts.url,
+    output: opts.output,
+    onProgress: opts.onProgress
+      ? (data) => {
+          opts.onProgress!({
+            percent: data.percent,
             currentFile: 1,
             totalFiles: 1,
-            speed: formatRateForDisplay(parsed.bitrate, parsed.speed),
-            eta: parsed.time
+            speed: data.speed,
+            eta: data.eta
           })
         }
-      }
-    })
-
-    proc.stderr.on('error', (err: Error) => {
-      // 非致命：stderr 流错误只记录，不影响下载继续
-      console.error('[downloadM3u8] stderr error:', err.message)
-    })
-
-    proc.on('close', (code: number | null) => {
-      setFfmpegProc(null)
-      if (code === 0) {
-        if (opts.onProgress) {
-          opts.onProgress({
-            percent: 100,
-            currentFile: 1,
-            totalFiles: 1,
-            speed: '完成',
-            eta: '0:00'
-          })
-        }
-        resolve(true)
-      } else {
-        const errOutput = stderrLines.join('')
-        reject(buildDownloadError(errOutput, code))
-      }
-    })
-
-    proc.on('error', (err: Error) => {
-      setFfmpegProc(null)
-      reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
-    })
+      : undefined,
+    onProcCreated: opts.onProcCreated,
+    onDurationDetected: opts.onDurationDetected
   })
-}
-
-/**
- * Build a user-friendly error message from ffmpeg stderr output.
- */
-function buildDownloadError(errOutput: string, code: number | null): Error {
-  // HTTP 403 — missing/invalid Referer or auth headers
-  if (errOutput.includes('HTTP error 403')) {
-    return new Error(
-      '下载失败 (HTTP 403 Forbidden)：服务器拒绝访问。\n' +
-      '请检查是否设置了正确的 Referer 和 User-Agent 请求头。'
-    )
-  }
-  // HTTP 404 — wrong URL
-  if (errOutput.includes('HTTP error 404')) {
-    return new Error(
-      '下载失败 (HTTP 404 Not Found)：视频地址不存在。\n' +
-      '提示：请确保输入的是 .m3u8 流媒体地址，而非网页地址。可使用"从网页提取"功能获取真实 m3u8 链接。'
-    )
-  }
-  // HTTP 5xx
-  if (errOutput.includes('Server returned 5XX') || errOutput.includes('Server returned 5')) {
-    return new Error('下载失败 (HTTP 5xx)：服务器内部错误，请稍后重试。')
-  }
-  // Connection refused / timed out
-  if (errOutput.includes('Connection refused') || errOutput.includes('Connection timed out')) {
-    return new Error('下载失败：无法连接到服务器，请检查网络或确认 URL 可访问。')
-  }
-  // Connection reset (-10054 on Windows = WSAECONNRESET)
-  if (errOutput.includes('-10054') || errOutput.includes('Connection reset by peer')) {
-    return new Error(
-      '下载失败：服务器重置了连接 (WSAECONNRESET)。\n' +
-      '常见原因：\n' +
-      '1. 输入的是网页 URL 而非 m3u8 流地址 — 请先用"从网页提取"功能获取真实地址\n' +
-      '2. 网站使用了 Cloudflare 等防护 — 需要设置正确的 Referer/Origin/User-Agent\n' +
-      '3. 视频链接已过期或需要 Cookie 认证'
-    )
-  }
-  // DNS / host not found
-  if (errOutput.includes('No such host') || errOutput.includes('getaddrinfo') || errOutput.includes('Name or service not known')) {
-    return new Error('下载失败：无法解析域名，请检查 URL 是否正确或网络是否连接。')
-  }
-  // Connection timeout
-  if (errOutput.includes('Operation timed out') || errOutput.includes('ETIMEDOUT')) {
-    return new Error('下载失败：连接超时，服务器无响应。')
-  }
-  // TLS / SSL errors
-  if (errOutput.includes('SSL') || errOutput.includes('TLS') || errOutput.includes('certificate')) {
-    return new Error(
-      '下载失败 (TLS/SSL 错误)：安全连接失败。\n' +
-      '可能是网站的 HTTPS 证书问题，或服务器拒绝了 ffmpeg 的 TLS 握手。'
-    )
-  }
-  // Fallback
-  return new Error(`下载失败 (code: ${code}): ${errOutput.slice(-500)}`)
 }
 
 // ─── M3U8 Variant Parsing ──────────────────────────────────────────────────

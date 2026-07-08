@@ -22,6 +22,58 @@ const fetchedUrls = ref<string[]>([])
 const fetchedTitle = ref('')
 const showFetchedUrls = ref(false)
 
+/** Raw cookies extracted from browser session, keyed by (domain, name). */
+interface RawCookie {
+  domain: string
+  name: string
+  value: string
+}
+const rawCookies = ref<RawCookie[]>([])
+
+/** Check if a cookie domain matches a URL hostname. */
+function cookieDomainMatches(cookieDomain: string, hostname: string): boolean {
+  // Normalize: remove leading dot (e.g. ".surrit.com" → "surrit.com")
+  const d = cookieDomain.startsWith('.') ? cookieDomain.slice(1) : cookieDomain
+  if (hostname === d) { return true }
+  if (hostname.endsWith('.' + d)) { return true }
+  return false
+}
+
+/** Build a Cookie header string from rawCookies filtered for the given URL. */
+function buildCookiesForUrl(url: string): string {
+  if (!url || rawCookies.value.length === 0) { return '' }
+  let hostname: string
+  try {
+    hostname = new URL(url).hostname
+  } catch {
+    return ''
+  }
+  // Deduplicate by name within the same matched domain scope
+  const seen = new Set<string>()
+  const parts: string[] = []
+  for (const c of rawCookies.value) {
+    if (cookieDomainMatches(c.domain, hostname)) {
+      const key = `${c.domain}|${c.name}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        parts.push(`${c.name}=${c.value}`)
+      }
+    }
+  }
+  return parts.join('; ')
+}
+
+/** Update the Cookie request header based on a target URL. */
+function syncCookiesForUrl(url: string): void {
+  const cookieStr = buildCookiesForUrl(url)
+  const cookieHeader = headers.value.find((h) => h.key.toLowerCase() === 'cookie')
+  if (cookieHeader) {
+    cookieHeader.value = cookieStr
+  } else if (cookieStr) {
+    headers.value.push({ key: 'Cookie', value: cookieStr })
+  }
+}
+
 // ─── Quality (m3u8 variants) ─────────────────────────────────────────────────
 
 interface QualityVariant {
@@ -157,6 +209,8 @@ const autoFileName = computed((): string => {
 // Auto-detect quality + auto-fill filename when m3u8 URL changes
 watch(m3u8Url, (url) => {
   fileName.value = autoFileName.value
+  // Sync cookies for the new URL domain (if we have raw cookies from page fetch)
+  syncCookiesForUrl(url)
   if (url && isValidUrl(url) && url.includes('.m3u8')) {
     fetchQualityVariants()
   } else {
@@ -164,6 +218,11 @@ watch(m3u8Url, (url) => {
     variants.value = []
     selectedVariantIndex.value = -1
   }
+})
+
+// Keep Cookie header in sync when effective URL changes (e.g. quality variant selection)
+watch(effectiveUrl, (url) => {
+  syncCookiesForUrl(url)
 })
 
 const outputPath = computed((): string => {
@@ -248,6 +307,8 @@ async function fetchM3u8FromPage(): Promise<void> {
       showFetchedUrls.value = false
     } else {
       showFetchedUrls.value = true
+      // Store raw cookies for later domain-filtered use
+      rawCookies.value = result.cookies || []
       // Auto-fill Referer/Origin
       try {
         const parsed = new URL(pageUrl)
@@ -257,6 +318,7 @@ async function fetchM3u8FromPage(): Promise<void> {
         const originHeader = headers.value.find((h) => h.key.toLowerCase() === 'origin')
         if (originHeader && !originHeader.value) { originHeader.value = `${parsed.protocol}//${parsed.hostname}` }
       } catch { /* ignore */ }
+      // Don't auto-fill Cookie yet — wait for user to select a specific m3u8 URL
     }
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
@@ -271,6 +333,8 @@ async function selectFetchedUrl(url: string): Promise<void> {
   m3u8Url.value = url
   showFetchedUrls.value = false
   hintMsg.value = ''
+  // Sync cookies for the selected m3u8 URL's domain
+  syncCookiesForUrl(url)
 }
 
 // ─── Download Queue ──────────────────────────────────────────────────────────

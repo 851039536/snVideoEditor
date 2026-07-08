@@ -165,6 +165,7 @@ export interface ElectronAPI {
     m3u8Urls: string[]
     pageTitle: string
     pageUrl: string
+    cookies: { domain: string; name: string; value: string }[]
   }>
 
   fetchM3u8Variants: (

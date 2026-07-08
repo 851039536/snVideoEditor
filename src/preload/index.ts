@@ -237,6 +237,7 @@ const electronAPI = {
     m3u8Urls: string[]
     pageTitle: string
     pageUrl: string
+    cookies: { domain: string; name: string; value: string }[]
   }> =>
     ipcRenderer.invoke('video:fetchPageM3u8Browser', pageUrl),
 

@@ -51,6 +51,37 @@ export function fetchPageM3u8ViaBrowser(pageUrl: string): Promise<PageFetchResul
       // webRequest might not be available in all session configurations
     }
 
+    // ─── Helper: extract cookies from the browser session ───
+    async function extractCookies(): Promise<{ domain: string; name: string; value: string }[]> {
+      try {
+        const allCookies = await win.webContents.session.cookies.get({})
+        if (allCookies.length === 0) { return [] }
+        return allCookies.map((c) => ({
+          domain: c.domain || '',
+          name: c.name,
+          value: c.value
+        }))
+      } catch {
+        return []
+      }
+    }
+
+    // ─── Resolve helper ───
+    async function doResolve(): Promise<void> {
+      if (resolved) { return }
+      resolved = true
+      clearTimeout(timer)
+      const title = win.webContents?.getTitle?.() || '未知标题'
+      const cookies = await extractCookies()
+      cleanup()
+      resolve({
+        m3u8Urls: [...new Set(m3u8Urls)],
+        pageTitle: title,
+        pageUrl,
+        cookies
+      })
+    }
+
     // ─── Timer: resolve after collecting URLs ───
 
     const TIMEOUT_MS = 20000
@@ -58,10 +89,10 @@ export function fetchPageM3u8ViaBrowser(pageUrl: string): Promise<PageFetchResul
 
     const timer = setTimeout(() => {
       if (resolved) { return }
-      resolved = true
-      const title = win.webContents?.getTitle?.() || '未知标题'
-      cleanup()
       if (m3u8Urls.length === 0) {
+        resolved = true
+        const title = win.webContents?.getTitle?.() || '未知标题'
+        cleanup()
         reject(
           new Error(
             `未能从页面 "${title}" 中提取到 m3u8 地址（超时）。\n` +
@@ -71,11 +102,7 @@ export function fetchPageM3u8ViaBrowser(pageUrl: string): Promise<PageFetchResul
           )
         )
       } else {
-        resolve({
-          m3u8Urls: [...new Set(m3u8Urls)],
-          pageTitle: title,
-          pageUrl
-        })
+        doResolve()
       }
     }, TIMEOUT_MS)
 
@@ -88,17 +115,9 @@ export function fetchPageM3u8ViaBrowser(pageUrl: string): Promise<PageFetchResul
         if (resolved) { return }
         // If we already have m3u8 URLs, resolve early
         if (m3u8Urls.length > 0) {
-          resolved = true
-          clearTimeout(timer)
-          const title = win.webContents?.getTitle?.() || '未知标题'
           // Wait a tiny bit more for any extras
           setTimeout(() => {
-            cleanup()
-            resolve({
-              m3u8Urls: [...new Set(m3u8Urls)],
-              pageTitle: title,
-              pageUrl
-            })
+            doResolve()
           }, 1000)
         }
       }, SETTLE_MS)
