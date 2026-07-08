@@ -93,7 +93,10 @@ export class DownloadQueueManager {
     }
 
     const id = `dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    const cacheDir = path.join(app.getPath('userData'), 'download-cache', id)
+    // Place cache directory next to the output file (same drive) so disk space
+    // pressure follows user's save location instead of always hitting C drive.
+    const outputDir = path.dirname(opts.output)
+    const cacheDir = path.join(outputDir, `.sn-cache-${id}`)
     const item: QueueItem = {
       id,
       url: opts.url,
