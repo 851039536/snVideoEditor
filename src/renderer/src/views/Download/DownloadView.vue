@@ -243,12 +243,12 @@ const canStart = computed((): boolean => {
 // Whether the queue has any active items (pending, downloading, or paused)
 const hasActiveQueue = computed((): boolean => {
   return progressStore.queueItems.some(
-    (i) => i.status === 'pending' || i.status === 'downloading' || i.status === 'paused'
+    (i) => i.status === 'pending' || i.status === 'downloading' || i.status === 'merging' || i.status === 'paused'
   )
 })
 
 const downloadingCount = computed((): number => {
-  return progressStore.queueItems.filter((i) => i.status === 'downloading').length
+  return progressStore.queueItems.filter((i) => i.status === 'downloading' || i.status === 'merging').length
 })
 
 function setConcurrency(n: number): void {
