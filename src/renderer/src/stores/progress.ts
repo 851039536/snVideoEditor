@@ -9,6 +9,7 @@ export interface QueueItem {
   url: string
   output: string
   headers?: Record<string, string>
+  cacheDir?: string
   status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused'
   progress: { percent: number; speed: string; eta: string }
   error?: string

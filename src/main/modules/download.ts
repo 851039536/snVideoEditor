@@ -1,9 +1,5 @@
-import * as https from 'https'
-import * as http from 'http'
+import { net } from 'electron'
 import { URL } from 'url'
-import {
-  cancelFfmpegOperation
-} from './ffmpeg'
 import { downloadViaChromium } from './chromium-downloader'
 
 export interface DownloadOptions {
@@ -12,6 +8,10 @@ export interface DownloadOptions {
   headers?: Record<string, string>
   /** Resume offset in seconds. When set, ffmpeg will use -ss to skip already-downloaded content. */
   startTime?: number
+  /** Per-item abort signal, forwarded to downloadViaChromium. */
+  abortSignal?: AbortSignal
+  /** Persistent cache dir for resume support. */
+  cacheDir?: string
   onProgress?: (data: {
     percent: number
     currentFile: number
@@ -44,95 +44,6 @@ export interface PageFetchResult {
 export const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
 
-/** HTTP redirect status codes. */
-const REDIRECT_CODES = new Set([301, 302, 307, 308])
-
-/**
- * Perform a simple HTTP GET request, following redirects, and return the
- * response body as a UTF-8 string.
- */
-/** Maximum number of HTTP redirects to follow before bailing out. */
-const MAX_REDIRECTS = 10
-
-function httpGetText(
-  url: string,
-  extraHeaders?: Record<string, string>,
-  timeoutMs = 15000,
-  redirectCount = 0
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (redirectCount > MAX_REDIRECTS) {
-      return reject(new Error('重定向次数过多，可能存在循环重定向'))
-    }
-
-    const parsedUrl = new URL(url)
-    const client = parsedUrl.protocol === 'https:' ? https : http
-
-    const reqHeaders: Record<string, string> = {
-      'User-Agent': DEFAULT_UA,
-      'Accept': '*/*',
-      ...(extraHeaders || {})
-    }
-
-    const options: https.RequestOptions = {
-      hostname: parsedUrl.hostname,
-      path: parsedUrl.pathname + parsedUrl.search,
-      method: 'GET',
-      headers: reqHeaders,
-      timeout: timeoutMs
-    }
-
-    let settled = false
-
-    const req = client.request(options, (res) => {
-      if (settled) { return }
-
-      if (
-        res.statusCode !== undefined &&
-        REDIRECT_CODES.has(res.statusCode) &&
-        res.headers.location
-      ) {
-        settled = true
-        const redirectUrl = new URL(res.headers.location, url).href
-        return resolve(httpGetText(redirectUrl, extraHeaders, timeoutMs, redirectCount + 1))
-      }
-
-      if (res.statusCode !== 200) {
-        settled = true
-        return reject(new Error(`HTTP ${res.statusCode}`))
-      }
-
-      const chunks: Buffer[] = []
-      res.on('data', (chunk: Buffer) => {
-        if (!settled) { chunks.push(chunk) }
-      })
-      res.on('end', () => {
-        if (settled) { return }
-        settled = true
-        resolve(Buffer.concat(chunks).toString('utf-8'))
-      })
-      res.on('error', (err: Error) => {
-        if (settled) { return }
-        settled = true
-        reject(err)
-      })
-    })
-
-    req.on('error', (err: Error) => {
-      if (settled) { return }
-      settled = true
-      reject(err)
-    })
-    req.setTimeout(timeoutMs, () => {
-      if (settled) { return }
-      settled = true
-      req.destroy()
-      reject(new Error('ETIMEDOUT'))
-    })
-    req.end()
-  })
-}
-
 /**
  * Download a m3u8 stream and save as MP4.
  *
@@ -147,6 +58,8 @@ export async function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
     url: opts.url,
     output: opts.output,
     headers: opts.headers,
+    abortSignal: opts.abortSignal,
+    cacheDir: opts.cacheDir,
     onProgress: opts.onProgress
       ? (data) => {
           opts.onProgress!({
@@ -183,7 +96,14 @@ export async function fetchM3u8Variants(
   headers?: Record<string, string>
 ): Promise<M3u8Variant[]> {
   try {
-    const text = await httpGetText(m3u8Url, headers)
+    const resp = await net.fetch(m3u8Url, {
+      headers: {
+        'User-Agent': DEFAULT_UA,
+        ...(headers || {})
+      }
+    })
+    if (!resp.ok) { return [] }
+    const text = await resp.text()
     return parseMasterPlaylist(text, m3u8Url)
   } catch {
     // Silently return empty on any error — caller will try direct download
@@ -271,5 +191,3 @@ function getStandardLabel(height: number): string {
   if (height <= 1440) { return '2K' }
   return '4K'
 }
-
-export { cancelFfmpegOperation as cancelDownloadOperation }

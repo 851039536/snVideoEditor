@@ -1,15 +1,23 @@
+import { app } from 'electron'
+import * as path from 'path'
+import * as fs from 'fs'
 import { downloadM3u8, type DownloadOptions } from './download'
-import { killFfmpegProc, setFfmpegProc } from './ffmpeg'
+import { killFfmpegProc } from './ffmpeg'
 import type { ChildProcess } from 'child_process'
 
 /** Maximum number of items allowed in the download queue. */
 const MAX_QUEUE_SIZE = 100
+
+/** Debounce delay (ms) for saveToDisk to avoid excessive writes on progress updates. */
+const SAVE_DEBOUNCE_MS = 1000
 
 export interface QueueItem {
   id: string
   url: string
   output: string
   headers?: Record<string, string>
+  /** Persistent cache directory for TS segments (enables resume after restart). */
+  cacheDir?: string
   status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused'
   progress: { percent: number; speed: string; eta: string }
   error?: string
@@ -42,9 +50,11 @@ export class DownloadQueueManager {
   private isProcessing = false
   private activeIds = new Set<string>()
   private activeProcs = new Map<string, ChildProcess>()
+  private activeAbortControllers = new Map<string, AbortController>()
   private concurrency = 2
   private progressCb: QueueProgressCallback | null = null
   private statusCb: QueueStatusCallback | null = null
+  private saveTimer: ReturnType<typeof setTimeout> | null = null
 
   static getInstance(): DownloadQueueManager {
     if (!instance) {
@@ -83,11 +93,13 @@ export class DownloadQueueManager {
     }
 
     const id = `dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const cacheDir = path.join(app.getPath('userData'), 'download-cache', id)
     const item: QueueItem = {
       id,
       url: opts.url,
       output: opts.output,
       headers: opts.headers ? { ...opts.headers } : undefined,
+      cacheDir,
       status: 'pending',
       progress: { percent: 0, speed: '', eta: '' },
       addedAt: Date.now(),
@@ -139,7 +151,11 @@ export class DownloadQueueManager {
   }
 
   cancelAll(): void {
-    // Kill all active download processes first
+    // Abort all active download controllers first
+    for (const ac of this.activeAbortControllers.values()) {
+      ac.abort()
+    }
+    // Kill all active download processes
     for (const proc of this.activeProcs.values()) {
       killFfmpegProc(proc)
     }
@@ -152,8 +168,8 @@ export class DownloadQueueManager {
       }
     }
     this.activeProcs.clear()
+    this.activeAbortControllers.clear()
     this.activeIds.clear()
-    setFfmpegProc(null)
 
     // Mark all pending items as cancelled
     for (const item of this.items) {
@@ -224,6 +240,60 @@ export class DownloadQueueManager {
     return this.activeIds.size > 0
   }
 
+  // ─── Persistence ───────────────────────────────────────────────────────────
+
+  /** Get the JSON file path for queue persistence. */
+  private getQueueFilePath(): string {
+    return path.join(app.getPath('userData'), 'download-queue.json')
+  }
+
+  /** Save queue state to disk (debounced to avoid excessive writes). */
+  saveToDisk(): void {
+    if (this.saveTimer) { clearTimeout(this.saveTimer) }
+    this.saveTimer = setTimeout(() => {
+      this.doSaveToDisk()
+    }, SAVE_DEBOUNCE_MS)
+  }
+
+  /** Immediately save queue state to disk (call on app quit). */
+  doSaveToDisk(): void {
+    try {
+      const data = JSON.stringify({ items: this.items })
+      fs.writeFileSync(this.getQueueFilePath(), data, 'utf-8')
+    } catch {
+      // Silently ignore write failures
+    }
+  }
+
+  /** Load queue state from disk and restore items. Called on app startup. */
+  loadFromDisk(): void {
+    try {
+      const filePath = this.getQueueFilePath()
+      if (!fs.existsSync(filePath)) { return }
+      const data = fs.readFileSync(filePath, 'utf-8')
+      const parsed = JSON.parse(data) as { items: QueueItem[] }
+      if (!parsed.items || !Array.isArray(parsed.items)) { return }
+
+      // Restore items: downloading → pending (needs re-scheduling), others keep state
+      for (const item of parsed.items) {
+        if (item.status === 'downloading') {
+          item.status = 'pending'
+          item.progress = { percent: 0, speed: '', eta: '' }
+        }
+        // Cancelled/completed/failed/paused keep their state
+        this.items.push(item)
+      }
+
+      if (this.items.length > 0) {
+        this.notifyStatus()
+        // Schedule any pending/paused items for download
+        this.scheduleTasks()
+      }
+    } catch {
+      // Silently ignore parse failures — start with empty queue
+    }
+  }
+
   // ─── Private ──────────────────────────────────────────────────────────────
 
   /**
@@ -241,6 +311,9 @@ export class DownloadQueueManager {
     if (targetStatus === 'paused') {
       item.pausedAtPercent = item.progress.percent
     }
+    // Abort the download controller (interrupts net.fetch)
+    const ac = this.activeAbortControllers.get(item.id)
+    if (ac) { ac.abort() }
     // Kill the ffmpeg process for this item
     const proc = this.activeProcs.get(item.id)
     if (proc) {
@@ -248,7 +321,7 @@ export class DownloadQueueManager {
     }
     this.activeIds.delete(item.id)
     this.activeProcs.delete(item.id)
-    setFfmpegProc(null)
+    this.activeAbortControllers.delete(item.id)
     this.notifyStatus()
 
     // Release the slot: try to start next pending task
@@ -268,6 +341,8 @@ export class DownloadQueueManager {
     if (this.statusCb) {
       this.statusCb(this.getStatus())
     }
+    // Debounced save to disk for persistence
+    this.saveToDisk()
   }
 
   private notifyProgress(
@@ -305,12 +380,21 @@ export class DownloadQueueManager {
   private startDownload(item: QueueItem): void {
     item.status = 'downloading'
     this.activeIds.add(item.id)
+    // Create per-item abort controller for cancellation
+    const abortController = new AbortController()
+    this.activeAbortControllers.set(item.id, abortController)
+    // Ensure cacheDir exists
+    if (item.cacheDir) {
+      fs.mkdirSync(item.cacheDir, { recursive: true })
+    }
     this.notifyStatus()
 
     downloadM3u8({
       url: item.url,
       output: item.output,
       headers: item.headers,
+      abortSignal: abortController.signal,
+      cacheDir: item.cacheDir,
       startTime: item.pausedAtPercent !== undefined && item.cachedDurationSec
         ? (item.pausedAtPercent / 100) * item.cachedDurationSec
         : undefined,
@@ -334,6 +418,11 @@ export class DownloadQueueManager {
         if (item.status === 'downloading') {
           item.status = 'completed'
           item.progress = { percent: 100, speed: '完成', eta: '0:00' }
+          // Clean up cache dir on success (segments no longer needed)
+          if (item.cacheDir) {
+            try { fs.rmSync(item.cacheDir, { recursive: true, force: true }) } catch { /* ignore */ }
+            item.cacheDir = undefined
+          }
         }
       })
       .catch((e) => {
@@ -341,12 +430,17 @@ export class DownloadQueueManager {
         if (item.status === 'downloading') {
           item.status = 'failed'
           item.error = cleanError(e)
+          // Clean up cache dir on failure (not resumable)
+          if (item.cacheDir) {
+            try { fs.rmSync(item.cacheDir, { recursive: true, force: true }) } catch { /* ignore */ }
+            item.cacheDir = undefined
+          }
         }
       })
       .finally(() => {
         this.activeIds.delete(item.id)
         this.activeProcs.delete(item.id)
-        setFfmpegProc(null)
+        this.activeAbortControllers.delete(item.id)
         this.notifyProgress(item.id, item.progress)
         this.notifyStatus()
 

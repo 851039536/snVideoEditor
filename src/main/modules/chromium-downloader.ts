@@ -17,12 +17,9 @@ import { spawn, type ChildProcess } from 'child_process'
 import {
   getFfmpegPath,
   parseProgressLine,
-  timeToSeconds,
-  setFfmpegProc,
-  cancelFfmpegOperation,
-  isCancelled,
-  resetCancelled
+  timeToSeconds
 } from './ffmpeg-shared'
+import { DEFAULT_UA } from './download'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +30,10 @@ export interface ChromiumDownloadOptions {
   output: string
   /** HTTP headers (Cookie, Referer, etc.) forwarded to every net.fetch request. */
   headers?: Record<string, string>
+  /** Per-item abort signal for cancellation. Replaces global isCancelled. */
+  abortSignal?: AbortSignal
+  /** Persistent cache directory for TS segments (enables resume). If omitted, uses a temp dir. */
+  cacheDir?: string
   /** Progress callback (0-100). */
   onProgress?: (data: {
     percent: number
@@ -52,6 +53,8 @@ interface SegmentInfo {
   localPath: string
   /** Zero-based index. */
   index: number
+  /** Segment duration in seconds (from #EXTINF). */
+  duration: number
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -59,54 +62,45 @@ interface SegmentInfo {
 /** Max concurrent segment downloads. */
 const MAX_CONCURRENT = 6
 
-/**
- * Chrome 125 User-Agent used for net.fetch.
- * Although cookies handle Cloudflare, a plausible UA avoids triggering
- * additional UA-based bot detection on some CDNs.
- */
-const CHROME_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Parse an m3u8 playlist and return absolute TS segment URLs in order. */
-function parseTsUrls(m3u8Content: string, baseUrl: string): string[] {
+/** Parse an m3u8 playlist and return absolute TS segment URLs with durations. */
+function parseTsSegments(m3u8Content: string, baseUrl: string): { url: string; duration: number }[] {
   const lines = m3u8Content.split(/\r?\n/)
-  const tsUrls: string[] = []
-  let isNextUrl = false
+  const segments: { url: string; duration: number }[] = []
+  let nextDuration = 10.0 // default if #EXTINF missing
 
   for (const rawLine of lines) {
     const line = rawLine.trim()
     if (!line) { continue }
 
     if (line.startsWith('#EXTINF')) {
-      isNextUrl = true
+      // Extract duration: #EXTINF:10.000, or #EXTINF:5.5,title
+      const match = line.match(/#EXTINF:([\d.]+)/i)
+      nextDuration = match ? parseFloat(match[1]) : 10.0
       continue
     }
 
     if (line.startsWith('#EXT-X-STREAM-INF')) {
       // This is a master playlist — not a direct TS playlist.
-      // Return empty so caller can detect this case.
       return []
     }
 
     if (line.startsWith('#')) {
-      isNextUrl = false
+      nextDuration = 10.0
       continue
     }
 
-    if (isNextUrl) {
-      isNextUrl = false
-      // Resolve relative URLs
-      try {
-        tsUrls.push(new URL(line, baseUrl).href)
-      } catch {
-        tsUrls.push(line)
-      }
+    // Non-comment line after #EXTINF = segment URL
+    try {
+      segments.push({ url: new URL(line, baseUrl).href, duration: nextDuration })
+    } catch {
+      segments.push({ url: line, duration: nextDuration })
     }
+    nextDuration = 10.0
   }
 
-  return tsUrls
+  return segments
 }
 
 /** Download a single URL via Chromium's network stack and return the response body as a Buffer. */
@@ -118,7 +112,7 @@ async function chromiumFetch(
   const resp = await net.fetch(url, {
     signal,
     headers: {
-      'User-Agent': CHROME_UA,
+      'User-Agent': DEFAULT_UA,
       ...(extraHeaders || {})
     }
   })
@@ -149,26 +143,33 @@ function formatSpeed(bitrate?: string): string {
 export async function downloadViaChromium(
   opts: ChromiumDownloadOptions
 ): Promise<boolean> {
-  const workDir = path.join(
+  // Use external cacheDir (persistent, for resume) or create a temp one
+  const isPersistentCache = !!opts.cacheDir
+  const workDir = opts.cacheDir || path.join(
     os.tmpdir(),
     `sn-chromium-dl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   )
   fs.mkdirSync(workDir, { recursive: true })
 
-  const abortController = new AbortController()
-  let aborted = false
+  // Use external abort signal (per-item) or create internal one (backward compat)
+  const signal = opts.abortSignal
+  const isAborted = (): boolean => signal?.aborted === true
+
+  /** Delete workDir only if it's a temporary dir, not a persistent cache. */
+  const cleanupIfTemp = (): void => {
+    if (!isPersistentCache) {
+      try { fs.rmSync(workDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
+  }
 
   try {
     // ─── Phase 1: Download the m3u8 playlist ───
-    if (isCancelled) {
-      aborted = true
-      return false
-    }
+    if (isAborted()) { return false }
     if (opts.onProgress) {
       opts.onProgress({ percent: 0, speed: '解析 m3u8...', eta: '' })
     }
 
-    const m3u8Resp = await chromiumFetch(opts.url, abortController.signal, opts.headers)
+    const m3u8Resp = await chromiumFetch(opts.url, signal, opts.headers)
     const m3u8Content = m3u8Resp.body.toString('utf-8')
 
     // Detect master playlist (contains #EXT-X-STREAM-INF)
@@ -178,33 +179,46 @@ export async function downloadViaChromium(
       )
     }
 
-    // Parse TS segments
-    const tsUrls = parseTsUrls(m3u8Content, opts.url)
-    if (tsUrls.length === 0) {
+    // Parse TS segments with real durations
+    const parsedSegs = parseTsSegments(m3u8Content, opts.url)
+    if (parsedSegs.length === 0) {
       throw new Error('m3u8 播放列表中未找到视频分片，可能不是有效的流媒体地址。')
     }
 
     // ─── Phase 2: Download all TS segments via Chromium ───
-    const segments: SegmentInfo[] = tsUrls.map((url, i) => ({
-      url,
+    const segments: SegmentInfo[] = parsedSegs.map((s, i) => ({
+      url: s.url,
       localPath: path.join(workDir, `seg_${String(i).padStart(6, '0')}.ts`),
-      index: i
+      index: i,
+      duration: s.duration
     }))
 
     const total = segments.length
     let completed = 0
-    let downloadedBytes = 0
+    let totalDownloadedBytes = 0  // cumulative (for accurate ETA)
+    let totalElapsedMs = 0
+    const downloadStartTime = Date.now()
     let lastReportTime = Date.now()
 
-    // Download with concurrency control
-    const downloadSegment = async (seg: SegmentInfo): Promise<void> => {
-      if (aborted) { return }
-      try {
-        const resp = await chromiumFetch(seg.url, abortController.signal, opts.headers)
-        fs.writeFileSync(seg.localPath, resp.body)
-        downloadedBytes += resp.body.length
-      } catch (e) {
-        if (!aborted) { throw e }
+    // Download a single segment with retry (3 attempts, linear backoff)
+    const downloadSegmentWithRetry = async (seg: SegmentInfo): Promise<void> => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (isAborted()) { return }
+        try {
+          const resp = await chromiumFetch(seg.url, signal, opts.headers)
+          fs.writeFileSync(seg.localPath, resp.body)
+          totalDownloadedBytes += resp.body.length
+          return // success
+        } catch (e) {
+          if (isAborted()) { return }
+          if (attempt < 2) {
+            // Wait before retry (1s, 2s)
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
+            if (isAborted()) { return }
+          } else {
+            throw e // all retries exhausted
+          }
+        }
       }
     }
 
@@ -213,35 +227,43 @@ export async function downloadViaChromium(
     const workers: Promise<void>[] = []
 
     async function worker(): Promise<void> {
-      while (queue.length > 0 && !aborted) {
-        if (isCancelled) {
-          aborted = true
-          break
-        }
+      while (queue.length > 0 && !isAborted()) {
         const seg = queue.shift()
         if (!seg) { break }
-        await downloadSegment(seg)
+
+        // Skip already-downloaded segments (resume support)
+        if (fs.existsSync(seg.localPath)) {
+          completed++
+          continue
+        }
+
+        await downloadSegmentWithRetry(seg)
         completed++
+
         // Report progress (10%–85% range for segment downloads)
         const now = Date.now()
         if (now - lastReportTime > 300 && opts.onProgress) {
+          totalElapsedMs = now - downloadStartTime
           const segPercent = Math.round((completed / total) * 75) + 10
-          const bytesPerSec =
-            (downloadedBytes / (now - lastReportTime + 1)) * 1000
+          // Use cumulative averages for accurate speed/ETA
+          const avgBytesPerSec = totalElapsedMs > 0
+            ? (totalDownloadedBytes / totalElapsedMs) * 1000
+            : 0
+          const avgSegmentBytes = completed > 0
+            ? totalDownloadedBytes / completed
+            : 0
           const remaining = total - completed
-          const etaSec =
-            bytesPerSec > 0
-              ? Math.round((remaining * (downloadedBytes / (completed || 1))) / bytesPerSec)
-              : 0
+          const etaSec = avgBytesPerSec > 0
+            ? Math.round((remaining * avgSegmentBytes) / avgBytesPerSec)
+            : 0
           opts.onProgress({
             percent: Math.min(segPercent, 99),
-            speed: formatSpeed(`${(bytesPerSec * 8).toFixed(0)}bits/s`),
+            speed: formatSpeed(`${(avgBytesPerSec * 8).toFixed(0)}bits/s`),
             eta: etaSec > 0
               ? `${Math.floor(etaSec / 60)}:${String(etaSec % 60).padStart(2, '0')}`
               : ''
           })
           lastReportTime = now
-          downloadedBytes = 0
         }
       }
     }
@@ -253,7 +275,7 @@ export async function downloadViaChromium(
     }
     await Promise.all(workers)
 
-    if (aborted) { return false }
+    if (isAborted()) { return false }
 
     // Verify all segments were downloaded
     const missing = segments.filter((s) => !fs.existsSync(s.localPath))
@@ -261,13 +283,16 @@ export async function downloadViaChromium(
       throw new Error(`下载不完整：${missing.length} 个分片缺失`)
     }
 
-    // ─── Phase 3: Build a local m3u8 playlist ───
+    // ─── Phase 3: Build a local m3u8 playlist with real durations ───
     const localM3u8Path = path.join(workDir, 'local.m3u8')
-    const localLines: string[] = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:10']
+    const maxDuration = Math.ceil(Math.max(...segments.map((s) => s.duration), 10))
+    const localLines: string[] = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:3',
+      `#EXT-X-TARGETDURATION:${maxDuration}`
+    ]
     for (const seg of segments) {
-      localLines.push(`#EXTINF:10.0,`)
-      // ffmpeg needs absolute or relative paths; use the filename since ffmpeg
-      // will be launched from the workDir or we use full paths
+      localLines.push(`#EXTINF:${seg.duration.toFixed(3)},`)
       localLines.push(seg.localPath.replace(/\\/g, '/'))
     }
     localLines.push('#EXT-X-ENDLIST')
@@ -280,19 +305,15 @@ export async function downloadViaChromium(
     // ─── Phase 4: Convert with ffmpeg (local files only, no network) ───
     const result = await convertLocalM3u8(localM3u8Path, opts)
 
-    // Clean up temp files
-    try {
-      fs.rmSync(workDir, { recursive: true, force: true })
-    } catch { /* ignore */ }
+    // Clean up temp files (only temp dir, not persistent cache)
+    cleanupIfTemp()
 
     return result
   } catch (e) {
-    // Clean up on error
-    try {
-      fs.rmSync(workDir, { recursive: true, force: true })
-    } catch { /* ignore */ }
+    // On error: clean up temp dir but preserve persistent cache for resume
+    cleanupIfTemp()
 
-    if (aborted) { return false }
+    if (isAborted()) { return false }
     throw e
   }
 }
@@ -316,7 +337,6 @@ async function convertLocalM3u8(
     ]
 
     const proc = spawn(getFfmpegPath(), args)
-    setFfmpegProc(proc)
     if (opts.onProcCreated) {
       opts.onProcCreated(proc)
     }
@@ -360,7 +380,6 @@ async function convertLocalM3u8(
     })
 
     proc.on('close', (code: number | null) => {
-      setFfmpegProc(null)
       if (code === 0) {
         if (opts.onProgress) {
           opts.onProgress({ percent: 100, speed: '完成', eta: '0:00' })
@@ -373,12 +392,7 @@ async function convertLocalM3u8(
     })
 
     proc.on('error', (err: Error) => {
-      setFfmpegProc(null)
       reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
     })
   })
 }
-
-// ─── Cancellation ─────────────────────────────────────────────────────────────
-
-export { cancelFfmpegOperation as cancelChromiumDownload }

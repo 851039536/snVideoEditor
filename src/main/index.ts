@@ -469,6 +469,9 @@ app.whenReady().then(() => {
   registerWindowHandlers()
   registerPlayerHandlers()
 
+  // Restore download queue from disk
+  DownloadQueueManager.getInstance().loadFromDisk()
+
   createWindow()
 
   app.on('activate', function () {
@@ -488,6 +491,8 @@ app.on('window-all-closed', () => {
   } catch {
     // Silently ignore cleanup failures
   }
+  // Save download queue state before quitting
+  DownloadQueueManager.getInstance().doSaveToDisk()
   if (process.platform !== 'darwin') {
     app.quit()
   }
