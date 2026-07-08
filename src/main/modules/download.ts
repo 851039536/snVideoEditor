@@ -146,6 +146,7 @@ export async function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
   return downloadViaChromium({
     url: opts.url,
     output: opts.output,
+    headers: opts.headers,
     onProgress: opts.onProgress
       ? (data) => {
           opts.onProgress!({

@@ -31,6 +31,8 @@ export interface ChromiumDownloadOptions {
   url: string
   /** Final output path (e.g. /Users/.../video.mp4). */
   output: string
+  /** HTTP headers (Cookie, Referer, etc.) forwarded to every net.fetch request. */
+  headers?: Record<string, string>
   /** Progress callback (0-100). */
   onProgress?: (data: {
     percent: number
@@ -110,12 +112,14 @@ function parseTsUrls(m3u8Content: string, baseUrl: string): string[] {
 /** Download a single URL via Chromium's network stack and return the response body as a Buffer. */
 async function chromiumFetch(
   url: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  extraHeaders?: Record<string, string>
 ): Promise<{ body: Buffer; status: number }> {
   const resp = await net.fetch(url, {
     signal,
     headers: {
-      'User-Agent': CHROME_UA
+      'User-Agent': CHROME_UA,
+      ...(extraHeaders || {})
     }
   })
 
@@ -164,7 +168,7 @@ export async function downloadViaChromium(
       opts.onProgress({ percent: 0, speed: '解析 m3u8...', eta: '' })
     }
 
-    const m3u8Resp = await chromiumFetch(opts.url, abortController.signal)
+    const m3u8Resp = await chromiumFetch(opts.url, abortController.signal, opts.headers)
     const m3u8Content = m3u8Resp.body.toString('utf-8')
 
     // Detect master playlist (contains #EXT-X-STREAM-INF)
@@ -196,7 +200,7 @@ export async function downloadViaChromium(
     const downloadSegment = async (seg: SegmentInfo): Promise<void> => {
       if (aborted) { return }
       try {
-        const resp = await chromiumFetch(seg.url, abortController.signal)
+        const resp = await chromiumFetch(seg.url, abortController.signal, opts.headers)
         fs.writeFileSync(seg.localPath, resp.body)
         downloadedBytes += resp.body.length
       } catch (e) {
