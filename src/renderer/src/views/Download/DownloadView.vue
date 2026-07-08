@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Globe, Download, Folder, FolderOpen, Monitor, Plus, X, Trash2, Search, Link, AlertTriangle, MonitorPlay, Check } from 'lucide-vue-next'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { Globe, Download, Folder, FolderOpen, Monitor, X, Search, Link, AlertTriangle, MonitorPlay, Check } from 'lucide-vue-next'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import DownloadQueue from '@/views/Download/DownloadQueue.vue'
 import { useProgressStore } from '@/stores/progress'
-import { useHeaders } from '@/composables/useHeaders'
 import { todayDateStr, sanitizeFileName } from '@/utils/format'
 
 const progressStore = useProgressStore()
@@ -66,11 +65,10 @@ function buildCookiesForUrl(url: string): string {
 /** Update the Cookie request header based on a target URL. */
 function syncCookiesForUrl(url: string): void {
   const cookieStr = buildCookiesForUrl(url)
-  const cookieHeader = headers.value.find((h) => h.key.toLowerCase() === 'cookie')
-  if (cookieHeader) {
-    cookieHeader.value = cookieStr
-  } else if (cookieStr) {
-    headers.value.push({ key: 'Cookie', value: cookieStr })
+  if (cookieStr) {
+    headers['Cookie'] = cookieStr
+  } else {
+    delete headers['Cookie']
   }
 }
 
@@ -130,7 +128,7 @@ async function fetchQualityVariants(): Promise<void> {
   const version = ++fetchVariantsVersion
   isFetchingVariants.value = true
   try {
-    const result = await window.electronAPI.fetchM3u8Variants(url, buildHeaders())
+    const result = await window.electronAPI.fetchM3u8Variants(url, { ...headers })
     // 竞态保护：如果 URL 已变化（新版本号已递增），丢弃过时结果
     if (version !== fetchVariantsVersion) { return }
     variants.value = result
@@ -153,9 +151,11 @@ async function fetchQualityVariants(): Promise<void> {
   }
 }
 
-// ─── Headers ──────────────────────────────────────────────────────────────────
+// ─── Headers (auto-managed, not shown in UI) ──────────────────────────────────
 
-const { headers, UA_PRESETS, addHeader, removeHeader, applyUAPreset, buildHeaders } = useHeaders()
+const headers = reactive<Record<string, string>>({
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+})
 
 // ─── Output ──────────────────────────────────────────────────────────────────
 
@@ -309,14 +309,11 @@ async function fetchM3u8FromPage(): Promise<void> {
       showFetchedUrls.value = true
       // Store raw cookies for later domain-filtered use
       rawCookies.value = result.cookies || []
-      // Auto-fill Referer/Origin
+      // Auto-fill Referer/Origin from page URL
       try {
         const parsed = new URL(pageUrl)
-        const referer = `${parsed.protocol}//${parsed.hostname}/`
-        const refHeader = headers.value.find((h) => h.key.toLowerCase() === 'referer')
-        if (refHeader && !refHeader.value) { refHeader.value = referer }
-        const originHeader = headers.value.find((h) => h.key.toLowerCase() === 'origin')
-        if (originHeader && !originHeader.value) { originHeader.value = `${parsed.protocol}//${parsed.hostname}` }
+        headers['Referer'] = `${parsed.protocol}//${parsed.hostname}/`
+        headers['Origin'] = `${parsed.protocol}//${parsed.hostname}`
       } catch { /* ignore */ }
       // Don't auto-fill Cookie yet — wait for user to select a specific m3u8 URL
     }
@@ -368,7 +365,7 @@ async function enqueueDownload(): Promise<void> {
     await window.electronAPI.enqueueDownload({
       url,
       output: outputPath.value,
-      headers: buildHeaders(),
+      headers: { ...headers },
       fileName: fileName.value
     })
     justEnqueued.value = true
@@ -545,41 +542,6 @@ onUnmounted(() => {
             <p class="text-xs text-text-muted mt-1.5">
               已选: {{ variants[selectedVariantIndex]?.label || '原始质量' }}
             </p>
-          </div>
-        </div>
-
-        <!-- HTTP Headers -->
-        <div class="glass-card p-4">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-text-primary">HTTP 请求头</h3>
-            <button @click="addHeader" class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1">
-              <Plus :size="12" /> 添加
-            </button>
-          </div>
-          <p class="text-xs text-text-muted mb-3">
-            部分网站需要正确的 Referer、Origin 和 User-Agent 才能下载。
-          </p>
-
-          <div class="space-y-2 mb-3">
-            <div v-for="(h, idx) in headers" :key="idx" class="flex items-center gap-2">
-              <input v-model="h.key" type="text" placeholder="Key (如 Referer)" class="input-base w-[140px] text-sm flex-shrink-0" />
-              <input v-model="h.value" type="text" placeholder="Value" class="input-base flex-1 text-sm" />
-              <button @click="removeHeader(idx)" class="p-1.5 rounded" :class="headers.length > 1 ? 'visible' : 'invisible'">
-                <Trash2 :size="14" class="text-text-muted" />
-              </button>
-            </div>
-          </div>
-
-          <div class="border-t border-bg-tertiary pt-3">
-            <p class="text-xs text-text-muted mb-2">User-Agent 快捷填充</p>
-            <div class="flex gap-1.5 flex-wrap">
-              <button
-                v-for="ua in UA_PRESETS"
-                :key="ua.label"
-                @click="applyUAPreset(ua.value)"
-                class="px-2 py-1 text-xs rounded-md bg-bg-tertiary text-text-secondary hover:bg-accent-blue/20 hover:text-accent-blue transition-colors"
-              >{{ ua.label }}</button>
-            </div>
           </div>
         </div>
       </div>
