@@ -18,7 +18,7 @@ export interface QueueItem {
   headers?: Record<string, string>
   /** Persistent cache directory for TS segments (enables resume after restart). */
   cacheDir?: string
-  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused'
+  status: 'pending' | 'downloading' | 'merging' | 'completed' | 'failed' | 'cancelled' | 'paused'
   progress: { percent: number; speed: string; eta: string }
   error?: string
   addedAt: number
@@ -122,7 +122,7 @@ export class DownloadQueueManager {
     if (idx < 0) { return false }
     const item = this.items[idx]
     // Only forbid removing active items; allow pending + terminal states
-    if (item.status === 'downloading') { return false }
+    if (item.status === 'downloading' || item.status === 'merging') { return false }
     // Clean up cache dir to prevent disk leak (cache is kept for resume, but
     // removing the item means user no longer wants it)
     if (item.cacheDir) {
@@ -146,7 +146,7 @@ export class DownloadQueueManager {
     }
     const before = this.items.length
     this.items = this.items.filter(
-      (i) => i.status === 'pending' || i.status === 'downloading' || i.status === 'paused'
+      (i) => i.status === 'pending' || i.status === 'downloading' || i.status === 'merging' || i.status === 'paused'
     )
     const removed = before - this.items.length
     if (removed > 0) {
@@ -182,7 +182,7 @@ export class DownloadQueueManager {
     // Mark all active items as cancelled BEFORE the Promise callbacks fire
     for (const id of this.activeIds) {
       const item = this.items.find((i) => i.id === id)
-      if (item && item.status === 'downloading') {
+      if (item && (item.status === 'downloading' || item.status === 'merging')) {
         item.status = 'cancelled'
       }
     }
@@ -212,7 +212,7 @@ export class DownloadQueueManager {
       return true
     }
 
-    if (item.status === 'downloading') {
+    if (item.status === 'downloading' || item.status === 'merging') {
       this.killAndRelease(item, 'cancelled')
       return true
     }
@@ -293,9 +293,9 @@ export class DownloadQueueManager {
       const parsed = JSON.parse(data) as { items: QueueItem[] }
       if (!parsed.items || !Array.isArray(parsed.items)) { return }
 
-      // Restore items: downloading → pending (needs re-scheduling), others keep state
+      // Restore items: downloading/merging → pending (needs re-scheduling), others keep state
       for (const item of parsed.items) {
-        if (item.status === 'downloading') {
+        if (item.status === 'downloading' || item.status === 'merging') {
           item.status = 'pending'
           item.progress = { percent: 0, speed: '', eta: '' }
         }
@@ -423,6 +423,11 @@ export class DownloadQueueManager {
           speed: data.speed,
           eta: data.eta
         }
+        // Switch to merging status when ffmpeg merge phase starts
+        if (data.phase === 'merge' && item.status === 'downloading') {
+          item.status = 'merging'
+          this.notifyStatus()
+        }
         this.notifyProgress(item.id, item.progress)
       },
       onProcCreated: (proc) => {
@@ -434,7 +439,7 @@ export class DownloadQueueManager {
     })
       .then(() => {
         // Guard: don't overwrite if cancelAll() already marked this item
-        if (item.status === 'downloading') {
+        if (item.status === 'downloading' || item.status === 'merging') {
           item.status = 'completed'
           item.progress = { percent: 100, speed: '完成', eta: '0:00' }
           // Clean up cache dir on success (segments no longer needed)
@@ -446,7 +451,7 @@ export class DownloadQueueManager {
       })
       .catch((e) => {
         // Guard: don't overwrite if cancelAll() already marked this item
-        if (item.status === 'downloading') {
+        if (item.status === 'downloading' || item.status === 'merging') {
           item.status = 'failed'
           item.error = cleanError(e)
           // Keep cacheDir intact for resume on retry (don't delete partial segments)

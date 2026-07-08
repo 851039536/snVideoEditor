@@ -20,6 +20,7 @@ const emit = defineEmits<{
 const STATUS_CONFIG = {
   pending: { icon: Clock, class: 'text-yellow-400', bg: 'bg-yellow-400/10', label: '等待中' },
   downloading: { icon: Download, class: 'text-accent-blue animate-pulse', bg: 'bg-accent-blue/10', label: '下载中' },
+  merging: { icon: Download, class: 'text-accent-blue animate-pulse', bg: 'bg-accent-blue/10', label: '合并中' },
   completed: { icon: Check, class: 'text-success', bg: 'bg-success/10', label: '已完成' },
   failed: { icon: AlertTriangle, class: 'text-danger', bg: 'bg-danger/10', label: '失败' },
   cancelled: { icon: X, class: 'text-text-muted', bg: 'bg-text-muted/10', label: '已取消' },
@@ -94,7 +95,7 @@ const hasTerminalItems = computed((): boolean => {
         :key="item.id"
         class="queue-item p-3 rounded-lg border transition-all duration-200"
         :class="{
-          'border-accent-blue/30 bg-accent-blue/5': item.status === 'downloading',
+          'border-accent-blue/30 bg-accent-blue/5': item.status === 'downloading' || item.status === 'merging',
           'border-bg-tertiary bg-bg-secondary/50': item.status === 'pending',
           'border-warning/30 bg-warning/5': item.status === 'paused',
           'border-bg-tertiary bg-bg-secondary/30 opacity-70': item.status === 'completed',
@@ -126,7 +127,7 @@ const hasTerminalItems = computed((): boolean => {
                 :class="[
                   STATUS_CONFIG[item.status].bg,
                   STATUS_CONFIG[item.status].class,
-                  { 'animate-pulse': item.status === 'downloading' }
+                  { 'animate-pulse': item.status === 'downloading' || item.status === 'merging' }
                 ]"
               >
                 {{ STATUS_CONFIG[item.status].label }}
@@ -140,22 +141,22 @@ const hasTerminalItems = computed((): boolean => {
               :title="item.cacheDir"
             >缓存: {{ item.cacheDir }}</p>
 
-            <!-- Progress bar (for downloading or paused) -->
-            <div v-if="item.status === 'downloading' || item.status === 'paused'" class="relative h-1.5 bg-bg-tertiary rounded-full overflow-hidden mb-1">
+            <!-- Progress bar (for downloading, merging or paused) -->
+            <div v-if="item.status === 'downloading' || item.status === 'merging' || item.status === 'paused'" class="relative h-1.5 bg-bg-tertiary rounded-full overflow-hidden mb-1">
               <div
                 class="absolute top-0 left-0 h-full rounded-full transition-all duration-300"
                 :class="item.status === 'paused' ? 'bg-warning' : 'bg-gradient-to-r from-accent-blue to-accent-purple'"
                 :style="{ width: `${item.progress.percent}%` }"
               >
-                <div v-if="item.status === 'downloading'" class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer" />
+                <div v-if="item.status === 'downloading' || item.status === 'merging'" class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer" />
               </div>
             </div>
 
             <!-- Progress text -->
             <div class="flex items-center gap-3 text-[10px] text-text-muted">
-              <span v-if="item.status === 'downloading'">{{ item.progress.percent }}%</span>
+              <span v-if="item.status === 'downloading' || item.status === 'merging'">{{ item.progress.percent }}%</span>
               <span v-if="item.status === 'paused'">已暂停 ({{ item.progress.percent }}%)</span>
-              <span v-if="item.status === 'downloading' && item.progress.speed">{{ item.progress.speed }}</span>
+              <span v-if="(item.status === 'downloading' || item.status === 'merging') && item.progress.speed">{{ item.progress.speed }}</span>
               <span v-if="item.status === 'failed' && item.error" class="text-danger truncate" :title="item.error">
                 {{ item.error.slice(0, 60) }}{{ item.error.length > 60 ? '...' : '' }}
               </span>
@@ -181,7 +182,7 @@ const hasTerminalItems = computed((): boolean => {
               <Play :size="13" />
             </button>
             <button
-              v-if="item.status === 'downloading' || item.status === 'paused'"
+              v-if="item.status === 'downloading' || item.status === 'paused' || item.status === 'merging'"
               @click="emit('cancel', item.id)"
               class="p-1.5 rounded-md hover:bg-danger/20 text-text-muted hover:text-danger transition-colors"
               title="取消下载"
@@ -197,7 +198,7 @@ const hasTerminalItems = computed((): boolean => {
               <RotateCcw :size="13" />
             </button>
             <button
-              v-if="item.status !== 'downloading'"
+              v-if="item.status !== 'downloading' && item.status !== 'merging'"
               @click="emit('remove', item.id)"
               class="p-1.5 rounded-md hover:bg-danger/20 text-text-muted hover:text-danger transition-colors"
               :title="item.status === 'pending' ? '移除' : '从队列移除'"

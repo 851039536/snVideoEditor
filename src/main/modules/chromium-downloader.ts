@@ -34,11 +34,12 @@ export interface ChromiumDownloadOptions {
   abortSignal?: AbortSignal
   /** Persistent cache directory for TS segments (enables resume). If omitted, uses a temp dir. */
   cacheDir?: string
-  /** Progress callback (0-100). */
+  /** Progress callback (0-100). phase indicates download vs merge stage. */
   onProgress?: (data: {
     percent: number
     speed: string
     eta: string
+    phase?: 'download' | 'merge'
   }) => void
   /** Called when ffmpeg process is spawned (for cancellation). */
   onProcCreated?: (proc: ChildProcess) => void
@@ -166,7 +167,7 @@ export async function downloadViaChromium(
     // ─── Phase 1: Download the m3u8 playlist ───
     if (isAborted()) { return false }
     if (opts.onProgress) {
-      opts.onProgress({ percent: 0, speed: '解析 m3u8...', eta: '' })
+      opts.onProgress({ percent: 0, speed: '解析 m3u8...', eta: '', phase: 'download' })
     }
 
     const m3u8Resp = await chromiumFetch(opts.url, signal, opts.headers)
@@ -278,7 +279,8 @@ export async function downloadViaChromium(
             speed: formatSpeed(`${(avgBytesPerSec * 8).toFixed(0)}bits/s`),
             eta: etaSec > 0
               ? `${Math.floor(etaSec / 60)}:${String(etaSec % 60).padStart(2, '0')}`
-              : ''
+              : '',
+            phase: 'download'
           })
           lastReportTime = now
         }
@@ -310,7 +312,7 @@ export async function downloadViaChromium(
     fs.writeFileSync(localM3u8Path, localLines.join('\n'), 'utf-8')
 
     if (opts.onProgress) {
-      opts.onProgress({ percent: 88, speed: '转码中...', eta: '' })
+      opts.onProgress({ percent: 88, speed: '转码中...', eta: '', phase: 'merge' })
     }
 
     // ─── Phase 4: Convert with ffmpeg (local files only, no network) ───
@@ -347,6 +349,10 @@ async function convertLocalM3u8(
     ]
 
     const proc = spawn(getFfmpegPath(), args)
+    // Lower process priority so ffmpeg merge doesn't hog CPU/IO and freeze the system
+    if (process.platform === 'win32' && proc.pid) {
+      try { os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch { /* ignore */ }
+    }
     if (opts.onProcCreated) {
       opts.onProcCreated(proc)
     }
@@ -384,7 +390,8 @@ async function convertLocalM3u8(
         opts.onProgress({
           percent,
           speed: formatSpeed(parsed.bitrate),
-          eta: parsed.time
+          eta: parsed.time,
+          phase: 'merge'
         })
       }
     })
@@ -396,7 +403,7 @@ async function convertLocalM3u8(
     proc.on('close', (code: number | null) => {
       if (code === 0) {
         if (opts.onProgress) {
-          opts.onProgress({ percent: 100, speed: '完成', eta: '0:00' })
+          opts.onProgress({ percent: 100, speed: '完成', eta: '0:00', phase: 'merge' })
         }
         resolve(true)
       } else {

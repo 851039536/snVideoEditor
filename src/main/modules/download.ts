@@ -18,6 +18,7 @@ export interface DownloadOptions {
     totalFiles: number
     speed: string
     eta: string
+    phase?: string
   }) => void
   /** Callback with the spawned ffmpeg process, so the caller can cancel it. */
   onProcCreated?: (proc: import('child_process').ChildProcess) => void
@@ -67,7 +68,8 @@ export async function downloadM3u8(opts: DownloadOptions): Promise<boolean> {
             currentFile: 1,
             totalFiles: 1,
             speed: data.speed,
-            eta: data.eta
+            eta: data.eta,
+            phase: data.phase
           })
         }
       : undefined,

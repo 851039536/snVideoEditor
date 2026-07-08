@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
+import * as os from 'os'
 import type { ProgressCallback } from './ffmpeg-shared'
 import {
   getFfmpegPath,
@@ -124,6 +125,10 @@ function runCompressPass(
   return new Promise((resolve, reject) => {
     const proc = spawn(getFfmpegPath(), args)
     setFfmpegProc(proc)
+    // Lower process priority so ffmpeg doesn't hog CPU/IO and freeze the system
+    if (process.platform === 'win32' && proc.pid) {
+      try { os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch { /* ignore */ }
+    }
     const stderrLines: string[] = []
     let meta: VideoMeta | null = null
 
