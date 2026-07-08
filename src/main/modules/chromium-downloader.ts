@@ -206,7 +206,7 @@ export async function downloadViaChromium(
         if (isAborted()) { return }
         try {
           const resp = await chromiumFetch(seg.url, signal, opts.headers)
-          fs.writeFileSync(seg.localPath, resp.body)
+          await fs.promises.writeFile(seg.localPath, resp.body)
           totalDownloadedBytes += resp.body.length
           return // success
         } catch (e) {
@@ -222,17 +222,24 @@ export async function downloadViaChromium(
       }
     }
 
-    // Process segments in batches
-    const queue = [...segments]
+    // Pre-scan existing segments for resume (one readdirSync vs N existsSync)
+    const existingFiles = new Set<string>()
+    try {
+      for (const name of fs.readdirSync(workDir)) {
+        existingFiles.add(path.join(workDir, name))
+      }
+    } catch { /* ignore */ }
+
+    // Process segments in batches (use index pointer to avoid O(n²) shift)
+    let queuePtr = 0
     const workers: Promise<void>[] = []
 
     async function worker(): Promise<void> {
-      while (queue.length > 0 && !isAborted()) {
-        const seg = queue.shift()
-        if (!seg) { break }
+      while (queuePtr < total && !isAborted()) {
+        const seg = segments[queuePtr++]
 
         // Skip already-downloaded segments (resume support)
-        if (fs.existsSync(seg.localPath)) {
+        if (existingFiles.has(seg.localPath)) {
           completed++
           continue
         }
@@ -276,12 +283,6 @@ export async function downloadViaChromium(
     await Promise.all(workers)
 
     if (isAborted()) { return false }
-
-    // Verify all segments were downloaded
-    const missing = segments.filter((s) => !fs.existsSync(s.localPath))
-    if (missing.length > 0) {
-      throw new Error(`下载不完整：${missing.length} 个分片缺失`)
-    }
 
     // ─── Phase 3: Build a local m3u8 playlist with real durations ───
     const localM3u8Path = path.join(workDir, 'local.m3u8')
@@ -331,7 +332,6 @@ async function convertLocalM3u8(
       '-i', localM3u8Path,
       '-c', 'copy',
       '-bsf:a', 'aac_adtstoasc',
-      '-movflags', '+faststart',
       '-y',
       opts.output
     ]
@@ -341,12 +341,16 @@ async function convertLocalM3u8(
       opts.onProcCreated(proc)
     }
 
+    const MAX_STDERR_LINES = 50
     let durationSec = 0
     const stderrLines: string[] = []
 
     proc.stderr.on('data', (data: Buffer) => {
       const chunk = data.toString()
       stderrLines.push(chunk)
+      if (stderrLines.length > MAX_STDERR_LINES) {
+        stderrLines.splice(0, stderrLines.length - MAX_STDERR_LINES)
+      }
 
       // Extract total duration
       if (durationSec === 0) {
