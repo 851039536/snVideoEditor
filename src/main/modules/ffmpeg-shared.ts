@@ -1,6 +1,23 @@
+import { app } from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
+
+/**
+ * In packaged Electron apps, native binaries may be inside app.asar (unexecutable).
+ * The real binary lives at app.asar.unpacked/... when electron-builder asarUnpack is used.
+ * This function converts asar paths to their unpacked counterpart in packaged mode.
+ */
+function unpackAsarPath(originalPath: string): string {
+  if (!app.isPackaged) {
+    return originalPath
+  }
+  const asarIndex = originalPath.indexOf('app.asar')
+  if (asarIndex === -1) {
+    return originalPath
+  }
+  return originalPath.replace('app.asar', 'app.asar.unpacked')
+}
 
 /**
  * Check if a binary file is actually executable.
@@ -34,8 +51,9 @@ function resolveFfmpegPath(): string {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const p = require('ffmpeg-static')
-    if (p && typeof p === 'string' && canExecute(p)) {
-      return p
+    const pUnpacked = unpackAsarPath(p)
+    if (p && typeof p === 'string' && canExecute(pUnpacked)) {
+      return pUnpacked
     }
   } catch {
     // ignore
@@ -44,8 +62,9 @@ function resolveFfmpegPath(): string {
   const searchDirs = [__dirname, path.join(__dirname, '..'), path.join(__dirname, '..', '..'), process.cwd()]
   for (const dir of searchDirs) {
     const candidate = path.join(dir, 'node_modules', 'ffmpeg-static', exeName)
-    if (fs.existsSync(candidate) && canExecute(candidate)) {
-      return candidate
+    const candidateUnpacked = unpackAsarPath(candidate)
+    if (fs.existsSync(candidateUnpacked) && canExecute(candidateUnpacked)) {
+      return candidateUnpacked
     }
   }
   try {
@@ -76,8 +95,9 @@ function resolveFfprobePath(): string {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const p = require('ffprobe-static')
-    if (p?.path && typeof p.path === 'string' && canExecute(p.path)) {
-      return p.path
+    const pUnpacked = p?.path ? unpackAsarPath(p.path) : null
+    if (pUnpacked && canExecute(pUnpacked)) {
+      return pUnpacked
     }
   } catch {
     // ignore
@@ -86,8 +106,9 @@ function resolveFfprobePath(): string {
   const searchDirs = [__dirname, path.join(__dirname, '..'), path.join(__dirname, '..', '..'), process.cwd()]
   for (const dir of searchDirs) {
     const candidate = path.join(dir, 'node_modules', 'ffprobe-static', exeName)
-    if (fs.existsSync(candidate) && canExecute(candidate)) {
-      return candidate
+    const candidateUnpacked = unpackAsarPath(candidate)
+    if (fs.existsSync(candidateUnpacked) && canExecute(candidateUnpacked)) {
+      return candidateUnpacked
     }
   }
   try {

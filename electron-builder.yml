@@ -27,6 +27,9 @@ linux:
   target:
     - AppImage
     - deb
+asarUnpack:
+  - "node_modules/ffprobe-static/**"
+  - "node_modules/ffmpeg-static/**"
 publish:
   provider: generic
   url: https://example.com/auto-updates

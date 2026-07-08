@@ -8,7 +8,7 @@ export default defineConfig({
     build: {
       outDir: 'out/main',
       rollupOptions: {
-        external: ['fluent-ffmpeg', 'ffmpeg-static']
+        external: ['fluent-ffmpeg', 'ffmpeg-static', 'ffprobe-static']
       }
     }
   },
