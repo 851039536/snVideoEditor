@@ -183,7 +183,7 @@ const hasTerminalItems = computed((): boolean => {
               <X :size="13" />
             </button>
             <button
-              v-if="item.status === 'failed'"
+              v-if="item.status === 'failed' || item.status === 'cancelled'"
               @click="emit('retry', item.id)"
               class="p-1.5 rounded-md hover:bg-accent-blue/20 text-text-muted hover:text-accent-blue transition-colors"
               title="重试"

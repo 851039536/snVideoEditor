@@ -120,6 +120,11 @@ export class DownloadQueueManager {
     const item = this.items[idx]
     // Only forbid removing active items; allow pending + terminal states
     if (item.status === 'downloading') { return false }
+    // Clean up cache dir to prevent disk leak (cache is kept for resume, but
+    // removing the item means user no longer wants it)
+    if (item.cacheDir) {
+      try { fs.rmSync(item.cacheDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
     this.items.splice(idx, 1)
     this.notifyStatus()
     return true
@@ -127,6 +132,15 @@ export class DownloadQueueManager {
 
   /** Batch-remove all terminal items (completed / failed / cancelled). Returns count removed. */
   clearTerminal(): number {
+    // Collect terminal items first so we can clean their cache dirs
+    const terminal = this.items.filter(
+      (i) => i.status === 'completed' || i.status === 'failed' || i.status === 'cancelled'
+    )
+    for (const item of terminal) {
+      if (item.cacheDir) {
+        try { fs.rmSync(item.cacheDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      }
+    }
     const before = this.items.length
     this.items = this.items.filter(
       (i) => i.status === 'pending' || i.status === 'downloading' || i.status === 'paused'
@@ -141,10 +155,12 @@ export class DownloadQueueManager {
   retryItem(id: string): boolean {
     const item = this.items.find((i) => i.id === id)
     if (!item) { return false }
-    if (item.status !== 'failed') { return false }
+    // Allow retry for both failed and cancelled items (resume from cache)
+    if (item.status !== 'failed' && item.status !== 'cancelled') { return false }
     item.status = 'pending'
     item.progress = { percent: 0, speed: '', eta: '' }
     item.error = undefined
+    item.pausedAtPercent = undefined
     this.notifyStatus()
     this.scheduleTasks()
     return true
@@ -430,11 +446,7 @@ export class DownloadQueueManager {
         if (item.status === 'downloading') {
           item.status = 'failed'
           item.error = cleanError(e)
-          // Clean up cache dir on failure (not resumable)
-          if (item.cacheDir) {
-            try { fs.rmSync(item.cacheDir, { recursive: true, force: true }) } catch { /* ignore */ }
-            item.cacheDir = undefined
-          }
+          // Keep cacheDir intact for resume on retry (don't delete partial segments)
         }
       })
       .finally(() => {

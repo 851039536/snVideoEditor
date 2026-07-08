@@ -206,7 +206,12 @@ export async function downloadViaChromium(
         if (isAborted()) { return }
         try {
           const resp = await chromiumFetch(seg.url, signal, opts.headers)
-          await fs.promises.writeFile(seg.localPath, resp.body)
+          // Atomic write: write to .tmp then rename, so a crash mid-write
+          // leaves a .tmp file (skipped by resume scan) instead of a truncated
+          // .ts file that would be mistaken for a complete segment.
+          const tmpPath = `${seg.localPath}.tmp`
+          await fs.promises.writeFile(tmpPath, resp.body)
+          await fs.promises.rename(tmpPath, seg.localPath)
           totalDownloadedBytes += resp.body.length
           return // success
         } catch (e) {
@@ -226,6 +231,11 @@ export async function downloadViaChromium(
     const existingFiles = new Set<string>()
     try {
       for (const name of fs.readdirSync(workDir)) {
+        // Clean up stale .tmp files from crashed writes (atomic write leftover)
+        if (name.endsWith('.tmp')) {
+          try { fs.unlinkSync(path.join(workDir, name)) } catch { /* ignore */ }
+          continue
+        }
         existingFiles.add(path.join(workDir, name))
       }
     } catch { /* ignore */ }
