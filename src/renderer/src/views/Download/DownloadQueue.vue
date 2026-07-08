@@ -133,6 +133,12 @@ const hasTerminalItems = computed((): boolean => {
               </span>
             </div>
             <p class="text-[11px] text-text-muted truncate mb-1">{{ item.fileName }}</p>
+            <!-- Cache path (shown when cacheDir exists, i.e. before the download completes) -->
+            <p
+              v-if="item.cacheDir"
+              class="text-[10px] text-text-muted/60 truncate mb-1"
+              :title="item.cacheDir"
+            >缓存: {{ item.cacheDir }}</p>
 
             <!-- Progress bar (for downloading or paused) -->
             <div v-if="item.status === 'downloading' || item.status === 'paused'" class="relative h-1.5 bg-bg-tertiary rounded-full overflow-hidden mb-1">
