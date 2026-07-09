@@ -335,7 +335,36 @@ const electronAPI = {
   removeQueueListeners: (): void => {
     ipcRenderer.removeAllListeners('download:queue-progress')
     ipcRenderer.removeAllListeners('download:queue-update')
-  }
+  },
+
+  // Download history
+  checkDownloadDuplicate: (fileName: string): Promise<{
+    fileName: string
+    url: string
+    output: string
+    completedAt: number
+    fileSize?: number
+  } | null> =>
+    ipcRenderer.invoke('download:checkDuplicate', fileName),
+
+  getDownloadHistoryPath: (): Promise<string> =>
+    ipcRenderer.invoke('download:getHistoryPath'),
+
+  getDownloadHistory: (): Promise<{
+    fileName: string
+    url: string
+    output: string
+    completedAt: number
+    fileSize?: number
+  }[]> =>
+    ipcRenderer.invoke('download:getHistory'),
+
+  clearDownloadHistory: (): Promise<void> =>
+    ipcRenderer.invoke('download:clearHistory'),
+
+  // Dialog
+  confirmDialog: (message: string, title?: string): Promise<boolean> =>
+    ipcRenderer.invoke('dialog:confirm', message, title)
 }
 
 if (process.contextIsolated) {

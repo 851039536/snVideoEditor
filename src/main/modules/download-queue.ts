@@ -2,6 +2,7 @@ import { app } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import { downloadM3u8, type DownloadOptions } from './download'
+import { DownloadHistoryManager } from './download-history'
 import { killFfmpegProc } from './ffmpeg'
 import type { ChildProcess } from 'child_process'
 
@@ -447,6 +448,18 @@ export class DownloadQueueManager {
             try { fs.rmSync(item.cacheDir, { recursive: true, force: true }) } catch { /* ignore */ }
             item.cacheDir = undefined
           }
+          // Append to download history
+          try {
+            let fileSize: number | undefined
+            try { fileSize = fs.statSync(item.output).size } catch { /* ignore */ }
+            DownloadHistoryManager.getInstance().addEntry({
+              fileName: item.fileName,
+              url: item.url,
+              output: item.output,
+              completedAt: Date.now(),
+              fileSize
+            })
+          } catch { /* silently ignore history write failures */ }
         }
       })
       .catch((e) => {

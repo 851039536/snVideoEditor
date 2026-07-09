@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { join } from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -7,6 +7,7 @@ import { splitVideo, mergeVideos, compressVideo, batchCompress, getVideoMeta, co
 import { downloadM3u8, fetchM3u8Variants } from './modules/download'
 import { fetchPageM3u8ViaBrowser } from './modules/page-fetcher'
 import { DownloadQueueManager } from './modules/download-queue'
+import { DownloadHistoryManager } from './modules/download-history'
 import { acquireLock, releaseLock, getActiveOperationType } from './modules/lock'
 import { encryptFile, decryptFile, batchProcessFiles, cancelCryptoOperation } from './modules/crypto'
 import { decryptForPlayback } from './modules/player'
@@ -361,6 +362,40 @@ function registerDownloadHandlers(): void {
   // Quality variant parsing (not wrapped — no ffmpeg involvement)
   ipcMain.handle('video:fetchM3u8Variants', async (_event, m3u8Url: string, headers?: Record<string, string>) => {
     return fetchM3u8Variants(m3u8Url, headers)
+  })
+
+  // Download history
+  const historyManager = DownloadHistoryManager.getInstance()
+
+  ipcMain.handle('download:checkDuplicate', async (_event, fileName: string) => {
+    return historyManager.checkDuplicate(fileName)
+  })
+
+  ipcMain.handle('download:getHistoryPath', async () => {
+    return historyManager.getFilePath()
+  })
+
+  ipcMain.handle('download:getHistory', async () => {
+    return historyManager.getAll()
+  })
+
+  ipcMain.handle('download:clearHistory', async () => {
+    historyManager.clear()
+  })
+
+  // Native confirm dialog (reusable for duplicate download prompts)
+  ipcMain.handle('dialog:confirm', async (_event, message: string, title?: string) => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (!win) { return false }
+    const result = await dialog.showMessageBox(win, {
+      type: 'question',
+      buttons: ['取消', '确认'],
+      defaultId: 1,
+      cancelId: 0,
+      title: title || '提示',
+      message
+    })
+    return result.response === 1
   })
 }
 

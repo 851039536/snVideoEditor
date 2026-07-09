@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Globe, Download, Folder, FolderOpen, Monitor, X, Search, Link, AlertTriangle, MonitorPlay, Check } from 'lucide-vue-next'
+import { Globe, Download, Folder, FolderOpen, Monitor, X, Search, Link, AlertTriangle, MonitorPlay, Check, ExternalLink } from 'lucide-vue-next'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import DownloadQueue from '@/views/Download/DownloadQueue.vue'
 import { useProgressStore } from '@/stores/progress'
@@ -163,6 +163,13 @@ const commonPaths = ref<{ desktop: string; downloads: string }>({ desktop: '', d
 const outputDir = ref('')
 const fileName = ref('')
 const loadingPath = ref('')
+const historyJsonPath = ref('')
+
+async function openHistoryFolder(): Promise<void> {
+  if (!historyJsonPath.value) { return }
+  const dir = historyJsonPath.value.replace(/[/\\][^/\\]+$/, '')
+  await window.electronAPI.openFolder(dir)
+}
 
 async function fetchCommonPaths(): Promise<void> {
   try {
@@ -362,6 +369,19 @@ async function enqueueDownload(): Promise<void> {
 
   isEnqueueing.value = true
   try {
+    // Check for duplicate filename in download history
+    const dup = await window.electronAPI.checkDownloadDuplicate(fileName.value)
+    if (dup) {
+      const confirmed = await window.electronAPI.confirmDialog(
+        `文件名 "${fileName.value}" 已下载过（上次: ${new Date(dup.completedAt).toLocaleString()}），是否重复下载？`,
+        '重复下载确认'
+      )
+      if (!confirmed) {
+        hintMsg.value = '已取消重复下载'
+        return
+      }
+    }
+
     await window.electronAPI.enqueueDownload({
       url,
       output: outputPath.value,
@@ -419,6 +439,11 @@ async function handleClearTerminal(): Promise<void> {
 
 onMounted(async () => {
   fetchCommonPaths()
+
+  // Fetch download history JSON path
+  try {
+    historyJsonPath.value = await window.electronAPI.getDownloadHistoryPath()
+  } catch { /* ignore */ }
 
   // Fetch initial queue status (items may exist from before navigation)
   try {
@@ -579,6 +604,18 @@ onUnmounted(() => {
             <label class="text-xs text-text-secondary mb-1 block">文件名</label>
             <input v-model="fileName" type="text" :placeholder="autoFileName" class="input-base w-full text-sm" />
             <p v-if="outputPath" class="text-xs text-text-muted mt-1 truncate">将保存至: {{ outputPath }}</p>
+          </div>
+
+          <!-- History JSON path -->
+          <div v-if="historyJsonPath" class="mt-3 pt-3 border-t border-bg-tertiary">
+            <p class="text-[10px] text-text-muted/70 mb-1">下载历史记录</p>
+            <p class="text-xs text-text-muted truncate font-mono" :title="historyJsonPath">{{ historyJsonPath }}</p>
+            <button
+              @click="openHistoryFolder"
+              class="btn-secondary !px-2 !py-0.5 text-xs mt-1.5 flex items-center gap-1"
+            >
+              <ExternalLink :size="10" /> 打开所在文件夹
+            </button>
           </div>
         </div>
 

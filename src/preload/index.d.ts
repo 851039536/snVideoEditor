@@ -23,6 +23,14 @@ export interface FileInfo {
   name: string
 }
 
+export interface HistoryEntry {
+  fileName: string
+  url: string
+  output: string
+  completedAt: number
+  fileSize?: number
+}
+
 export interface ElectronAPI {
   // App info
     getTempDir: () => Promise<string>
@@ -241,6 +249,15 @@ export interface ElectronAPI {
   }) => void) => void
 
   removeQueueListeners: () => void
+
+  // Download history
+  checkDownloadDuplicate: (fileName: string) => Promise<HistoryEntry | null>
+  getDownloadHistoryPath: () => Promise<string>
+  getDownloadHistory: () => Promise<HistoryEntry[]>
+  clearDownloadHistory: () => Promise<void>
+
+  // Dialog
+  confirmDialog: (message: string, title?: string) => Promise<boolean>
 }
 
 declare global {
