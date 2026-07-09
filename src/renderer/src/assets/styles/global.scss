@@ -37,11 +37,19 @@
     --color-info: #58A6FF;
 
     /* Design tokens */
+    --font-sans: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
     --font-size-base: 14px;
     --radius-sm: 4px;
     --radius-base: 6px;
     --radius-md: 8px;
     --radius-lg: 12px;
+    --transition-fast: 0.12s;
+    --transition-normal: 0.2s;
+    --transition-slow: 0.3s;
+    --z-panel: 10;
+    --z-overlay: 20;
+    --z-modal: 50;
   }
 
   .light {
@@ -72,6 +80,8 @@
     --color-warning: #BF8700;
     --color-info: #0969DA;
 
+    --font-sans: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
     --font-size-base: 14px;
   }
 

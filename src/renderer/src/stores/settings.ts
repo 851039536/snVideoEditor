@@ -7,6 +7,7 @@ const THEME_KEY = 'snve-theme'
 const COMPRESS_PRESET_KEY = 'snve-compress-preset'
 const PLAYER_DATA_KEY = 'snve-player-data'
 const OUTPUT_DIR_KEY = 'snve-output-dir'
+const SIDEBAR_COLLAPSED_KEY = 'snve-sidebar-collapsed'
 
 export interface CompressPreset {
   crfValue: number
@@ -64,6 +65,14 @@ function loadOutputDir(): string {
   } catch { return '' }
 }
 
+function loadSidebarCollapsed(): boolean {
+  try {
+    const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
+    if (saved !== null) { return saved === 'true' }
+  } catch { /* ignore */ }
+  return false
+}
+
 function applyTheme(theme: 'dark' | 'light'): void {
   document.documentElement.classList.toggle('light', theme === 'light')
 }
@@ -73,6 +82,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const theme = ref<'dark' | 'light'>(loadTheme())
   const compressPreset = ref<CompressPreset>(loadCompressPreset())
   const playerData = ref<PersistedPlayerData>(loadPlayerData())
+  const sidebarCollapsed = ref<boolean>(loadSidebarCollapsed())
 
   // Apply theme on init
   applyTheme(theme.value)
@@ -91,6 +101,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
   function setPlayerData(data: PersistedPlayerData): void {
     playerData.value = data
+  }
+
+  function toggleSidebar(): void {
+    sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
   // Persist output directory
@@ -114,14 +128,21 @@ export const useSettingsStore = defineStore('settings', () => {
     try { localStorage.setItem(PLAYER_DATA_KEY, JSON.stringify(val)) } catch { /* ignore */ }
   }, { deep: true })
 
+  // Persist sidebar collapsed state
+  watch(sidebarCollapsed, (val) => {
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(val)) } catch { /* ignore */ }
+  })
+
   return {
     outputDirectory,
     theme,
     compressPreset,
     playerData,
+    sidebarCollapsed,
     setOutputDirectory,
     toggleTheme,
     setCompressPreset,
-    setPlayerData
+    setPlayerData,
+    toggleSidebar
   }
 })

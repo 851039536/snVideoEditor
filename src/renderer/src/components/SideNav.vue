@@ -1,93 +1,70 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import {
-  Home, Scissors, FileVideo, Shield, Image, Globe,
-  ChevronLeft, ChevronRight, Video, Sun, Moon
-} from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Video, Sun, Moon } from 'lucide-vue-next'
 import { ref, computed } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
+import { FEATURE_CONFIG } from '@/config/features'
 
 const router = useRouter()
 const settingsStore = useSettingsStore()
-const collapsed = ref(false)
-
-interface NavItem {
-  name: string
-  path: string
-  icon: typeof Home
-  color: string
-}
-
-const navItems: NavItem[] = [
-  { name: '首页', path: '/', icon: Home, color: 'var(--color-text-primary)' },
-  { name: '分割合并', path: '/split-merge', icon: Scissors, color: 'var(--color-accent-blue)' },
-  { name: '视频压缩', path: '/compress', icon: FileVideo, color: 'var(--color-accent-purple)' },
-  { name: '视频下载', path: '/download', icon: Globe, color: 'var(--color-info)' },
-  { name: '加密解密', path: '/encrypt', icon: Shield, color: 'var(--color-accent-light)' },
-  { name: '视频转GIF', path: '/gif', icon: Image, color: 'var(--color-warning)' },
-  { name: '视频播放', path: '/player', icon: Video, color: 'var(--color-info)' }
-]
+const hoverExpanded = ref(false)
 
 const isActive = (path: string): boolean => {
   return router.currentRoute.value.path === path
 }
 
 const toggleCollapsed = (): void => {
-  collapsed.value = !collapsed.value
+  settingsStore.toggleSidebar()
+  hoverExpanded.value = false
 }
 
-const navWidth = computed((): string => {
-  return collapsed.value ? '4rem' : '12.5rem'
+const isExpanded = computed((): boolean => {
+  return !settingsStore.sidebarCollapsed || hoverExpanded.value
 })
 </script>
 
 <template>
-  <nav 
-    class="h-screen bg-bg-secondary border-r border-bg-tertiary flex flex-col transition-all duration-300 flex-shrink-0"
-    :style="{ width: navWidth }"
+  <nav
+    class="h-full bg-bg-secondary border-r border-bg-tertiary flex flex-col flex-shrink-0 z-10 side-nav"
+    :class="isExpanded ? 'nav-expanded' : 'nav-collapsed'"
+    @mouseenter="hoverExpanded = true"
+    @mouseleave="hoverExpanded = false"
   >
     <!-- Logo Header -->
-    <div class="h-14 flex items-center justify-center border-b border-bg-tertiary">
-      <div class="flex items-center gap-2">
-        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent-blue to-accent-purple flex items-center justify-center">
+    <div class="nav-logo h-14 flex items-center justify-center border-b border-bg-tertiary overflow-hidden px-2">
+      <div class="flex items-center">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent-blue to-accent-purple flex items-center justify-center flex-shrink-0">
           <Video :size="16" class="text-white" />
         </div>
-        <Transition name="fade">
-          <span 
-            v-if="!collapsed"
-            class="text-sm font-bold text-gradient whitespace-nowrap"
-          >
-            SN Video Editor
-          </span>
-        </Transition>
+        <span class="nav-text text-sm font-bold text-gradient">
+          SN Video Editor
+        </span>
       </div>
     </div>
 
     <!-- Nav Items -->
-    <div class="flex-1 flex flex-col gap-1 p-2 mt-2">
+    <div class="flex-1 flex flex-col gap-1 p-2 mt-2 overflow-hidden">
       <button
-        v-for="item in navItems"
+        v-for="item in FEATURE_CONFIG"
         :key="item.path"
         @click="router.push(item.path)"
-        class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg relative"
+        class="nav-item flex items-center px-3 py-2.5 rounded-lg relative"
         :class="isActive(item.path) ? 'active' : ''"
+        :title="!isExpanded ? item.name : undefined"
       >
-        <component 
+        <component
           :is="item.icon"
           :size="20"
           class="flex-shrink-0"
           :class="isActive(item.path) ? '' : 'text-text-secondary'"
           :style="isActive(item.path) ? { color: item.color } : undefined"
         />
-        <Transition name="fade">
-          <span
-            v-if="!collapsed"
-            class="text-sm whitespace-nowrap"
-            :class="isActive(item.path) ? 'text-text-primary' : 'text-text-secondary'"
-          >
-            {{ item.name }}
-          </span>
-        </Transition>
+        <span
+          class="nav-text text-sm"
+          :class="isActive(item.path) ? 'text-text-primary' : 'text-text-secondary'"
+        >
+          {{ item.name }}
+        </span>
         <!-- Active Indicator -->
         <div
           v-if="isActive(item.path)"
@@ -112,9 +89,10 @@ const navWidth = computed((): string => {
       <button
         @click="toggleCollapsed"
         class="w-full flex items-center justify-center p-2 rounded-lg"
+        :title="settingsStore.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
       >
-        <component 
-          :is="collapsed ? ChevronRight : ChevronLeft"
+        <component
+          :is="settingsStore.sidebarCollapsed ? ChevronRight : ChevronLeft"
           :size="18"
           class="text-text-secondary"
         />
@@ -124,6 +102,15 @@ const navWidth = computed((): string => {
 </template>
 
 <style scoped>
+.side-nav {
+  width: 12.5rem;
+  transition: width var(--transition-normal);
+}
+
+.side-nav.nav-collapsed {
+  width: 4rem;
+}
+
 .nav-item {
   position: relative;
   overflow: hidden;
@@ -133,13 +120,30 @@ const navWidth = computed((): string => {
   background: hsl(var(--primary) / 0.1);
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.12s ease;
+/* Text slide animation */
+.nav-text {
+  display: inline-block;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 10rem;
+  opacity: 1;
+  margin-left: 0.75rem;
+  transition:
+    max-width var(--transition-normal),
+    opacity var(--transition-normal),
+    margin-left var(--transition-normal);
 }
 
-.fade-enter-from,
-.fade-leave-to {
+/* Logo header text — smaller margin */
+.nav-logo .nav-text {
+  margin-left: 0.5rem;
+  max-width: 9rem;
+}
+
+/* Collapsed state — must come after .nav-logo override for specificity */
+.nav-collapsed .nav-text {
+  max-width: 0;
   opacity: 0;
+  margin-left: 0;
 }
 </style>
