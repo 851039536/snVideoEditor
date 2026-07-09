@@ -22,7 +22,7 @@ import {
 function extractErrorSummary(stderrLines: string[]): string {
   const all = stderrLines.join('')
   const lines = all.split('\n')
-  const errorPattern = /(?:nvenc|qsv|amf|vaapi)\s*@|Error while opening|Error initializing|Driver does not|not support|incorrect parameters|Conversion failed|Invalid|Unknown encoder|No such file/i
+  const errorPattern = /(?:nvenc|qsv|amf|vaapi)\s*@|Error while opening|Error initializing|Driver does not|not support|incorrect parameters|Conversion failed|Invalid|Unknown encoder|No such file|hwaccel|cuda|cuInit|No capable devices|Unknown hwaccel/i
 
   // Find lines matching known error patterns
   const errorIdxs: number[] = []
@@ -63,6 +63,8 @@ export interface CompressOptions {
   codec: string
   audioBitrate?: string
   preset?: string
+  /** NVENC-specific preset (p1 fastest ~ p7 best quality). Only used when codec includes 'nvenc'. */
+  nvencPreset?: string
   twoPass?: boolean
   onProgress?: ProgressCallback
   /** Called when NVENC driver is incompatible and falls back to CPU encoding */
@@ -70,26 +72,64 @@ export interface CompressOptions {
 }
 
 export interface BatchCompressOptions {
-  files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; twoPass?: boolean }[]
+  files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; nvencPreset?: string; twoPass?: boolean }[]
   onProgress?: ProgressCallback
   /** Called when NVENC driver is incompatible and falls back to CPU encoding */
   onFallback?: (original: string, fallback: string) => void
 }
 
 /**
+ * GPU pipeline mode for NVENC encoding.
+ * - 'full-gpu': NVDEC decode (frames stay in GPU memory) + scale_cuda + NVENC.
+ *               Eliminates CPU decode bottleneck → higher GPU utilization & speed.
+ * - 'software': CPU decode + CPU scale + NVENC. Fallback when CUDA unavailable.
+ */
+type GpuPipelineMode = 'full-gpu' | 'software'
+
+/**
+ * Double a bitrate string (e.g. '320k' → '640k', '1.5M' → '3M').
+ * Used to compute a -bufsize of 2× the target bitrate for NVENC VBR.
+ * Returns the input unchanged if it doesn't match the expected pattern.
+ */
+function doubleBitrate(bitrate: string): string {
+  const m = bitrate.match(/^(\d+(?:\.\d+)?)([kKmM]?)$/)
+  if (!m) {
+    return bitrate
+  }
+  const val = parseFloat(m[1]) * 2
+  return `${val}${m[2] || 'k'}`
+}
+
+/**
  * Build ffmpeg arguments for a single compress pass.
  * Does NOT include '-pass' or output path — those are added per-pass.
  */
-function buildCompressArgs(opts: CompressOptions): string[] {
-  const args: string[] = [
-    '-i', opts.input,
-    '-c:v', opts.codec || 'libx264'
-  ]
-
+function buildCompressArgs(opts: CompressOptions, gpuMode: GpuPipelineMode = 'software'): string[] {
   const isGpu = isGpuCodec(opts.codec || '')
+  const isNvenc = (opts.codec || '').includes('nvenc')
+  const useFullGpu = gpuMode === 'full-gpu' && isNvenc
+  const hasScaling = !!opts.resolution && opts.resolution !== 'original'
+
+  const args: string[] = []
+
+  if (useFullGpu) {
+    // Full GPU pipeline: NVDEC decode → (scale_cuda) → NVENC encode
+    // -hwaccel_output_format cuda keeps decoded frames in GPU memory,
+    // avoiding the GPU→CPU→GPU round-trip that made plain -hwaccel cuda slower.
+    args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda')
+  }
+
+  args.push('-i', opts.input)
+  args.push('-c:v', opts.codec || 'libx264')
+
   if (opts.bitrate) {
     args.push('-b:v', opts.bitrate)
-  } else if (opts.codec?.includes('nvenc')) {
+    if (isNvenc) {
+      // NVENC VBR without -maxrate overshoots the target badly (e.g. 320k→560k).
+      // Constrain peaks with -maxrate (= target) and a 2× rate buffer.
+      args.push('-rc', 'vbr', '-maxrate', opts.bitrate, '-bufsize', doubleBitrate(opts.bitrate))
+    }
+  } else if (isNvenc) {
     args.push('-rc', 'vbr', '-cq', String(opts.crf || 23))
   } else if (opts.codec?.includes('qsv')) {
     args.push('-global_quality', String(opts.crf || 23))
@@ -97,13 +137,21 @@ function buildCompressArgs(opts: CompressOptions): string[] {
     args.push('-crf', String(opts.crf || 23))
   }
 
-  if (opts.resolution && opts.resolution !== 'original') {
-    args.push('-vf', `scale=${opts.resolution}`)
+  if (hasScaling) {
+    if (useFullGpu) {
+      // GPU-side scaling: keeps frames in GPU memory throughout the pipeline
+      args.push('-vf', `scale_cuda=${opts.resolution}`)
+    } else {
+      args.push('-vf', `scale=${opts.resolution}`)
+    }
   }
 
   args.push('-c:a', 'aac', '-b:a', opts.audioBitrate || '32k')
 
-  if (!isGpu && !isVp9Codec(opts.codec || '')) {
+  if (isNvenc) {
+    // NVENC preset: p1(fastest) ~ p7(best quality), p4 is the balanced default
+    args.push('-preset', opts.nvencPreset || 'p4')
+  } else if (!isGpu && !isVp9Codec(opts.codec || '')) {
     args.push('-preset', opts.preset || 'fast')
   }
 
@@ -240,9 +288,9 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
         reject(e)
       }
     } else {
-      // Single-pass (with NVENC driver compatibility auto-fallback)
-      const doSinglePass = async (codecOpts: CompressOptions): Promise<boolean> => {
-        const args = [...buildCompressArgs(codecOpts), codecOpts.output]
+      // Single-pass (NVENC full-GPU pipeline → software decode → libx264 fallback)
+      const doSinglePass = async (codecOpts: CompressOptions, gpuMode: GpuPipelineMode = 'software'): Promise<boolean> => {
+        const args = [...buildCompressArgs(codecOpts, gpuMode), codecOpts.output]
         const result = await runCompressPass(args, codecOpts)
         if (isCancelled) { return false }
         if (result.success) {
@@ -254,30 +302,63 @@ export function compressVideo(opts: CompressOptions): Promise<boolean> {
         throw new Error(`FFmpeg 压缩失败:\n${extractErrorSummary(result.stderrLines)}`)
       }
 
+      const isNvenc = (opts.codec || '').includes('nvenc')
+      const gpuPipelineErrorPattern = /hwaccel|cuda|cuInit|No capable devices|Unknown hwaccel|scale_cuda|No such filter|not available|not support/i
+      const driverErrorPattern = /Driver does not support|minimum required/i
+
+      const fallbackToCpu = async (err: unknown): Promise<void> => {
+        const msg2 = err instanceof Error ? err.message : String(err)
+        console.warn('[Compress] NVENC 驱动不兼容，自动回退 libx264:', msg2.slice(0, 200))
+        if (opts.onFallback) {
+          opts.onFallback(opts.codec, 'libx264')
+        }
+        try {
+          const fallbackOpts = { ...opts, codec: 'libx264', preset: opts.preset || 'fast' }
+          const ok2 = await doSinglePass(fallbackOpts, 'software')
+          if (!ok2) { resolve(false); return }
+          resolve(true)
+        } catch (e2) {
+          reject(e2)
+        }
+      }
+
       try {
-        const ok = await doSinglePass(opts)
+        // Level 1: NVENC full-GPU pipeline (NVDEC decode → scale_cuda → NVENC)
+        const ok = await doSinglePass(opts, isNvenc ? 'full-gpu' : 'software')
         if (!ok) { resolve(false); return }
         resolve(true)
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        const isNvenc = (opts.codec || '').includes('nvenc')
-        const isDriverErr = /Driver does not support|minimum required/i.test(msg)
-        if (isNvenc && isDriverErr) {
-          console.warn('[Compress] NVENC 驱动不兼容，自动回退 libx264:', msg.slice(0, 200))
-          if (opts.onFallback) {
-            opts.onFallback(opts.codec, 'libx264')
-          }
-          try {
-            const fallbackOpts = { ...opts, codec: 'libx264', preset: opts.preset || 'fast' }
-            const ok = await doSinglePass(fallbackOpts)
-            if (!ok) { resolve(false); return }
-            resolve(true)
-          } catch (e2) {
-            reject(e2)
-          }
-        } else {
+        if (!isNvenc) {
           reject(e)
+          return
         }
+
+        const msg = e instanceof Error ? e.message : String(e)
+
+        if (gpuPipelineErrorPattern.test(msg)) {
+          // Level 2: GPU pipeline unavailable (no CUDA / no scale_cuda), retry NVENC with software decode
+          console.warn('[Compress] GPU 流水线不可用，回退软件解码 + NVENC:', msg.slice(0, 200))
+          try {
+            const ok2 = await doSinglePass(opts, 'software')
+            if (!ok2) { resolve(false); return }
+            resolve(true)
+            return
+          } catch (e1) {
+            if (driverErrorPattern.test(e1 instanceof Error ? e1.message : String(e1))) {
+              // Level 3: NVENC driver incompatible after software-decode retry → libx264
+              return fallbackToCpu(e1)
+            }
+            reject(e1)
+            return
+          }
+        }
+
+        if (driverErrorPattern.test(msg)) {
+          // Level 3: NVENC driver incompatible directly → libx264
+          return fallbackToCpu(e)
+        }
+
+        reject(e)
       }
     }
   })

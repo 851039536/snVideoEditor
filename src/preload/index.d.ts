@@ -72,11 +72,12 @@ export interface ElectronAPI {
     codec: string
     audioBitrate?: string
     preset?: string
+    nvencPreset?: string
     twoPass?: boolean
   }) => Promise<boolean>
 
   batchCompress: (opts: {
-    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; twoPass?: boolean }[]
+    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; nvencPreset?: string; twoPass?: boolean }[]
   }) => Promise<{ success: number; successFiles: string[]; failed: { input: string; error: string }[]; fallbacks: { input: string; originalCodec: string; fallbackCodec: string }[] }>
 
   // GIF conversion

@@ -95,12 +95,13 @@ const electronAPI = {
     codec: string
     audioBitrate?: string
     preset?: string
+    nvencPreset?: string
     twoPass?: boolean
   }): Promise<boolean> =>
     ipcRenderer.invoke('video:compress', opts),
 
   batchCompress: (opts: {
-    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; twoPass?: boolean }[]
+    files: { input: string; output: string; crf: number; resolution: string; bitrate: string; codec: string; audioBitrate?: string; preset?: string; nvencPreset?: string; twoPass?: boolean }[]
   }): Promise<{ success: number; successFiles: string[]; failed: { input: string; error: string }[]; fallbacks: { input: string; originalCodec: string; fallbackCodec: string }[] }> =>
     ipcRenderer.invoke('video:batchCompress', opts),
 

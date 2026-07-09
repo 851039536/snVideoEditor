@@ -16,6 +16,7 @@ export interface CompressPreset {
   codec: string
   audioBitrate: string
   preset: string
+  nvencPreset: string
   twoPass: boolean
 }
 
@@ -26,6 +27,7 @@ const DEFAULT_COMPRESS_PRESET: CompressPreset = {
   codec: 'libx264',
   audioBitrate: '32k',
   preset: 'fast',
+  nvencPreset: 'p4',
   twoPass: false
 }
 

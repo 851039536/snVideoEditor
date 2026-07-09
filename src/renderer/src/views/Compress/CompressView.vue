@@ -29,6 +29,7 @@ const bitrate = ref(settingsStore.compressPreset.bitrate)
 const codec = ref(settingsStore.compressPreset.codec)
 const audioBitrate = ref(settingsStore.compressPreset.audioBitrate)
 const twoPass = ref(settingsStore.compressPreset.twoPass)
+const nvencPreset = ref(settingsStore.compressPreset.nvencPreset)
 
 const errorMsg = ref('')
 let isUnmounted = false
@@ -45,6 +46,7 @@ function savePreset(): void {
     codec: codec.value,
     audioBitrate: audioBitrate.value,
     preset: preset.value,
+    nvencPreset: nvencPreset.value,
     twoPass: twoPass.value
   })
 }
@@ -145,6 +147,7 @@ const isVp9 = computed(() => isVp9Codec(codec.value))
 // CRF range adapts per codec: H.264/H.265 use 0-51, VP9 uses 0-63
 const crfMax = computed(() => isVp9.value ? 63 : 51)
 const showPreset = computed(() => !isGpuEncoder.value && !isVp9.value)
+const showNvencPreset = computed(() => isGpuEncoder.value && codec.value.includes('nvenc'))
 
 // Clamp crfValue when switching to a codec with a lower max
 watch(crfMax, (max) => {
@@ -170,7 +173,7 @@ watch(resolution, (res) => {
 })
 
 // Persist preset on any param change + disable twoPass when inapplicable
-watch([crfValue, resolution, bitrate, codec, audioBitrate, preset, twoPass], () => {
+watch([crfValue, resolution, bitrate, codec, audioBitrate, preset, nvencPreset, twoPass], () => {
   if (!bitrate.value || isGpuEncoder.value) { twoPass.value = false }
   savePresetDebounced()
 })
@@ -278,6 +281,7 @@ async function startCompress(): Promise<void> {
       codec: codec.value,
       audioBitrate: audioBitrate.value,
       preset: preset.value,
+      nvencPreset: nvencPreset.value,
       twoPass: twoPass.value
     }))
     const currentRunId = ++runId
@@ -615,6 +619,33 @@ onUnmounted(() => {
                 <option value="slow">slow</option>
                 <option value="slower">slower</option>
                 <option value="veryslow">veryslow (最佳画质)</option>
+              </select>
+            </div>
+
+            <!-- NVENC Encoding Preset (GPU NVENC only) -->
+            <div v-if="showNvencPreset">
+              <InfoTooltip title="NVENC 预设是什么？" widthClass="w-72">
+                <template #label>
+                  <label class="text-sm text-text-secondary">NVENC 编码预设</label>
+                </template>
+                <template #content>
+                  <p class="mb-2"><strong class="text-text-primary">NVENC 预设（p1 ~ p7）</strong> 是 NVIDIA 硬件编码器专用的速度/质量权衡：</p>
+                  <ul class="list-disc list-inside space-y-1">
+                    <li><span class="text-accent-blue font-medium">p1 ~ p3</span>：极速编码，吞吐量最高，同画质下文件略大</li>
+                    <li><span class="text-accent-purple font-medium">p4（默认）</span>：速度与质量的平衡点，推荐日常使用</li>
+                    <li><span class="text-accent-yellow font-medium">p6 ~ p7</span>：最高画质，编码速度降低，但同码率下画质更好</li>
+                  </ul>
+                  <p class="mt-2 text-text-muted">与 CPU 预设不同，NVENC 预设仅影响硬件编码器的内部调度策略，不增加 CPU 负载。</p>
+                </template>
+              </InfoTooltip>
+              <select v-model="nvencPreset" class="select-input w-full">
+                <option value="p1">p1 (极速 - 最大吞吐)</option>
+                <option value="p2">p2</option>
+                <option value="p3">p3</option>
+                <option value="p4">p4 (默认 - 平衡)</option>
+                <option value="p5">p5</option>
+                <option value="p6">p6</option>
+                <option value="p7">p7 (最佳画质)</option>
               </select>
             </div>
 
