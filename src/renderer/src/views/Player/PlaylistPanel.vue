@@ -1,71 +1,86 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Lock, FileVideo, X, GripVertical, FolderSync, FolderOpen } from 'lucide-vue-next'
-import { formatSize, getFileName } from '@/utils/format'
-import type { PlayerEntry } from './types'
-import FileDropZone from '@/components/FileDropZone.vue'
+import { ref, computed } from 'vue';
+import { Lock, FileVideo, X, GripVertical, FolderSync, FolderOpen, Search } from 'lucide-vue-next';
+import { formatSize, getFileName } from '@/utils/format';
+import type { PlayerEntry } from './types';
+import FileDropZone from '@/components/FileDropZone.vue';
 
 const props = defineProps<{
-  files: PlayerEntry[]
-  currentIndex: number
-  isPlaying: boolean
-  lastFolder?: string
-}>()
+  files: PlayerEntry[];
+  currentIndex: number;
+  isPlaying: boolean;
+  lastFolder?: string;
+}>();
 
 const emit = defineEmits<{
-  selectFile: [index: number]
-  removeFile: [index: number]
-  addFiles: [paths: string[]]
-  scanDir: []
-  clearList: []
-  reorder: [payload: { from: number; to: number }]
-  rescanLastFolder: []
-}>()
+  selectFile: [index: number];
+  removeFile: [index: number];
+  addFiles: [paths: string[]];
+  scanDir: [];
+  clearList: [];
+  reorder: [payload: { from: number; to: number }];
+  rescanLastFolder: [];
+}>();
 
 // ---- Drag reorder ----
-const dragSrcIdx = ref(-1)
-const dragOverIdx = ref(-1)
+const dragSrcIdx = ref(-1);
+const dragOverIdx = ref(-1);
+
+// ---- Search / filter ----
+const searchQuery = ref('');
+
+/** Filtered view of the playlist, preserving each item's ORIGINAL index. */
+const filteredFiles = computed((): { file: PlayerEntry; idx: number }[] => {
+  const mapped = props.files.map((file, idx) => ({ file, idx }));
+  const q = searchQuery.value.trim().toLowerCase();
+  if (!q) {
+    return mapped;
+  }
+  return mapped.filter(({ file }) => getFileName(file.path).toLowerCase().includes(q));
+});
 
 function onDragStart(index: number, event: DragEvent): void {
-  dragSrcIdx.value = index
+  dragSrcIdx.value = index;
   if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', String(index))
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
   }
 }
 
 function onDragOver(index: number, event: DragEvent): void {
-  event.preventDefault()
+  event.preventDefault();
   if (dragSrcIdx.value !== index) {
-    dragOverIdx.value = index
+    dragOverIdx.value = index;
   }
   if (event.dataTransfer) {
-    event.dataTransfer.dropEffect = 'move'
+    event.dataTransfer.dropEffect = 'move';
   }
 }
 
 function onDragLeave(): void {
-  dragOverIdx.value = -1
+  dragOverIdx.value = -1;
 }
 
 function onDrop(index: number): void {
-  const from = dragSrcIdx.value
-  dragSrcIdx.value = -1
-  dragOverIdx.value = -1
+  const from = dragSrcIdx.value;
+  dragSrcIdx.value = -1;
+  dragOverIdx.value = -1;
   if (from >= 0 && from !== index && from < props.files.length && index < props.files.length) {
-    emit('reorder', { from, to: index })
+    emit('reorder', { from, to: index });
   }
 }
 
 function onDragEnd(): void {
-  dragSrcIdx.value = -1
-  dragOverIdx.value = -1
+  dragSrcIdx.value = -1;
+  dragOverIdx.value = -1;
 }
 
 function getFolderName(path: string): string {
-  if (!path) { return '' }
-  const parts = path.replace(/[/\\]+$/, '').split(/[/\\]/)
-  return parts[parts.length - 1] || path
+  if (!path) {
+    return '';
+  }
+  const parts = path.replace(/[/\\]+$/, '').split(/[/\\]/);
+  return parts[parts.length - 1] || path;
 }
 </script>
 
@@ -104,27 +119,41 @@ function getFolderName(path: string): string {
         <h3 class="text-xs font-semibold text-text-secondary uppercase tracking-wider">
           播放列表（{{ files.length }}）
         </h3>
-        <button
-          @click="emit('clearList')"
-          class="text-xs text-text-muted hover:text-danger transition-colors"
-        >
+        <button @click="emit('clearList')" class="text-xs text-text-muted hover:text-danger transition-colors">
           清空
+        </button>
+      </div>
+
+      <!-- Search / filter -->
+      <div v-if="files.length > 3" class="relative mb-2">
+        <Search :size="13" class="absolute left-2 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+        <input
+          v-model="searchQuery"
+          type="text"
+          placeholder="搜索文件名"
+          class="input-base w-full pl-7 pr-7 py-1 text-xs"
+        />
+        <button
+          v-if="searchQuery"
+          @click="searchQuery = ''"
+          class="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+          title="清除搜索"
+        >
+          <X :size="12" />
         </button>
       </div>
 
       <div class="space-y-0.5">
         <div
-          v-for="(file, idx) in files"
+          v-for="{ file, idx } in filteredFiles"
           :key="file.path"
           class="playlist-item group flex items-center gap-1.5 p-2 rounded-lg transition-colors cursor-pointer border border-transparent"
           :class="[
-            idx === currentIndex
-              ? 'bg-accent-blue/10 border-accent-blue/30'
-              : 'hover:bg-bg-tertiary/50',
+            idx === currentIndex ? 'bg-accent-blue/10 border-accent-blue/30' : 'hover:bg-bg-tertiary/50',
             idx === dragOverIdx ? 'drag-over' : '',
             idx === dragSrcIdx ? 'is-dragging' : ''
           ]"
-          draggable="true"
+          :draggable="!searchQuery"
           @click="emit('selectFile', idx)"
           @dragstart="onDragStart(idx, $event)"
           @dragover.prevent="onDragOver(idx, $event)"
@@ -140,9 +169,7 @@ function getFolderName(path: string): string {
           <!-- Index / Indicator -->
           <div
             class="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-xs font-mono font-semibold"
-            :class="idx === currentIndex
-              ? 'bg-accent-blue/20 text-accent-blue'
-              : 'bg-bg-primary text-text-muted'"
+            :class="idx === currentIndex ? 'bg-accent-blue/20 text-accent-blue' : 'bg-bg-primary text-text-muted'"
           >
             <template v-if="idx === currentIndex && isPlaying">
               <span class="flex items-center gap-px">
@@ -169,13 +196,10 @@ function getFolderName(path: string): string {
               </p>
             </div>
             <p class="text-[10px] text-text-muted mt-0.5 truncate">
-              <template v-if="file.isEncrypted">
-                加密视频{{ file.tempPath ? ' · 已解密' : '' }}
-              </template>
+              <template v-if="file.isEncrypted"> 加密视频{{ file.tempPath ? ' · 已解密' : '' }} </template>
               <template v-else-if="file.meta">
                 {{ file.meta.codec?.toUpperCase() || '未知' }}
-                {{ file.meta.width }}×{{ file.meta.height }}
-                · {{ formatSize(file.meta.size) }}
+                {{ file.meta.width }}×{{ file.meta.height }} · {{ formatSize(file.meta.size) }}
               </template>
               <template v-else>加载中...</template>
             </p>
@@ -191,6 +215,9 @@ function getFolderName(path: string): string {
           </button>
         </div>
       </div>
+
+      <!-- No match hint -->
+      <p v-if="filteredFiles.length === 0" class="text-xs text-text-muted text-center py-4">无匹配的文件</p>
     </div>
 
     <!-- Empty State -->
@@ -203,5 +230,5 @@ function getFolderName(path: string): string {
 </template>
 
 <style scoped>
-@use "./_player";
+@use './_player';
 </style>
