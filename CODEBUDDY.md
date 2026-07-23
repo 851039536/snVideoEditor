@@ -3,6 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 项目概述
+
 - **名称**: SN Video Editor — 模块化视频编辑桌面工具
 - **技术栈**: Electron 31 + Vite 5 + Vue 3.4 + TypeScript 5 + Pinia + Vue Router 4 + TailwindCSS
 - **框架**: electron-vite 2.x（三进程分离：main/preload/renderer）
@@ -11,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **UI 组件**: lucide-vue-next (图标)，无第三方 UI 组件库
 
 ## 常用命令
+
 ```bash
 npm install   # 安装依赖
 npm run dev   # 启动开发模式（同时启动 main/preload/renderer 三进程）
@@ -18,6 +20,7 @@ npm run build # 构建（勿私自执行，太慢）
 ```
 
 ## 项目结构
+
 ```
 src/
 ├── main/                     # Electron 主进程
@@ -67,7 +70,13 @@ src/
 采用两种通道：
 
 1. **请求-响应**：渲染进程通过 `ipcRenderer.invoke` → 主进程 `ipcMain.handle`，返回 Promise。用于文件操作、元数据、操作启动等。
-2. **进度推送**：主进程通过 `event.sender.send('operation:progress', data)` 推送进度 → 渲染进程 `ipcRenderer.on` 监听。进度在调用 operation 前注册回调，完成后需 `removeProgressListener()` 清理。
+2. **进度推送**：主进程通过 `event.sender.send('operation:progress', data)` 推送进度 → 渲染进程 `ipcRenderer.on` 监听。
+
+### 进度监听器生命周期（强制）
+
+- **监听器绑定组件生命周期，而非操作函数**：`onProgress` 必须在视图的 `onMounted` 注册、`onUnmounted` 移除（调用 `removeProgressListener()`），覆盖组件整个挂载期。禁止在 `startXxx` 操作函数内部临时注册监听器——否则切换页面再返回后不会重新订阅，进度面板会冻结或消失。
+- **全局进度终态与组件本地 UI 解耦**：操作完成回调中，`progressStore.finish()/reset()`（全局状态）必须无条件执行；只有组件本地 UI 更新（结果列表、文件状态等）才用 `isUnmounted` 守卫跳过。这样用户中途切走/切回，进度面板仍能正确显示实时进度与完成态。
+- **按文件索引更新状态时用组件级快照**：常驻监听器通过组件级快照（如 `runSnapshot`）读取当前批次文件，避免运行中列表变动导致索引错位。
 
 取消操作：`operation:cancel` 同时清除 ffmpeg 子进程（`SIGTERM`）和 crypto 流（`destroy()`），取消后各模块 resolve(false) 而非 reject。
 
@@ -77,8 +86,8 @@ src/
 
 ```ts
 wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
-  return actualHandler({ ...opts, onProgress })
-})
+  return actualHandler({ ...opts, onProgress });
+});
 ```
 
 - `lockType`：操作锁标识（如 `'split'`、`'compress'`、`'crypto'`），同一时刻只允许一个操作
@@ -88,6 +97,7 @@ wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
 ## FFmpeg 二进制解析策略（ffmpeg.ts）
 
 多级 fallback 链，按顺序尝试：
+
 1. `FFMPEG_PATH` / `FFPROBE_PATH` 环境变量
 2. `ffmpeg-static` / `ffprobe-static` npm 包
 3. 遍历 `__dirname` 上级目录的 `node_modules/<pkg>/<exe>`
@@ -116,6 +126,7 @@ wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
 - 窗口控制通过 `ipcMain.on('window:*')` 操作 `BrowserWindow`
 
 ## 代码风格
+
 - **if 语句必须带花括号 `{}`**，即使只有一行也不能省略
 - Vue 组件使用 `<script setup lang="ts">` + Composition API
 - 主进程模块用 function 导出，通过 `ipcMain.handle` 注册
@@ -123,6 +134,7 @@ wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
 - TypeScript 严格模式，所有函数必须声明返回类型
 
 ## 文件组织规则
+
 - **views 子目录规则**：完整功能模块放在 `views/<功能名>/` 子目录下，主页面命名为 `<功能名>View.vue`，子组件放同目录
   - 示例：SplitMerge 功能 → `views/SplitMerge/SplitMergeView.vue` + `views/SplitMerge/ClipList.vue`
   - 每个视图应有 `types/index.ts` 存放模块私有类型（禁止接口散落在 `.vue` 中）
@@ -136,14 +148,14 @@ wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
 
 基于 universal-arch-skill 审查规范，新增功能必须遵守：
 
-| # | 原则 | 核心要求 |
-|---|------|----------|
-| 1 | 功能模块化 | 每个视图独立目录，含主视图 + `types/index.ts`（禁止接口散落在 .vue 中） |
-| 2 | 注册完整性 | 新增视图同步更新 `config/features.ts` + `router/index.ts`（共 2 处），不得遗漏 |
-| 3 | 类型安全单一数据源 | 功能列表在 `config/features.ts` 统一定义，`HomeView`/`SideNav` 均从此导入 |
-| 4 | 统一入口 | 跨功能操作通过 IPC（`wrapOperation`）或 `stores/` (Pinia)，禁止直接 `fetch()`/`new CustomEvent()`/`document.execCommand()` |
-| 5 | 设计 Token | 禁止硬编码颜色/间距/字体，全部使用 CSS 变量或 Tailwind utility class |
-| 6 | 样式分离 | `.vue` 文件 `<style>` 优先使用 `@use` 导入外部 SCSS，禁止大量内联样式（>10 行） |
+| #   | 原则               | 核心要求                                                                                                                   |
+| --- | ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 功能模块化         | 每个视图独立目录，含主视图 + `types/index.ts`（禁止接口散落在 .vue 中）                                                    |
+| 2   | 注册完整性         | 新增视图同步更新 `config/features.ts` + `router/index.ts`（共 2 处），不得遗漏                                             |
+| 3   | 类型安全单一数据源 | 功能列表在 `config/features.ts` 统一定义，`HomeView`/`SideNav` 均从此导入                                                  |
+| 4   | 统一入口           | 跨功能操作通过 IPC（`wrapOperation`）或 `stores/` (Pinia)，禁止直接 `fetch()`/`new CustomEvent()`/`document.execCommand()` |
+| 5   | 设计 Token         | 禁止硬编码颜色/间距/字体，全部使用 CSS 变量或 Tailwind utility class                                                       |
+| 6   | 样式分离           | `.vue` 文件 `<style>` 优先使用 `@use` 导入外部 SCSS，禁止大量内联样式（>10 行）                                            |
 
 ### 新增功能注册清单
 
@@ -163,6 +175,7 @@ wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
 ## 样式分离规则（强制）
 
 ### 禁止
+
 - `.vue` 文件中 `<style>` 内联超过 10 行 SCSS 代码
 - 硬编码 `border-radius: Npx`（应使用 `var(--radius-*)`）
 - 硬编码 `font-family`（应使用 `var(--font-sans)` / `var(--font-mono)`）
@@ -170,10 +183,12 @@ wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
 - 非标准过渡时长（统一使用 `var(--transition-*)`）
 
 ### 共享样式
+
 - 提取跨视图重复样式到 `assets/styles/_<name>.scss`（下划线前缀 = SCSS partial）
 - 视图通过 `<style scoped>` 内 `@use` 导入，用 CSS 变量传递差异参数
 - **⚠️ `@use` 必须放在 `<style>` 块的第一行**（SCSS 规范要求），CSS 变量覆盖放在 `@use` 之后
 - 示例：`_timeline.scss` 被 `SplitMergeView` 和 `GifConvertView` 共享
+
   ```scss
   <style scoped>
   @use "../../assets/styles/timeline";  // ← 必须第一行
@@ -186,23 +201,24 @@ wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
 
 ## 设计 Token 速查表
 
-| Token | 值 | 用途 |
-|-------|-----|------|
-| `--font-sans` | `'PingFang SC', 'Microsoft YaHei', sans-serif` | 系统字体栈 |
-| `--font-mono` | `'JetBrains Mono', 'Fira Code', 'Consolas', monospace` | 等宽字体栈 |
-| `--font-size-base` | `14px` | 基准字号 |
-| `--transition-fast` | `0.12s` | 所有 UI 交互过渡（按钮/hover/focus） |
-| `--transition-normal` | `0.2s` | 面板展开/收起 |
-| `--transition-slow` | `0.3s` | 页面过渡/导航切换 |
-| `--radius-sm` | `4px` | 标签/徽章/微控件 |
-| `--radius-base` | `6px` | 输入框/小控件 |
-| `--radius-md` | `8px` | 卡片/section |
-| `--radius-lg` | `12px` | 弹窗/主面板 |
-| `--z-panel` | `10` | 浮动面板 |
-| `--z-overlay` | `20` | 遮罩层 |
-| `--z-modal` | `50` | 模态弹窗 |
+| Token                 | 值                                                     | 用途                                 |
+| --------------------- | ------------------------------------------------------ | ------------------------------------ |
+| `--font-sans`         | `'PingFang SC', 'Microsoft YaHei', sans-serif`         | 系统字体栈                           |
+| `--font-mono`         | `'JetBrains Mono', 'Fira Code', 'Consolas', monospace` | 等宽字体栈                           |
+| `--font-size-base`    | `14px`                                                 | 基准字号                             |
+| `--transition-fast`   | `0.12s`                                                | 所有 UI 交互过渡（按钮/hover/focus） |
+| `--transition-normal` | `0.2s`                                                 | 面板展开/收起                        |
+| `--transition-slow`   | `0.3s`                                                 | 页面过渡/导航切换                    |
+| `--radius-sm`         | `4px`                                                  | 标签/徽章/微控件                     |
+| `--radius-base`       | `6px`                                                  | 输入框/小控件                        |
+| `--radius-md`         | `8px`                                                  | 卡片/section                         |
+| `--radius-lg`         | `12px`                                                 | 弹窗/主面板                          |
+| `--z-panel`           | `10`                                                   | 浮动面板                             |
+| `--z-overlay`         | `20`                                                   | 遮罩层                               |
+| `--z-modal`           | `50`                                                   | 模态弹窗                             |
 
 ## 设计风格
+
 - 深色科技风（Dark Tech），支持一键切换浅色主题
 - 主题通过 `<html>` 上的 `.light` class + CSS 变量双体系驱动
 - 配色全部使用 CSS 变量，Tailwind 通过 `var(--color-*)` 引用
@@ -213,6 +229,7 @@ wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
 - 主题切换按钮位于 SideNav 底部，localStorage 持久化
 
 ## 构建注意事项
+
 - **禁止私自执行 `npm run build` 或 `dotnet build`**，太慢太卡，修改后由用户自行验证
 - ffmpeg-static / ffprobe-static 通过 `require()` 动态加载
 - electron-builder 打包时 ffmpeg 二进制需随 app 分发
