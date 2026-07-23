@@ -1,152 +1,166 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Globe, Download, Folder, FolderOpen, Monitor, X, Search, Link, AlertTriangle, MonitorPlay, Check, ExternalLink } from 'lucide-vue-next'
-import ProgressPanel from '@/components/ProgressPanel.vue'
-import DownloadQueue from '@/views/Download/DownloadQueue.vue'
-import { useProgressStore } from '@/stores/progress'
-import { todayDateStr, sanitizeFileName } from '@/utils/format'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+import {
+  Globe,
+  Download,
+  Folder,
+  FolderOpen,
+  Monitor,
+  X,
+  Search,
+  Link,
+  AlertTriangle,
+  MonitorPlay,
+  Check,
+  ExternalLink
+} from 'lucide-vue-next';
+import ProgressPanel from '@/components/ProgressPanel.vue';
+import DownloadQueue from '@/views/Download/DownloadQueue.vue';
+import { useProgressStore } from '@/stores/progress';
+import { todayDateStr, sanitizeFileName } from '@/utils/format';
+import type { QualityVariant, RawCookie } from '@/types/file';
 
-const progressStore = useProgressStore()
+const progressStore = useProgressStore();
 
 // ─── URL input ───────────────────────────────────────────────────────────────
 
-const m3u8Url = ref('')
-const errorMsg = ref('')
-const hintMsg = ref('')
+const m3u8Url = ref('');
+const errorMsg = ref('');
+const hintMsg = ref('');
 
 // ─── Page fetch ──────────────────────────────────────────────────────────────
 
-const isFetching = ref(false)
-const fetchedUrls = ref<string[]>([])
-const fetchedTitle = ref('')
-const showFetchedUrls = ref(false)
+const isFetching = ref(false);
+const fetchedUrls = ref<string[]>([]);
+const fetchedTitle = ref('');
+const showFetchedUrls = ref(false);
 
 /** Raw cookies extracted from browser session, keyed by (domain, name). */
-interface RawCookie {
-  domain: string
-  name: string
-  value: string
-}
-const rawCookies = ref<RawCookie[]>([])
+const rawCookies = ref<RawCookie[]>([]);
 
 /** Check if a cookie domain matches a URL hostname. */
 function cookieDomainMatches(cookieDomain: string, hostname: string): boolean {
   // Normalize: remove leading dot (e.g. ".surrit.com" → "surrit.com")
-  const d = cookieDomain.startsWith('.') ? cookieDomain.slice(1) : cookieDomain
-  if (hostname === d) { return true }
-  if (hostname.endsWith('.' + d)) { return true }
-  return false
+  const d = cookieDomain.startsWith('.') ? cookieDomain.slice(1) : cookieDomain;
+  if (hostname === d) {
+    return true;
+  }
+  if (hostname.endsWith('.' + d)) {
+    return true;
+  }
+  return false;
 }
 
 /** Build a Cookie header string from rawCookies filtered for the given URL. */
 function buildCookiesForUrl(url: string): string {
-  if (!url || rawCookies.value.length === 0) { return '' }
-  let hostname: string
+  if (!url || rawCookies.value.length === 0) {
+    return '';
+  }
+  let hostname: string;
   try {
-    hostname = new URL(url).hostname
+    hostname = new URL(url).hostname;
   } catch {
-    return ''
+    return '';
   }
   // Deduplicate by name within the same matched domain scope
-  const seen = new Set<string>()
-  const parts: string[] = []
+  const seen = new Set<string>();
+  const parts: string[] = [];
   for (const c of rawCookies.value) {
     if (cookieDomainMatches(c.domain, hostname)) {
-      const key = `${c.domain}|${c.name}`
+      const key = `${c.domain}|${c.name}`;
       if (!seen.has(key)) {
-        seen.add(key)
-        parts.push(`${c.name}=${c.value}`)
+        seen.add(key);
+        parts.push(`${c.name}=${c.value}`);
       }
     }
   }
-  return parts.join('; ')
+  return parts.join('; ');
 }
 
 /** Update the Cookie request header based on a target URL. */
 function syncCookiesForUrl(url: string): void {
-  const cookieStr = buildCookiesForUrl(url)
+  const cookieStr = buildCookiesForUrl(url);
   if (cookieStr) {
-    headers['Cookie'] = cookieStr
+    headers['Cookie'] = cookieStr;
   } else {
-    delete headers['Cookie']
+    delete headers['Cookie'];
   }
 }
 
 // ─── Quality (m3u8 variants) ─────────────────────────────────────────────────
 
-interface QualityVariant {
-  url: string
-  resolution: string
-  height: number
-  label: string
-  bandwidth?: number
-}
-const variants = ref<QualityVariant[]>([])
-const selectedVariantIndex = ref(-1) // -1 = use original URL (direct download)
-const isFetchingVariants = ref(false)
-const showQualitySelector = ref(false)
-let fetchVariantsVersion = 0 // 防止竞态条件：每次新请求递增，旧请求结果被丢弃
+const variants = ref<QualityVariant[]>([]);
+const selectedVariantIndex = ref(-1); // -1 = use original URL (direct download)
+const isFetchingVariants = ref(false);
+const showQualitySelector = ref(false);
+let fetchVariantsVersion = 0; // 防止竞态条件：每次新请求递增，旧请求结果被丢弃
 
 /** The actual URL to download — could be a variant URL or the original */
 const effectiveUrl = computed((): string => {
   if (variants.value.length > 0 && selectedVariantIndex.value >= 0) {
-    return variants.value[selectedVariantIndex.value].url
+    return variants.value[selectedVariantIndex.value].url;
   }
-  return m3u8Url.value.trim()
-})
+  return m3u8Url.value.trim();
+});
 
 /** Auto-select 480p variant */
 function autoSelect480p(variantList: QualityVariant[]): void {
   if (variantList.length === 0) {
-    selectedVariantIndex.value = -1
-    return
+    selectedVariantIndex.value = -1;
+    return;
   }
   // Exact 480p match
-  const idx480 = variantList.findIndex((v) => v.height === 480)
+  const idx480 = variantList.findIndex((v) => v.height === 480);
   if (idx480 >= 0) {
-    selectedVariantIndex.value = idx480
-    return
+    selectedVariantIndex.value = idx480;
+    return;
   }
   // Closest to 480p (prefer slightly lower)
-  let bestIdx = 0
-  let bestDiff = Math.abs(variantList[0].height - 480)
+  let bestIdx = 0;
+  let bestDiff = Math.abs(variantList[0].height - 480);
   for (let i = 1; i < variantList.length; i++) {
-    const diff = Math.abs(variantList[i].height - 480)
+    const diff = Math.abs(variantList[i].height - 480);
     if (diff < bestDiff || (diff === bestDiff && variantList[i].height < variantList[bestIdx].height)) {
-      bestIdx = i
-      bestDiff = diff
+      bestIdx = i;
+      bestDiff = diff;
     }
   }
-  selectedVariantIndex.value = bestIdx
+  selectedVariantIndex.value = bestIdx;
 }
 
 /** Fetch quality variants for the current m3u8 URL */
 async function fetchQualityVariants(): Promise<void> {
-  const url = m3u8Url.value.trim()
-  if (!isValidUrl(url)) { return }
+  const url = m3u8Url.value.trim();
+  if (!isValidUrl(url)) {
+    return;
+  }
 
-  const version = ++fetchVariantsVersion
-  isFetchingVariants.value = true
+  const version = ++fetchVariantsVersion;
+  isFetchingVariants.value = true;
   try {
-    const result = await window.electronAPI.fetchM3u8Variants(url, { ...headers })
+    const result = await window.electronAPI.fetchM3u8Variants(url, { ...headers });
     // 竞态保护：如果 URL 已变化（新版本号已递增），丢弃过时结果
-    if (version !== fetchVariantsVersion) { return }
-    variants.value = result
+    if (version !== fetchVariantsVersion) {
+      return;
+    }
+    variants.value = result;
     if (result.length > 0) {
-      autoSelect480p(result)
-      showQualitySelector.value = true
+      autoSelect480p(result);
+      showQualitySelector.value = true;
     } else {
-      selectedVariantIndex.value = -1
-      showQualitySelector.value = false
+      selectedVariantIndex.value = -1;
+      showQualitySelector.value = false;
     }
   } catch {
-    if (version !== fetchVariantsVersion) { return }
-    variants.value = []
-    selectedVariantIndex.value = -1
-    showQualitySelector.value = false
+    if (version !== fetchVariantsVersion) {
+      return;
+    }
+    variants.value = [];
+    selectedVariantIndex.value = -1;
+    showQualitySelector.value = false;
   } finally {
     if (version === fetchVariantsVersion) {
-      isFetchingVariants.value = false
+      isFetchingVariants.value = false;
     }
   }
 }
@@ -154,231 +168,265 @@ async function fetchQualityVariants(): Promise<void> {
 // ─── Headers (auto-managed, not shown in UI) ──────────────────────────────────
 
 const headers = reactive<Record<string, string>>({
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-})
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+});
 
 // ─── Output ──────────────────────────────────────────────────────────────────
 
-const commonPaths = ref<{ desktop: string; downloads: string }>({ desktop: '', downloads: '' })
-const outputDir = ref('')
-const fileName = ref('')
-const loadingPath = ref('')
-const historyJsonPath = ref('')
+const commonPaths = ref<{ desktop: string; downloads: string }>({ desktop: '', downloads: '' });
+const outputDir = ref('');
+const fileName = ref('');
+// True once the user manually edits the filename, to avoid the URL watcher
+// overwriting their input on subsequent URL changes.
+const fileNameEdited = ref(false);
+const loadingPath = ref('');
+const historyJsonPath = ref('');
 
 async function openHistoryFolder(): Promise<void> {
-  if (!historyJsonPath.value) { return }
-  const dir = historyJsonPath.value.replace(/[/\\][^/\\]+$/, '')
-  await window.electronAPI.openFolder(dir)
+  if (!historyJsonPath.value) {
+    return;
+  }
+  const dir = historyJsonPath.value.replace(/[/\\][^/\\]+$/, '');
+  await window.electronAPI.openFolder(dir);
 }
 
 async function fetchCommonPaths(): Promise<void> {
   try {
-    commonPaths.value = await window.electronAPI.getCommonPaths()
-  } catch (_e) { /* leave defaults */ }
+    commonPaths.value = await window.electronAPI.getCommonPaths();
+  } catch (_e) {
+    /* leave defaults */
+  }
 }
 
 async function selectQuickDir(type: 'desktop' | 'downloads'): Promise<void> {
-  loadingPath.value = type
+  loadingPath.value = type;
   try {
-    if (!commonPaths.value.desktop) { await fetchCommonPaths() }
-    const dir = commonPaths.value[type]
-    if (dir) { outputDir.value = dir }
-    else { errorMsg.value = '无法获取系统路径，请使用自定义目录' }
+    if (!commonPaths.value.desktop) {
+      await fetchCommonPaths();
+    }
+    const dir = commonPaths.value[type];
+    if (dir) {
+      outputDir.value = dir;
+    } else {
+      errorMsg.value = '无法获取系统路径，请使用自定义目录';
+    }
   } finally {
-    loadingPath.value = ''
+    loadingPath.value = '';
   }
 }
 
 async function selectCustomDir(): Promise<void> {
-  const dir = await window.electronAPI.selectDirectory()
-  if (dir) { outputDir.value = dir }
+  const dir = await window.electronAPI.selectDirectory();
+  if (dir) {
+    outputDir.value = dir;
+  }
 }
 
 const autoFileName = computed((): string => {
-  const ts = todayDateStr()
+  const ts = todayDateStr();
   // Priority 1: use page title if available (from "从网页提取")
   if (fetchedTitle.value) {
-    const safe = sanitizeFileName(fetchedTitle.value)
-    return `${safe || 'video'}_${ts}.mp4`
+    const safe = sanitizeFileName(fetchedTitle.value);
+    return `${safe || 'video'}_${ts}.mp4`;
   }
   // Priority 2: derive from URL path
   try {
-    const urlPath = new URL(m3u8Url.value).pathname
-    const segments = urlPath.split('/').filter(Boolean)
-    const last = segments[segments.length - 1] || 'video'
-    const name = last.replace(/\.(m3u8|ts|mp4|mkv|webm|avi)$/i, '')
-    return `${name}_${ts}.mp4`
+    const urlPath = new URL(m3u8Url.value).pathname;
+    const segments = urlPath.split('/').filter(Boolean);
+    const last = segments[segments.length - 1] || 'video';
+    const name = last.replace(/\.(m3u8|ts|mp4|mkv|webm|avi)$/i, '');
+    return `${name}_${ts}.mp4`;
   } catch {
-    return `download_${ts}.mp4`
+    return `download_${ts}.mp4`;
   }
-})
+});
 
 // Auto-detect quality + auto-fill filename when m3u8 URL changes
 watch(m3u8Url, (url) => {
-  fileName.value = autoFileName.value
-  // Sync cookies for the new URL domain (if we have raw cookies from page fetch)
-  syncCookiesForUrl(url)
-  if (url && isValidUrl(url) && url.includes('.m3u8')) {
-    fetchQualityVariants()
-  } else {
-    showQualitySelector.value = false
-    variants.value = []
-    selectedVariantIndex.value = -1
+  // Only auto-fill when the user hasn't manually edited the filename
+  if (!fileNameEdited.value) {
+    fileName.value = autoFileName.value;
   }
-})
+  // Sync cookies for the new URL domain (if we have raw cookies from page fetch)
+  syncCookiesForUrl(url);
+  if (url && isValidUrl(url) && url.includes('.m3u8')) {
+    fetchQualityVariants();
+  } else {
+    showQualitySelector.value = false;
+    variants.value = [];
+    selectedVariantIndex.value = -1;
+  }
+});
 
 // Keep Cookie header in sync when effective URL changes (e.g. quality variant selection)
 watch(effectiveUrl, (url) => {
-  syncCookiesForUrl(url)
-})
+  syncCookiesForUrl(url);
+});
 
 const outputPath = computed((): string => {
-  if (!outputDir.value || !fileName.value) { return '' }
-  return outputDir.value.replace(/\\/g, '/') + '/' + fileName.value
-})
+  if (!outputDir.value || !fileName.value) {
+    return '';
+  }
+  return outputDir.value.replace(/\\/g, '/') + '/' + fileName.value;
+});
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 const canStart = computed((): boolean => {
-  return (
-    effectiveUrl.value.length > 0 &&
-    outputDir.value.length > 0 &&
-    fileName.value.trim().length > 0
-  )
-})
+  return effectiveUrl.value.length > 0 && outputDir.value.length > 0 && fileName.value.trim().length > 0;
+});
 
 // Whether the queue has any active items (pending, downloading, or paused)
 const hasActiveQueue = computed((): boolean => {
   return progressStore.queueItems.some(
     (i) => i.status === 'pending' || i.status === 'downloading' || i.status === 'merging' || i.status === 'paused'
-  )
-})
+  );
+});
 
 const downloadingCount = computed((): number => {
-  return progressStore.queueItems.filter((i) => i.status === 'downloading' || i.status === 'merging').length
-})
+  return progressStore.queueItems.filter((i) => i.status === 'downloading' || i.status === 'merging').length;
+});
 
 function setConcurrency(n: number): void {
-  progressStore.queueConcurrency = n
-  window.electronAPI.setDownloadConcurrency(n)
+  progressStore.queueConcurrency = n;
+  window.electronAPI.setDownloadConcurrency(n);
 }
 
 function isValidUrl(url: string): boolean {
-  try { new URL(url); return true }
-  catch { return false }
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-const isInputUrlValid = computed(() => isValidUrl(m3u8Url.value))
+const isInputUrlValid = computed(() => isValidUrl(m3u8Url.value));
 
 function looksLikeWebPage(url: string): boolean {
-  if (!url) { return false }
-  const lower = url.toLowerCase()
+  if (!url) {
+    return false;
+  }
+  const lower = url.toLowerCase();
   // Definitely a streaming URL, not a webpage
   if (lower.includes('.m3u8') || lower.includes('.ts') || lower.includes('/hls/') || lower.includes('/dash/')) {
-    return false
+    return false;
   }
   // Known video platforms that serve HTML pages
-  const videoHosts = ['vimeo.com', 'dailymotion.com', 'bilibili.com', 'youtube.com',
-                      'youku.com', 'iqiyi.com', 'netflix.com']
+  const videoHosts = [
+    'vimeo.com',
+    'dailymotion.com',
+    'bilibili.com',
+    'youtube.com',
+    'youku.com',
+    'iqiyi.com',
+    'netflix.com'
+  ];
   if (videoHosts.some((h) => lower.includes(h))) {
-    return true
+    return true;
   }
   // Common webpage extensions
   if (lower.endsWith('.html') || lower.endsWith('.htm') || lower.endsWith('.php')) {
-    return true
+    return true;
   }
   // Generic heuristic: if no media extension, treat as webpage
-  return !/\.(mp4|mkv|webm|avi|mov|flv|wmv|m4v|3gp)(\?|$)/i.test(lower)
+  return !/\.(mp4|mkv|webm|avi|mov|flv|wmv|m4v|3gp)(\?|$)/i.test(lower);
 }
 
 // ─── Fetch m3u8 from page ────────────────────────────────────────────────────
 
 async function fetchM3u8FromPage(): Promise<void> {
-  errorMsg.value = ''
-  hintMsg.value = ''
-  const pageUrl = m3u8Url.value.trim()
+  errorMsg.value = '';
+  hintMsg.value = '';
+  const pageUrl = m3u8Url.value.trim();
 
   if (!isValidUrl(pageUrl)) {
-    errorMsg.value = '请输入有效的网页 URL 地址'
-    return
+    errorMsg.value = '请输入有效的网页 URL 地址';
+    return;
   }
 
-  isFetching.value = true
+  isFetching.value = true;
   try {
-    const result = await window.electronAPI.fetchPageM3u8(pageUrl)
-    fetchedTitle.value = result.pageTitle
-    fetchedUrls.value = result.m3u8Urls
+    const result = await window.electronAPI.fetchPageM3u8(pageUrl);
+    fetchedTitle.value = result.pageTitle;
+    fetchedUrls.value = result.m3u8Urls;
 
     if (result.m3u8Urls.length === 0) {
-      hintMsg.value = `未能从页面 "${result.pageTitle}" 中提取到 m3u8 地址。请尝试直接在浏览器中打开页面，按 F12 → Network → 筛选 m3u8 查找真实播放地址。`
-      showFetchedUrls.value = false
+      hintMsg.value = `未能从页面 "${result.pageTitle}" 中提取到 m3u8 地址。请尝试直接在浏览器中打开页面，按 F12 → Network → 筛选 m3u8 查找真实播放地址。`;
+      showFetchedUrls.value = false;
     } else {
-      showFetchedUrls.value = true
+      showFetchedUrls.value = true;
       // Store raw cookies for later domain-filtered use
-      rawCookies.value = result.cookies || []
+      rawCookies.value = result.cookies || [];
       // Auto-fill Referer/Origin from page URL
       try {
-        const parsed = new URL(pageUrl)
-        headers['Referer'] = `${parsed.protocol}//${parsed.hostname}/`
-        headers['Origin'] = `${parsed.protocol}//${parsed.hostname}`
-      } catch { /* ignore */ }
+        const parsed = new URL(pageUrl);
+        headers['Referer'] = `${parsed.protocol}//${parsed.hostname}/`;
+        headers['Origin'] = `${parsed.protocol}//${parsed.hostname}`;
+      } catch {
+        /* ignore */
+      }
       // Don't auto-fill Cookie yet — wait for user to select a specific m3u8 URL
     }
   } catch (e) {
-    errorMsg.value = e instanceof Error ? e.message : String(e)
-    showFetchedUrls.value = false
+    errorMsg.value = e instanceof Error ? e.message : String(e);
+    showFetchedUrls.value = false;
   } finally {
-    isFetching.value = false
+    isFetching.value = false;
   }
 }
 
 /** When user selects an m3u8 URL from fetched list, the watch on m3u8Url will auto-fetch variants */
 async function selectFetchedUrl(url: string): Promise<void> {
-  m3u8Url.value = url
-  showFetchedUrls.value = false
-  hintMsg.value = ''
-  // Sync cookies for the selected m3u8 URL's domain
-  syncCookiesForUrl(url)
+  // Allow the watcher to re-derive the filename from the freshly fetched title/URL
+  fileNameEdited.value = false;
+  m3u8Url.value = url;
+  showFetchedUrls.value = false;
+  hintMsg.value = '';
+  // Cookie sync is handled by the watch on m3u8Url triggered above
 }
 
 // ─── Download Queue ──────────────────────────────────────────────────────────
 
-const justEnqueued = ref(false)
-let justEnqueuedTimer: ReturnType<typeof setTimeout> | null = null
-const isEnqueueing = ref(false) // 幂等保护：防止快速双击重复入队
+const justEnqueued = ref(false);
+let justEnqueuedTimer: ReturnType<typeof setTimeout> | null = null;
+const isEnqueueing = ref(false); // 幂等保护：防止快速双击重复入队
 
 async function enqueueDownload(): Promise<void> {
-  if (isEnqueueing.value) { return }
-  errorMsg.value = ''
-  hintMsg.value = ''
+  if (isEnqueueing.value) {
+    return;
+  }
+  errorMsg.value = '';
+  hintMsg.value = '';
 
-  const url = effectiveUrl.value
+  const url = effectiveUrl.value;
 
   if (!isValidUrl(url)) {
-    errorMsg.value = '请输入有效的 URL 地址'
-    return
+    errorMsg.value = '请输入有效的 URL 地址';
+    return;
   }
   if (!outputPath.value) {
-    errorMsg.value = '请选择输出目录并输入文件名'
-    return
+    errorMsg.value = '请选择输出目录并输入文件名';
+    return;
   }
   // Only set hint after all early-return checks, so it won't be cleared by next call
   if (looksLikeWebPage(url)) {
-    hintMsg.value = '⚠ 当前输入看起来像网页地址而非 m3u8 流地址，建议先点击"从网页提取"获取真实播放链接。'
+    hintMsg.value = '⚠ 当前输入看起来像网页地址而非 m3u8 流地址，建议先点击"从网页提取"获取真实播放链接。';
   }
 
-  isEnqueueing.value = true
+  isEnqueueing.value = true;
   try {
     // Check for duplicate filename in download history
-    const dup = await window.electronAPI.checkDownloadDuplicate(fileName.value)
+    const dup = await window.electronAPI.checkDownloadDuplicate(fileName.value);
     if (dup) {
       const confirmed = await window.electronAPI.confirmDialog(
         `文件名 "${fileName.value}" 已下载过（上次: ${new Date(dup.completedAt).toLocaleString()}），是否重复下载？`,
         '重复下载确认'
-      )
+      );
       if (!confirmed) {
-        hintMsg.value = '已取消重复下载'
-        return
+        hintMsg.value = '已取消重复下载';
+        return;
       }
     }
 
@@ -387,80 +435,80 @@ async function enqueueDownload(): Promise<void> {
       output: outputPath.value,
       headers: { ...headers },
       fileName: fileName.value
-    })
-    justEnqueued.value = true
-    if (justEnqueuedTimer) { clearTimeout(justEnqueuedTimer) }
-    justEnqueuedTimer = setTimeout(() => { justEnqueued.value = false }, 1800)
+    });
+    justEnqueued.value = true;
+    if (justEnqueuedTimer) {
+      clearTimeout(justEnqueuedTimer);
+    }
+    justEnqueuedTimer = setTimeout(() => {
+      justEnqueued.value = false;
+    }, 1800);
   } catch (e) {
-    errorMsg.value = e instanceof Error ? e.message : String(e)
+    errorMsg.value = e instanceof Error ? e.message : String(e);
   } finally {
-    isEnqueueing.value = false
+    isEnqueueing.value = false;
   }
 }
 
 async function cancelAllDownloads(): Promise<void> {
-  await window.electronAPI.cancelDownloadQueue()
+  await window.electronAPI.cancelDownloadQueue();
 }
 
 async function handleQueueRetry(id: string): Promise<void> {
-  await window.electronAPI.retryQueueItem(id)
+  await window.electronAPI.retryQueueItem(id);
 }
 
 async function handleQueueRemove(id: string): Promise<void> {
-  await window.electronAPI.removeQueueItem(id)
+  await window.electronAPI.removeQueueItem(id);
 }
 
 async function handleQueueCancel(id: string): Promise<void> {
-  const ok = await window.electronAPI.cancelQueueItem(id)
+  const ok = await window.electronAPI.cancelQueueItem(id);
   if (!ok) {
     // Item already changed to terminal state between click and IPC; resync state
     try {
-      const status = await window.electronAPI.getQueueStatus()
-      progressStore.updateQueueItems(status.items)
-      progressStore.queueActiveIds = status.activeIds
-      progressStore.queueIsProcessing = status.isProcessing
-    } catch { /* ignore */ }
+      const status = await window.electronAPI.getQueueStatus();
+      progressStore.updateQueueItems(status.items);
+      progressStore.queueActiveIds = status.activeIds;
+      progressStore.queueIsProcessing = status.isProcessing;
+    } catch {
+      /* ignore */
+    }
   }
 }
 
 async function handleQueuePause(id: string): Promise<void> {
-  await window.electronAPI.pauseQueueItem(id)
+  await window.electronAPI.pauseQueueItem(id);
 }
 
 async function handleQueueResume(id: string): Promise<void> {
-  await window.electronAPI.resumeQueueItem(id)
+  await window.electronAPI.resumeQueueItem(id);
 }
 
 async function handleClearTerminal(): Promise<void> {
-  await window.electronAPI.clearQueueTerminal()
+  await window.electronAPI.clearQueueTerminal();
 }
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 onMounted(async () => {
-  fetchCommonPaths()
+  fetchCommonPaths();
 
   // Fetch download history JSON path
   try {
-    historyJsonPath.value = await window.electronAPI.getDownloadHistoryPath()
-  } catch { /* ignore */ }
+    historyJsonPath.value = await window.electronAPI.getDownloadHistoryPath();
+  } catch {
+    /* ignore */
+  }
 
-  // Fetch initial queue status (items may exist from before navigation)
-  try {
-    const status = await window.electronAPI.getQueueStatus()
-    progressStore.updateQueueItems(status.items)
-    progressStore.queueActiveIds = status.activeIds
-    progressStore.queueIsProcessing = status.isProcessing
-    progressStore.queueConcurrency = status.concurrency
-  } catch { /* backend may not be ready yet */ }
-
-  // Listen to queue status updates from backend
+  // Register listeners BEFORE the initial status fetch so no backend update
+  // arriving during the await gap is lost.
   window.electronAPI.onQueueUpdate((status) => {
-    progressStore.updateQueueItems(status.items)
-    progressStore.queueActiveIds = status.activeIds
-    progressStore.queueIsProcessing = status.isProcessing
-    progressStore.queueConcurrency = status.concurrency
-  })
+    progressStore.updateQueueItems(status.items);
+    progressStore.queueActiveIds = status.activeIds;
+    progressStore.queueIsProcessing = status.isProcessing;
+    progressStore.queueConcurrency = status.concurrency;
+  });
 
   // Listen to download progress for the active queue item
   window.electronAPI.onQueueProgress((data) => {
@@ -468,15 +516,27 @@ onMounted(async () => {
       percent: data.percent,
       speed: data.speed,
       eta: data.eta
-    })
-  })
-})
+    });
+  });
+
+  // Fetch initial queue status (items may exist from before navigation)
+  try {
+    const status = await window.electronAPI.getQueueStatus();
+    progressStore.updateQueueItems(status.items);
+    progressStore.queueActiveIds = status.activeIds;
+    progressStore.queueIsProcessing = status.isProcessing;
+    progressStore.queueConcurrency = status.concurrency;
+  } catch {
+    /* backend may not be ready yet */
+  }
+});
 
 onUnmounted(() => {
-  if (justEnqueuedTimer) { clearTimeout(justEnqueuedTimer) }
-  window.electronAPI?.removeProgressListener()
-  window.electronAPI?.removeQueueListeners()
-})
+  if (justEnqueuedTimer) {
+    clearTimeout(justEnqueuedTimer);
+  }
+  window.electronAPI?.removeQueueListeners();
+});
 </script>
 
 <template>
@@ -484,7 +544,9 @@ onUnmounted(() => {
     <!-- Header -->
     <header class="mb-6">
       <div class="flex items-center gap-3 mb-2">
-        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center">
+        <div
+          class="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center"
+        >
           <Globe :size="20" class="text-accent-blue" />
         </div>
         <h1 class="text-2xl font-bold text-text-primary">视频下载</h1>
@@ -524,7 +586,10 @@ onUnmounted(() => {
           </p>
 
           <!-- Fetched URLs -->
-          <div v-if="showFetchedUrls && fetchedUrls.length > 0" class="mt-3 p-3 rounded-lg bg-accent-blue/10 border border-accent-blue/30">
+          <div
+            v-if="showFetchedUrls && fetchedUrls.length > 0"
+            class="mt-3 p-3 rounded-lg bg-accent-blue/10 border border-accent-blue/30"
+          >
             <div class="flex items-center gap-1.5 mb-2">
               <Link :size="14" class="text-accent-blue" />
               <span class="text-sm font-semibold text-accent-blue">已提取 {{ fetchedUrls.length }} 个 m3u8 地址</span>
@@ -539,13 +604,18 @@ onUnmounted(() => {
               >
                 <span class="text-xs text-text-muted w-5 flex-shrink-0">{{ idx + 1 }}</span>
                 <code class="text-xs text-text-primary flex-1 break-all font-mono">{{ url }}</code>
-                <button class="btn-secondary !px-2 !py-0.5 text-xs opacity-0 group-hover:opacity-100 flex-shrink-0">使用</button>
+                <button class="btn-secondary !px-2 !py-0.5 text-xs opacity-0 group-hover:opacity-100 flex-shrink-0">
+                  使用
+                </button>
               </div>
             </div>
           </div>
 
           <!-- Quality Selector -->
-          <div v-if="showQualitySelector && variants.length > 0" class="mt-3 p-3 rounded-lg bg-green-500/10 border border-green-500/30">
+          <div
+            v-if="showQualitySelector && variants.length > 0"
+            class="mt-3 p-3 rounded-lg bg-green-500/10 border border-green-500/30"
+          >
             <div class="flex items-center gap-1.5 mb-2">
               <MonitorPlay :size="14" class="text-green-400" />
               <span class="text-sm font-semibold text-green-400">清晰度 ({{ variants.length }} 个可选)</span>
@@ -557,9 +627,11 @@ onUnmounted(() => {
                 :key="idx"
                 @click="selectedVariantIndex = idx"
                 class="px-2.5 py-1.5 text-xs rounded-md transition-colors"
-                :class="selectedVariantIndex === idx
-                  ? 'bg-green-500 text-white font-semibold'
-                  : 'bg-bg-tertiary text-text-secondary hover:bg-green-500/20'"
+                :class="
+                  selectedVariantIndex === idx
+                    ? 'bg-green-500 text-white font-semibold'
+                    : 'bg-bg-tertiary text-text-secondary hover:bg-green-500/20'
+                "
               >
                 {{ v.label }}
               </button>
@@ -585,10 +657,18 @@ onUnmounted(() => {
         <div class="glass-card p-4">
           <h3 class="text-sm font-semibold text-text-primary mb-3">输出设置</h3>
           <div class="flex gap-2 flex-wrap mb-3">
-            <button @click="selectQuickDir('desktop')" class="btn-secondary !px-3 !py-1.5 text-xs" :disabled="loadingPath === 'desktop'">
+            <button
+              @click="selectQuickDir('desktop')"
+              class="btn-secondary !px-3 !py-1.5 text-xs"
+              :disabled="loadingPath === 'desktop'"
+            >
               <Monitor :size="14" /> {{ loadingPath === 'desktop' ? '加载中...' : '桌面' }}
             </button>
-            <button @click="selectQuickDir('downloads')" class="btn-secondary !px-3 !py-1.5 text-xs" :disabled="loadingPath === 'downloads'">
+            <button
+              @click="selectQuickDir('downloads')"
+              class="btn-secondary !px-3 !py-1.5 text-xs"
+              :disabled="loadingPath === 'downloads'"
+            >
               <Download :size="14" /> {{ loadingPath === 'downloads' ? '加载中...' : '下载' }}
             </button>
             <button @click="selectCustomDir" class="btn-secondary !px-3 !py-1.5 text-xs">
@@ -602,7 +682,13 @@ onUnmounted(() => {
 
           <div>
             <label class="text-xs text-text-secondary mb-1 block">文件名</label>
-            <input v-model="fileName" type="text" :placeholder="autoFileName" class="input-base w-full text-sm" />
+            <input
+              v-model="fileName"
+              @input="fileNameEdited = true"
+              type="text"
+              :placeholder="autoFileName"
+              class="input-base w-full text-sm"
+            />
             <p v-if="outputPath" class="text-xs text-text-muted mt-1 truncate">将保存至: {{ outputPath }}</p>
           </div>
 
@@ -624,9 +710,7 @@ onUnmounted(() => {
           <div class="flex items-center justify-between">
             <div>
               <h3 class="text-sm font-semibold text-text-primary">同时下载数</h3>
-              <p class="text-xs text-text-muted mt-0.5">
-                当前 {{ downloadingCount }} 个进行中
-              </p>
+              <p class="text-xs text-text-muted mt-0.5">当前 {{ downloadingCount }} 个进行中</p>
             </div>
             <div class="flex items-center gap-1">
               <button
@@ -634,10 +718,14 @@ onUnmounted(() => {
                 :key="n"
                 @click="setConcurrency(n)"
                 class="w-8 h-8 text-xs rounded-md transition-colors font-medium"
-                :class="progressStore.queueConcurrency === n
-                  ? 'bg-accent-blue text-white'
-                  : 'bg-bg-tertiary text-text-secondary hover:bg-accent-blue/20'"
-              >{{ n }}</button>
+                :class="
+                  progressStore.queueConcurrency === n
+                    ? 'bg-accent-blue text-white'
+                    : 'bg-bg-tertiary text-text-secondary hover:bg-accent-blue/20'
+                "
+              >
+                {{ n }}
+              </button>
             </div>
           </div>
         </div>
@@ -654,9 +742,11 @@ onUnmounted(() => {
             @click="enqueueDownload"
             :disabled="!canStart || justEnqueued || isEnqueueing"
             class="btn-primary w-full py-3 text-base transition-all duration-200"
-            :class="canStart
-              ? 'bg-gradient-to-r from-accent-blue to-accent-purple'
-              : 'bg-bg-tertiary text-text-muted cursor-not-allowed'"
+            :class="
+              canStart
+                ? 'bg-gradient-to-r from-accent-blue to-accent-purple'
+                : 'bg-bg-tertiary text-text-muted cursor-not-allowed'
+            "
           >
             <template v-if="justEnqueued">
               <Check :size="18" />
@@ -664,11 +754,15 @@ onUnmounted(() => {
             </template>
             <template v-else-if="hasActiveQueue">
               <Download :size="18" />
-              加入下载队列{{ selectedVariantIndex >= 0 && variants.length > 0 ? ` (${variants[selectedVariantIndex].label})` : '' }}
+              加入下载队列{{
+                selectedVariantIndex >= 0 && variants.length > 0 ? ` (${variants[selectedVariantIndex].label})` : ''
+              }}
             </template>
             <template v-else>
               <Download :size="18" />
-              开始下载{{ selectedVariantIndex >= 0 && variants.length > 0 ? ` (${variants[selectedVariantIndex].label})` : '' }}
+              开始下载{{
+                selectedVariantIndex >= 0 && variants.length > 0 ? ` (${variants[selectedVariantIndex].label})` : ''
+              }}
             </template>
           </button>
 
