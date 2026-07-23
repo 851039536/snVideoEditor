@@ -123,11 +123,12 @@ export function fetchPageM3u8ViaBrowser(pageUrl: string): Promise<PageFetchResul
       }, SETTLE_MS)
     })
 
-    win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (resolved) { return }
-      // Some failures (e.g., ERR_ABORTED from navigations) are harmless
-      // Only reject for actual failures
-      if (errorCode < 0 && !validatedURL.includes('favicon')) {
+      // Only reject for main frame failures. Sub-frame and sub-resource
+      // failures (e.g. ERR_ABORTED from cancelled navigations, blocked ads)
+      // are harmless and should not interrupt the main fetch flow.
+      if (isMainFrame && errorCode < 0) {
         resolved = true
         clearTimeout(timer)
         cleanup()
