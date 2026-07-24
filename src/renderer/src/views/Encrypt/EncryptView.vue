@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { Shield, Lock, Unlock, Folder, Play, Pause, X, FileVideo, FolderOpen, Key, Copy, Check } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
@@ -59,7 +59,7 @@ async function copyKeyToClipboard(): Promise<void> {
 
 const maskedKey = computed((): string => {
   if (DEFAULT_ENCRYPT_KEY.length <= KEY_MASK_PREFIX_LENGTH) { return DEFAULT_ENCRYPT_KEY }
-  return DEFAULT_ENCRYPT_KEY.slice(0, KEY_MASK_PREFIX_LENGTH) + '*'.repeat(12)
+  return DEFAULT_ENCRYPT_KEY.slice(0, KEY_MASK_PREFIX_LENGTH) + '*'.repeat(DEFAULT_ENCRYPT_KEY.length - KEY_MASK_PREFIX_LENGTH)
 })
 
 
@@ -116,6 +116,17 @@ async function resetPlayer(): Promise<void> {
   await cleanupPreviewTemp()
 }
 
+async function applyMetaAndReload(meta: VideoMeta, expectedPath: string): Promise<void> {
+  if (files.value[0]?.path !== expectedPath) { return }
+  videoMeta.value = meta
+  duration.value = meta.duration
+  await nextTick()
+  if (videoPlayer.value) {
+    videoPlayer.value.load()
+    videoPlayer.value.currentTime = 0
+  }
+}
+
 async function prepareDecryptPreview(): Promise<void> {
   if (mode.value !== 'decrypt') { return }
   const firstFile = files.value[0]
@@ -150,19 +161,11 @@ async function prepareDecryptPreview(): Promise<void> {
     }
 
     previewTempPath.value = tempPath
-    await nextTick()
-    if (videoPlayer.value) {
-      videoPlayer.value.load()
-      videoPlayer.value.currentTime = 0
-    }
 
     // Load meta from decrypted temp
     try {
       const meta = await window.electronAPI.getVideoMeta(tempPath)
-      if (files.value[0]?.path === firstFile.path) {
-        videoMeta.value = meta as VideoMeta
-        duration.value = (meta as VideoMeta).duration
-      }
+      await applyMetaAndReload(meta as VideoMeta, firstFile.path)
     } catch (_e) {
       // ignore
     }
@@ -176,14 +179,7 @@ async function prepareDecryptPreview(): Promise<void> {
 async function loadVideoMeta(filePath: string): Promise<void> {
   try {
     const meta = await window.electronAPI.getVideoMeta(filePath)
-    if (files.value.length === 0 || files.value[0]?.path !== filePath) { return }
-    videoMeta.value = meta as VideoMeta
-    duration.value = (meta as VideoMeta).duration
-    await nextTick()
-    if (videoPlayer.value) {
-      videoPlayer.value.load()
-      videoPlayer.value.currentTime = 0
-    }
+    await applyMetaAndReload(meta as VideoMeta, filePath)
   } catch (_e) {
     // ignore meta load errors
   }
@@ -200,8 +196,7 @@ async function togglePlay(): Promise<void> {
 }
 
 function onVideoPlay(): void { isPlaying.value = true }
-function onVideoPause(): void { isPlaying.value = false }
-function onVideoEnded(): void { isPlaying.value = false }
+function onVideoStop(): void { isPlaying.value = false }
 
 function onTimeUpdate(): void {
   if (!videoPlayer.value) { return }
@@ -233,11 +228,6 @@ watch(() => files.value[0]?.path, (newPath) => {
   }
 })
 
-// Reset player when switching mode
-watch(mode, () => {
-  resetPlayer()
-})
-
 async function selectOutputDirForAll(): Promise<void> {
   const dir = await window.electronAPI.selectDirectory()
   if (!dir) { return }
@@ -247,11 +237,6 @@ async function selectOutputDirForAll(): Promise<void> {
     entry.outputPath = `${dir}/${ext}`
   }
 }
-
-const canStart = computed((): boolean => {
-  if (files.value.length === 0) { return false }
-  return true
-})
 
 async function startProcess(): Promise<void> {
   errorMsg.value = ''
@@ -271,9 +256,6 @@ async function startProcess(): Promise<void> {
   }
 
   progressStore.start(mode.value === 'encrypt' ? 'encrypt' : 'decrypt')
-  window.electronAPI.onProgress((info) => {
-    progressStore.update(info)
-  })
 
   try {
     const batchFiles = files.value.map((f) => ({ input: f.path, output: f.outputPath }))
@@ -301,6 +283,12 @@ function switchMode(newMode: 'encrypt' | 'decrypt'): void {
   files.value = []
   errorMsg.value = ''
 }
+
+onMounted(() => {
+  window.electronAPI.onProgress((info) => {
+    progressStore.update(info)
+  })
+})
 
 onUnmounted(() => {
   window.electronAPI?.removeProgressListener()
@@ -373,8 +361,8 @@ onUnmounted(() => {
             preload="auto"
             @timeupdate="onTimeUpdate"
             @play="onVideoPlay"
-            @pause="onVideoPause"
-            @ended="onVideoEnded"
+            @pause="onVideoStop"
+            @ended="onVideoStop"
             @error="onVideoError"
             @loadedmetadata="onVideoLoaded"
           />
@@ -498,9 +486,9 @@ onUnmounted(() => {
         <!-- Start -->
         <button
           @click="startProcess"
-          :disabled="!canStart || progressStore.isProcessing"
+          :disabled="!canPlayVideo || progressStore.isProcessing"
           class="btn-primary"
-          :class="canStart && !progressStore.isProcessing
+          :class="canPlayVideo && !progressStore.isProcessing
             ? 'bg-gradient-to-r from-emerald-500 to-teal-500'
             : 'bg-bg-tertiary text-text-muted'"
         >
