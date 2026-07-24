@@ -4,7 +4,8 @@ import { Shield, Lock, Unlock, Folder, Play, Pause, X, FileVideo, FolderOpen, Ke
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
-import { formatSize, getFileName } from '@/utils/format'
+import { useVideoPlayer } from '@/composables/useVideoPlayer'
+import { formatSize, getFileName, toFileUrl } from '@/utils/format'
 import { secondsToHMS } from '@/utils/time'
 import type { VideoMeta } from '@/types/file'
 import { DEFAULT_ENCRYPT_KEY, KEY_MASK_PREFIX_LENGTH } from '@/config/crypto'
@@ -20,9 +21,7 @@ const files = ref<CryptoEntry[]>([])
 const errorMsg = ref('')
 
 // ---- Video Player ----
-const videoPlayer = ref<HTMLVideoElement | null>(null)
-const isPlaying = ref(false)
-const currentTime = ref(0)
+const { videoPlayer, isPlaying, currentTime, togglePlay, onVideoPlay, onVideoStop, onTimeUpdate, onVideoError, onVideoLoaded } = useVideoPlayer()
 const duration = ref(0)
 const videoMeta = ref<VideoMeta | null>(null)
 const previewTempPath = ref('')
@@ -31,11 +30,11 @@ const previewPreparing = ref(false)
 const videoSrc = computed((): string => {
   if (files.value.length === 0) { return '' }
   if (mode.value === 'encrypt') {
-    return `file:///${files.value[0].path.replace(/\\/g, '/')}`
+    return toFileUrl(files.value[0].path)
   }
   // decrypt mode: use temp decrypted file
   if (previewTempPath.value) {
-    return `file:///${previewTempPath.value.replace(/\\/g, '/')}`
+    return toFileUrl(previewTempPath.value)
   }
   return ''
 })
@@ -183,36 +182,6 @@ async function loadVideoMeta(filePath: string): Promise<void> {
   } catch (_e) {
     // ignore meta load errors
   }
-}
-
-async function togglePlay(): Promise<void> {
-  const vp = videoPlayer.value
-  if (!vp) { return }
-  if (vp.paused) {
-    try { await vp.play() } catch (_e) { /* ignore */ }
-  } else {
-    vp.pause()
-  }
-}
-
-function onVideoPlay(): void { isPlaying.value = true }
-function onVideoStop(): void { isPlaying.value = false }
-
-function onTimeUpdate(): void {
-  if (!videoPlayer.value) { return }
-  currentTime.value = videoPlayer.value.currentTime
-}
-
-function onVideoLoaded(): void {
-  if (videoPlayer.value) {
-    videoPlayer.value.currentTime = 0
-    currentTime.value = 0
-  }
-}
-
-function onVideoError(e: Event): void {
-  const video = e.target as HTMLVideoElement
-  console.error('视频加载失败:', video?.error?.message)
 }
 
 // Auto-load meta / prepare preview when first file changes

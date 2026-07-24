@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Image, Folder, X, Zap, Clock, Play, Pause } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
-import { secondsToHMS, hmsToSeconds, formatDuration } from '@/utils/time'
+import { secondsToHMS, formatDuration } from '@/utils/time'
 import { clamp } from '@/utils/math'
-import { getFileName } from '@/utils/format'
+import { getFileName, toFileUrl } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
+import { useVideoPlayer } from '@/composables/useVideoPlayer'
+import { useTrimTimeline } from '@/composables/useTrimTimeline'
 import type { FileEntry } from '@/types/file'
 import type { QualityPreset, WidthOption } from './types'
 
@@ -40,65 +42,37 @@ const trimEndSec = ref(5)
 const maxDuration = ref(0)
 const MIN_TRIM_GAP = 0.1
 
-// ---- HH:MM:SS fields derived from trimSec refs (pattern: SplitMergeView) ----
-function hmsFieldSetter(field: 'start' | 'end', h: string, m: string, s: string): void {
-  const total = hmsToSeconds(h, m, s)
-  if (isNaN(total)) { return }
-  if (field === 'start') {
-    trimStartSec.value = clamp(total, 0, trimEndSec.value - MIN_TRIM_GAP)
-    seekVideoPlayer(trimStartSec.value)
-  } else {
-    const max = maxDuration.value || 99999
-    trimEndSec.value = clamp(total, trimStartSec.value + MIN_TRIM_GAP, max)
-    seekVideoPlayer(trimEndSec.value)
+// ---- Video Player ----
+const { videoPlayer, isPlaying, currentTime, togglePlay, onVideoPlay, onVideoStop, onTimeUpdate, onVideoError, onVideoLoaded, seekVideoPlayer } = useVideoPlayer({
+  onTimeUpdate: (t, vp) => {
+    // Auto-stop at end trim point when trim is enabled
+    if (enableTrim.value && t >= trimEndSec.value) {
+      vp.pause()
+      vp.currentTime = trimEndSec.value
+      currentTime.value = trimEndSec.value
+    }
+  },
+  onLoaded: (vp) => {
+    vp.currentTime = enableTrim.value ? trimStartSec.value : 0
+    currentTime.value = enableTrim.value ? trimStartSec.value : 0
   }
-}
-
-const startHour = computed({
-  get: () => secondsToHMS(trimStartSec.value).split(':')[0],
-  set: (v: string) => hmsFieldSetter('start', v, startMin.value, startSec.value)
-})
-const startMin = computed({
-  get: () => secondsToHMS(trimStartSec.value).split(':')[1],
-  set: (v: string) => hmsFieldSetter('start', startHour.value, v, startSec.value)
-})
-const startSec = computed({
-  get: () => secondsToHMS(trimStartSec.value).split(':')[2],
-  set: (v: string) => hmsFieldSetter('start', startHour.value, startMin.value, v)
-})
-const endHour = computed({
-  get: () => secondsToHMS(trimEndSec.value).split(':')[0],
-  set: (v: string) => hmsFieldSetter('end', v, endMin.value, endSec.value)
-})
-const endMin = computed({
-  get: () => secondsToHMS(trimEndSec.value).split(':')[1],
-  set: (v: string) => hmsFieldSetter('end', endHour.value, v, endSec.value)
-})
-const endSec = computed({
-  get: () => secondsToHMS(trimEndSec.value).split(':')[2],
-  set: (v: string) => hmsFieldSetter('end', endHour.value, endMin.value, v)
 })
 
-const trimDuration = computed((): number => {
-  return Math.max(0, trimEndSec.value - trimStartSec.value)
+// ---- Trim Timeline ----
+const {
+  timelineRef, dragging,
+  startHour, startMin, startSec, endHour, endMin, endSec,
+  startPercent, endPercent, playheadPercent: playheadPercentFn,
+  getTimelineTime, startHandleDrag,
+  trimDuration, trimDurationStr
+} = useTrimTimeline({
+  duration: maxDuration,
+  trimStart: trimStartSec,
+  trimEnd: trimEndSec,
+  seekTo: seekVideoPlayer,
+  minGap: MIN_TRIM_GAP
 })
-
-const trimDurationStr = computed((): string => {
-  return secondsToHMS(trimDuration.value)
-})
-
-// ---- Helper ----
-function seekVideoPlayer(t: number): void {
-  if (videoPlayer.value) {
-    videoPlayer.value.currentTime = t
-    currentTime.value = t
-  }
-}
-
-// Video player
-const videoPlayer = ref<HTMLVideoElement | null>(null)
-const isPlaying = ref(false)
-const currentTime = ref(0)
+const playheadPercent = playheadPercentFn(currentTime)
 
 // Loop
 const loopCount = ref(0)
@@ -116,91 +90,15 @@ const errorMsg = ref('')
 
 const videoSrc = computed((): string => {
   if (files.value.length === 0) { return '' }
-  return `file:///${files.value[0].path.replace(/\\/g, '/')}`
+  return toFileUrl(files.value[0].path)
 })
 
-// ---- Video player controls ----
-
-async function togglePlay(): Promise<void> {
-  const vp = videoPlayer.value
-  if (!vp) { return }
-  if (vp.paused) {
-    try { await vp.play() } catch (_e) { /* ignore */ }
-  } else {
-    vp.pause()
-  }
-}
-
-function onVideoPlay(): void { isPlaying.value = true }
-function onVideoPause(): void { isPlaying.value = false }
-function onVideoEnded(): void { isPlaying.value = false }
-
-function onTimeUpdate(): void {
-  if (!videoPlayer.value) { return }
-  currentTime.value = videoPlayer.value.currentTime
-  // Auto-stop at end trim point when trim is enabled
-  if (enableTrim.value && currentTime.value >= trimEndSec.value) {
-    videoPlayer.value.pause()
-    videoPlayer.value.currentTime = trimEndSec.value
-    currentTime.value = trimEndSec.value
-  }
-}
-
-function onVideoLoaded(): void {
-  if (videoPlayer.value) {
-    videoPlayer.value.currentTime = enableTrim.value ? trimStartSec.value : 0
-    currentTime.value = enableTrim.value ? trimStartSec.value : 0
-  }
-}
-
-function onVideoError(e: Event): void {
-  const v = e.target as HTMLVideoElement
-  console.error('视频加载失败:', v?.error?.message)
-}
-
-// ---- Timeline drag handles ----
-
-const timelineRef = ref<HTMLDivElement | null>(null)
-const dragging = ref<'start' | 'end' | null>(null)
-
-const startPercent = computed((): number => {
-  if (maxDuration.value <= 0) { return 0 }
-  return (trimStartSec.value / maxDuration.value) * 100
-})
-
-const endPercent = computed((): number => {
-  if (maxDuration.value <= 0) { return 100 }
-  return (trimEndSec.value / maxDuration.value) * 100
-})
-
-const playheadPercent = computed((): number => {
-  if (maxDuration.value <= 0) { return 0 }
-  return (currentTime.value / maxDuration.value) * 100
-})
-
-function getTimelineTime(clientX: number): number {
-  const el = timelineRef.value
-  if (!el || maxDuration.value <= 0) { return 0 }
-  const rect = el.getBoundingClientRect()
-  const pct = clamp((clientX - rect.left) / rect.width, 0, 1)
-  return pct * maxDuration.value
-}
-
-function startHandleDrag(handle: 'start' | 'end', e: PointerEvent): void {
-  dragging.value = handle
-  const el = e.currentTarget as HTMLElement
-  el.setPointerCapture(e.pointerId)
-  e.preventDefault()
-  e.stopPropagation()
-}
+// ---- Timeline interaction ----
 
 function onTimelineClick(e: MouseEvent): void {
   if (dragging.value) { return }
   const t = getTimelineTime(e.clientX)
-  if (videoPlayer.value) {
-    videoPlayer.value.currentTime = t
-    currentTime.value = t
-  }
+  seekVideoPlayer(t)
 }
 
 function onTimelineMove(e: PointerEvent): void {
@@ -275,9 +173,6 @@ async function startConvert(): Promise<void> {
   }
 
   progressStore.start('gif')
-  window.electronAPI.onProgress((info) => {
-    progressStore.update(info)
-  })
 
   try {
     const trimmedStart = enableTrim.value ? trimStartSec.value : undefined
@@ -323,6 +218,12 @@ async function startConvert(): Promise<void> {
   }
 }
 
+onMounted(() => {
+  window.electronAPI.onProgress((info) => {
+    progressStore.update(info)
+  })
+})
+
 onUnmounted(() => {
   document.removeEventListener('pointermove', onGlobalPointerMove)
   document.removeEventListener('pointerup', onGlobalPointerUp)
@@ -358,8 +259,8 @@ onUnmounted(() => {
             preload="auto"
             @timeupdate="onTimeUpdate"
             @play="onVideoPlay"
-            @pause="onVideoPause"
-            @ended="onVideoEnded"
+            @pause="onVideoStop"
+            @ended="onVideoStop"
             @error="onVideoError"
             @loadedmetadata="onVideoLoaded"
           />

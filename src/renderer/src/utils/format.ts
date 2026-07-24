@@ -40,6 +40,13 @@ export function getDirName(filePath: string): string {
 }
 
 /**
+ * Convert a local file path to a file:/// URL (forward slashes).
+ */
+export function toFileUrl(filePath: string): string {
+  return `file:///${filePath.replace(/\\/g, '/')}`
+}
+
+/**
  * Sanitize a string for use as a filename:
  * - Remove illegal characters (\\ / : * ? " < > |)
  * - Replace whitespace with underscores

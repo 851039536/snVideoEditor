@@ -1,0 +1,58 @@
+// ─── Shared Timeline Component Styles ─────────────────────────────────────────
+// Structural styles for the trim timeline used by GifConvertView & SplitMergeView.
+// Color theming is applied by each view's own stylesheet.
+
+.timeline-track {
+  position: relative;
+  width: 100%;
+  background: hsl(var(--background));
+  display: flex;
+  overflow: visible;
+  cursor: pointer;
+  user-select: none;
+}
+
+.timeline-dimmed-l,
+.timeline-dimmed-r {
+  height: 100%;
+  background: hsl(var(--background) / 0.8);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.timeline-selected {
+  position: relative;
+  height: 100%;
+  flex-shrink: 0;
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--color-playhead);
+  z-index: 5;
+  transition: left 0.1s linear;
+  pointer-events: none;
+}
+
+.trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  opacity: 0.8;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.trim-handle-start {
+  left: -5px;
+  border-radius: var(--radius-sm, 4px) 0 0 var(--radius-sm, 4px);
+}
+
+.trim-handle-end {
+  right: -5px;
+  border-radius: 0 var(--radius-sm, 4px) var(--radius-sm, 4px) 0;
+}

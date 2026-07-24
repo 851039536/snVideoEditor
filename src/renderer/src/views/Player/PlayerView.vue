@@ -27,7 +27,7 @@ import {
 // @ts-ignore - Plyr ESM default export
 import Plyr from 'plyr';
 import 'plyr/dist/plyr.css';
-import { formatSize, getFileName } from '@/utils/format';
+import { formatSize, getFileName, toFileUrl } from '@/utils/format';
 import { secondsToHMS } from '@/utils/time';
 import type { VideoMeta } from '@/types/file';
 import { DEFAULT_ENCRYPT_KEY } from '@/config/crypto';
@@ -278,7 +278,7 @@ const videoSrc = computed((): string => {
   if (!p) {
     return '';
   }
-  return `file:///${p.replace(/\\/g, '/')}`;
+  return toFileUrl(p);
 });
 
 const currentFileName = computed((): string => {

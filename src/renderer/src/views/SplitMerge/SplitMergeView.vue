@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import {
   Scissors, X, ArrowUp, ArrowDown, Folder, Play, Pause,
   SkipBack, SkipForward, Video, ChevronsLeft, ChevronsRight, RefreshCw
@@ -9,8 +9,10 @@ import VideoPreview from '@/components/VideoPreview.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import ClipList from './ClipList.vue'
 import { useProgressStore } from '@/stores/progress'
+import { useVideoPlayer } from '@/composables/useVideoPlayer'
+import { useTrimTimeline } from '@/composables/useTrimTimeline'
 import { secondsToHMS } from '@/utils/time'
-import { formatSize, getFileName } from '@/utils/format'
+import { formatSize, getFileName, toFileUrl } from '@/utils/format'
 import { clamp } from '@/utils/math'
 import type { VideoMeta, ClipItem } from '@/types/file'
 
@@ -24,14 +26,53 @@ const files = ref<string[]>([])
 
 // ---- Video metadata & player ----
 const videoMeta = ref<VideoMeta | null>(null)
-const videoPlayer = ref<HTMLVideoElement | null>(null)
-const isPlaying = ref(false)
-const currentTime = ref(0)
+const { videoPlayer, isPlaying, currentTime, onVideoPlay, onVideoStop, onTimeUpdate, onVideoError, onVideoLoaded, seekVideoPlayer } = useVideoPlayer({
+  onTimeUpdate: (t, vp) => {
+    // Auto-stop at end trim point
+    if (t >= trimEndSec.value) {
+      vp.pause()
+      vp.currentTime = trimEndSec.value
+      currentTime.value = trimEndSec.value
+      isPlaying.value = false
+    }
+  },
+  onLoaded: (vp) => {
+    vp.currentTime = trimStartSec.value
+    currentTime.value = trimStartSec.value
+  },
+  onError: (e) => {
+    const video = e.target as HTMLVideoElement
+    errorMsg.value = `视频加载失败: ${video?.error?.message || '未知错误'}`
+  }
+})
 const duration = ref(0)
 
-// ---- Timeline drag state ----
-const timelineRef = ref<HTMLDivElement | null>(null)
-const dragging = ref<'start' | 'end' | null>(null)
+// Trim times in seconds (normalized 0..duration)
+const trimStartSec = ref(0)
+const trimEndSec = ref(30)
+
+// ---- Trim Timeline composable ----
+const {
+  timelineRef, dragging,
+  startHour, startMin, startSec, endHour, endMin, endSec,
+  startPercent, endPercent, playheadPercent: playheadPercentFn,
+  getTimelineTime,
+  trimDuration, trimDurationStr
+} = useTrimTimeline({
+  duration,
+  trimStart: trimStartSec,
+  trimEnd: trimEndSec,
+  seekTo: seekVideoPlayer
+})
+const playheadPercent = playheadPercentFn(currentTime)
+
+const playheadInSelectionPercent = computed((): number => {
+  const range = endPercent.value - startPercent.value
+  if (range <= 0) { return 50 }
+  return ((playheadPercent.value - startPercent.value) / range) * 100
+})
+
+// ---- Timeline drag state (advanced) ----
 const scrubbing = ref(false)
 const lastDragClientX = ref(0)
 
@@ -50,56 +91,6 @@ function loadScrubPause(): boolean {
 const pauseOnScrub = ref<boolean>(loadScrubPause())
 watch(pauseOnScrub, (val) => {
   try { localStorage.setItem(SCRUB_PAUSE_KEY, String(val)) } catch { /* ignore */ }
-})
-
-// Trim times in seconds (normalized 0..duration)
-const trimStartSec = ref(0)
-const trimEndSec = ref(30)
-
-// ---- Manual time inputs (for fine-tuning) ----
-// Derived from trim times via computed getter; setters write back with clamping + seek
-function hmsFieldSetter(field: 'start' | 'end', h: string, m: string, s: string): void {
-  const hNum = parseInt(h) || 0
-  const mNum = parseInt(m) || 0
-  const sNum = parseInt(s) || 0
-  const total = hNum * 3600 + mNum * 60 + sNum
-  if (field === 'start') {
-    trimStartSec.value = clamp(total, 0, trimEndSec.value - 0.1)
-    seekVideoPlayer(trimStartSec.value)
-  } else {
-    const max = duration.value || 99999
-    trimEndSec.value = clamp(total, trimStartSec.value + 0.1, max)
-    seekVideoPlayer(trimEndSec.value)
-  }
-}
-
-const startParts = computed(() => secondsToHMS(trimStartSec.value).split(':'))
-const endParts = computed(() => secondsToHMS(trimEndSec.value).split(':'))
-
-const startHour = computed({
-  get: () => startParts.value[0],
-  set: (v: string) => hmsFieldSetter('start', v, startMin.value, startSec.value)
-})
-const startMin = computed({
-  get: () => startParts.value[1],
-  set: (v: string) => hmsFieldSetter('start', startHour.value, v, startSec.value)
-})
-const startSec = computed({
-  get: () => startParts.value[2],
-  set: (v: string) => hmsFieldSetter('start', startHour.value, startMin.value, v)
-})
-
-const endHour = computed({
-  get: () => endParts.value[0],
-  set: (v: string) => hmsFieldSetter('end', v, endMin.value, endSec.value)
-})
-const endMin = computed({
-  get: () => endParts.value[1],
-  set: (v: string) => hmsFieldSetter('end', endHour.value, v, endSec.value)
-})
-const endSec = computed({
-  get: () => endParts.value[2],
-  set: (v: string) => hmsFieldSetter('end', endHour.value, endMin.value, v)
 })
 
 // ---- Step forward/backward ----
@@ -124,16 +115,11 @@ let loadRequestId = 0
 
 const videoSrc = computed((): string => {
   if (files.value.length === 0) { return '' }
-  return `file:///${files.value[0].replace(/\\/g, '/')}`
+  return toFileUrl(files.value[0])
 })
 
-const clipDurationSec = computed((): number => {
-  return Math.max(0, trimEndSec.value - trimStartSec.value)
-})
-
-const clipDurationStr = computed((): string => {
-  return secondsToHMS(clipDurationSec.value)
-})
+const clipDurationSec = trimDuration
+const clipDurationStr = trimDurationStr
 
 const selectedClipCount = computed((): number => {
   return clips.value.filter((c) => c.selected).length
@@ -143,34 +129,19 @@ const canMerge = computed((): boolean => {
   return selectedClipCount.value + files.value.length >= 2
 })
 
-// Timeline bar percentages
-const startPercent = computed((): number => {
-  if (duration.value <= 0) { return 0 }
-  return (trimStartSec.value / duration.value) * 100
-})
-
-const endPercent = computed((): number => {
-  if (duration.value <= 0) { return 100 }
-  return (trimEndSec.value / duration.value) * 100
-})
-
-const playheadPercent = computed((): number => {
-  if (duration.value <= 0) { return 0 }
-  return (currentTime.value / duration.value) * 100
-})
-
-const playheadInSelectionPercent = computed((): number => {
-  const range = endPercent.value - startPercent.value
-  if (range <= 0) { return 50 }
-  return ((playheadPercent.value - startPercent.value) / range) * 100
-})
-
 // ---- Helpers ----
 
-function seekVideoPlayer(t: number): void {
-  if (videoPlayer.value) {
-    videoPlayer.value.currentTime = t
-    currentTime.value = t
+async function togglePlay(): Promise<void> {
+  const vp = videoPlayer.value
+  if (!vp) { return }
+  if (vp.paused) {
+    try {
+      await vp.play()
+    } catch (e) {
+      errorMsg.value = `播放失败: ${e instanceof Error ? e.message : String(e)}`
+    }
+  } else {
+    vp.pause()
   }
 }
 
@@ -338,55 +309,6 @@ watch(mode, (newMode) => {
 
 // ---- Video player controls ----
 
-async function togglePlay(): Promise<void> {
-  const vp = videoPlayer.value
-  if (!vp) { return }
-  if (vp.paused) {
-    try {
-      await vp.play()
-    } catch (e) {
-      errorMsg.value = `播放失败: ${e instanceof Error ? e.message : String(e)}`
-    }
-  } else {
-    vp.pause()
-  }
-}
-
-function onVideoPlay(): void {
-  isPlaying.value = true
-}
-
-function onVideoPause(): void {
-  isPlaying.value = false
-}
-
-function onTimeUpdate(): void {
-  if (!videoPlayer.value) { return }
-  const t = videoPlayer.value.currentTime
-  // Auto-stop at end trim point
-  if (t >= trimEndSec.value) {
-    videoPlayer.value.pause()
-    videoPlayer.value.currentTime = trimEndSec.value
-    currentTime.value = trimEndSec.value
-    isPlaying.value = false
-  } else {
-    currentTime.value = t
-  }
-}
-
-function onVideoEnded(): void {
-  isPlaying.value = false
-}
-
-function onVideoError(e: Event): void {
-  const video = e.target as HTMLVideoElement
-  errorMsg.value = `视频加载失败: ${video?.error?.message || '未知错误'}`
-}
-
-function onVideoLoaded(): void {
-  seekVideoPlayer(trimStartSec.value)
-}
-
 function seekToStart(): void {
   seekVideoPlayer(trimStartSec.value)
 }
@@ -415,14 +337,6 @@ function snapEndHere(): void {
 }
 
 // ---- Timeline drag ----
-
-function getTimelineTime(clientX: number): number {
-  const el = timelineRef.value
-  if (!el || duration.value <= 0) { return 0 }
-  const rect = el.getBoundingClientRect()
-  const pct = clamp((clientX - rect.left) / rect.width, 0, 1)
-  return pct * duration.value
-}
 
 function startHandleDrag(handle: 'start' | 'end', e: PointerEvent): void {
   dragging.value = handle
@@ -659,10 +573,6 @@ async function startProcess(): Promise<void> {
 
   store.start('merge')
 
-  window.electronAPI.onProgress((info) => {
-    store.update(info)
-  })
-
   try {
     const result = await window.electronAPI.mergeVideos({
       inputs: allInputs,
@@ -680,15 +590,12 @@ async function startProcess(): Promise<void> {
       // Remove merged clips from list to avoid stale references
       clips.value = clips.value.filter((c) => !c.selected)
       store.finish()
-      window.electronAPI.removeProgressListener()
     } else {
       store.reset()
-      window.electronAPI.removeProgressListener()
     }
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
     store.reset()
-    window.electronAPI.removeProgressListener()
   }
 }
 
@@ -704,6 +611,12 @@ async function validateOutput(): Promise<boolean> {
 }
 
 // ---- Lifecycle ----
+
+onMounted(() => {
+  window.electronAPI.onProgress((info) => {
+    store.update(info)
+  })
+})
 
 if (typeof window !== 'undefined') {
   document.addEventListener('pointermove', onGlobalPointerMove)
@@ -789,8 +702,8 @@ onUnmounted(() => {
             preload="auto"
             @timeupdate="onTimeUpdate"
             @play="onVideoPlay"
-            @pause="onVideoPause"
-            @ended="onVideoEnded"
+            @pause="onVideoStop"
+            @ended="onVideoStop"
             @error="onVideoError"
             @loadedmetadata="onVideoLoaded"
           />
@@ -1128,54 +1041,35 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
+@use '../../assets/styles/timeline';
+
 .player-btn {
   cursor: pointer;
 }
 
-/* ---- Timeline ---- */
+/* ---- Timeline SplitMerge theme ---- */
 .timeline-track {
-  position: relative;
-  width: 100%;
   height: 48px;
-  background: hsl(var(--background));
   border-radius: 10px;
-  display: flex;
-  overflow: visible;
-  cursor: pointer;
-  user-select: none;
-}
-
-.timeline-dimmed-l,
-.timeline-dimmed-r {
-  height: 100%;
-  background: hsl(var(--background) / 0.8);
-  flex-shrink: 0;
 }
 
 .timeline-selected {
-  position: relative;
-  height: 100%;
   background: linear-gradient(90deg, rgba(91, 141, 239, 0.3), rgba(167, 139, 250, 0.35));
   border-left: 2px solid hsl(var(--primary));
   border-right: 2px solid var(--color-accent-light);
-  flex-shrink: 0;
 }
 
 .timeline-playhead {
-  position: absolute;
-  top: 0;
-  width: 2px;
-  height: 100%;
-  background: var(--color-playhead);
   outline: 1px solid rgba(255, 107, 107, 0.3);
-  z-index: 5;
-  transition: left 0.1s linear;
-  pointer-events: none;
 }
 
 .timeline-playhead.dragging {
   transition: none;
+}
+
+.trim-handle {
+  background: hsl(var(--primary));
 }
 
 /* ---- Responsive ---- */
