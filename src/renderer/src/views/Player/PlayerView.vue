@@ -768,12 +768,25 @@ function onKeydown(e: KeyboardEvent): void {
 // ---- Plyr ----
 function destroyPlayer(): void {
   if (player.value) {
+    // Plyr 初始化时 cloneNode 备份了带 src 的原始 video，destroy 会把该克隆插回 DOM。
+    // 克隆 preload=auto 一进 DOM 就重新打开文件句柄，且 Vue 不感知该元素，必须手动中止并移除
+    const restored = player.value.elements?.original as HTMLVideoElement | undefined;
     try {
       player.value.destroy();
     } catch (_e) {
       /* ignore */
     }
     player.value = null;
+    if (restored && typeof restored.load === 'function') {
+      try {
+        restored.pause();
+        restored.removeAttribute('src');
+        restored.load();
+        restored.remove();
+      } catch (_e) {
+        /* ignore */
+      }
+    }
   }
   isPlaying.value = false;
 }
