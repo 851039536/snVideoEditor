@@ -21,13 +21,14 @@ import CompressParams from './CompressParams.vue';
 import { formatSize, getDirName, getFileName } from '@/utils/format';
 import { useFileList } from '@/composables/useFileList';
 import { useCompressPreset } from '@/composables/useCompressPreset';
-import { useCompressBatch } from '@/composables/useCompressBatch';
+import { useCompressBatch, compressFiles } from '@/composables/useCompressBatch';
 import type { FileEntry } from '@/types/file';
 
 /** Output filename suffix for compressed videos. */
 const COMPRESS_SUFFIX = '_compressed.mp4';
 
-const { files, addFiles, removeFile, selectOutputDir, setOutputDir } = useFileList(COMPRESS_SUFFIX);
+// 文件列表使用模块级持久 ref，切换页面再返回时压缩过程内容不丢失
+const { files, addFiles, removeFile, selectOutputDir, setOutputDir } = useFileList(COMPRESS_SUFFIX, compressFiles);
 
 // Compression params — persisted preset + encoder capability detection
 const {
@@ -53,7 +54,7 @@ const {
   handleProgress,
   handleRemoveFile,
   startCompress
-} = useCompressBatch({ files, removeFile, params });
+} = useCompressBatch({ removeFile, params });
 
 let isUnmounted = false;
 

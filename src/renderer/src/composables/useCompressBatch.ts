@@ -1,5 +1,5 @@
-// 批量压缩执行流程：文件状态跟踪、进度映射与结果汇总
-import { ref, computed, onUnmounted } from 'vue'
+// 批量压缩执行流程：文件状态跟踪、进度映射与结果汇总（模块级状态跨页面持久）
+import { ref, computed } from 'vue'
 import type { Ref, ComputedRef } from 'vue'
 import { useProgressStore } from '@/stores/progress'
 import { getFileName } from '@/utils/format'
@@ -16,8 +16,26 @@ interface BatchResult {
   fallbacks: { input: string; originalCodec: string; fallbackCodec: string }[]
 }
 
+// ─── 模块级持久状态：切换页面再返回时，压缩文件列表/状态/结果仍然可见 ────────
+// 运行中的 startCompress 闭包写入的也是这份状态，完成结果不会因组件卸载而丢失。
+
+/** Compress 页面的文件列表（传给 useFileList 作为外部持久列表） */
+export const compressFiles = ref<FileEntry[]>([])
+
+// Batch file status tracking
+const fileStatuses = ref<Record<string, BatchFileStatus>>({})
+
+// Compression result comparison
+const compressResult = ref<CompressResultItem[]>([])
+
+const errorMsg = ref('')
+let runId = 0
+
+// Snapshot of the file list for the active run — read by the progress listener
+// to map the current file index to a file status.
+const runSnapshot = ref<FileEntry[]>([])
+
 export function useCompressBatch(opts: {
-  files: Ref<FileEntry[]>
   removeFile: (index: number) => void
   params: CompressPreset
 }): {
@@ -30,31 +48,17 @@ export function useCompressBatch(opts: {
   handleRemoveFile: (index: number) => void
   startCompress: () => Promise<void>
 } {
-  const { files, removeFile, params } = opts
+  const { removeFile, params } = opts
   const progressStore = useProgressStore()
 
-  const errorMsg = ref('')
-  let isUnmounted = false
-  let runId = 0
-
-  // Batch file status tracking
-  const fileStatuses = ref<Record<string, BatchFileStatus>>({})
-
-  // Compression result comparison
-  const compressResult = ref<CompressResultItem[]>([])
-
-  // Snapshot of the file list for the active run — read by the progress listener
-  // to map the current file index to a file status.
-  const runSnapshot = ref<FileEntry[]>([])
-
-  const allOutputsResolved = computed((): boolean => files.value.every((f) => !!f.outputPath))
+  const allOutputsResolved = computed((): boolean => compressFiles.value.every((f) => !!f.outputPath))
 
   const canStart = computed((): boolean => {
-    return files.value.length > 0 && allOutputsResolved.value && !progressStore.isProcessing
+    return compressFiles.value.length > 0 && allOutputsResolved.value && !progressStore.isProcessing
   })
 
   function pruneFileStatuses(): void {
-    const currentPaths = new Set(files.value.map((f) => f.path))
+    const currentPaths = new Set(compressFiles.value.map((f) => f.path))
     for (const key of Object.keys(fileStatuses.value)) {
       if (!currentPaths.has(key)) {
         delete fileStatuses.value[key]
@@ -63,7 +67,7 @@ export function useCompressBatch(opts: {
   }
 
   function handleRemoveFile(index: number): void {
-    const entry = files.value[index]
+    const entry = compressFiles.value[index]
     if (entry) {
       delete fileStatuses.value[entry.path]
     }
@@ -81,11 +85,11 @@ export function useCompressBatch(opts: {
 
   /** 开始前校验并建立本次运行的文件快照，校验失败返回 null */
   function prepareRun(): FileEntry[] | null {
-    if (files.value.length === 0) {
+    if (compressFiles.value.length === 0) {
       return null
     }
 
-    const unresolved = files.value.filter((f) => !f.outputPath)
+    const unresolved = compressFiles.value.filter((f) => !f.outputPath)
     if (unresolved.length > 0) {
       errorMsg.value = '请为所有文件选择输出目录'
       return null
@@ -93,13 +97,13 @@ export function useCompressBatch(opts: {
 
     // Set all files to pending and prune stale entries
     pruneFileStatuses()
-    for (const entry of files.value) {
+    for (const entry of compressFiles.value) {
       fileStatuses.value[entry.path] = 'pending'
     }
 
     // Snapshot the file list so progress indices and result matching stay
     // consistent even if the list changes (add/remove) during compression.
-    const snapshot = files.value.slice()
+    const snapshot = compressFiles.value.slice()
     runSnapshot.value = snapshot
     return snapshot
   }
@@ -145,7 +149,7 @@ export function useCompressBatch(opts: {
         }
       })
     )
-    if (currentRunId !== runId || isUnmounted) {
+    if (currentRunId !== runId) {
       return false
     }
     for (const r of results) {
@@ -231,34 +235,24 @@ export function useCompressBatch(opts: {
         progressStore.finish()
       }
 
-      // The remaining updates touch component-local state only — skip if unmounted.
-      if (isUnmounted) {
-        return
-      }
-
+      // 以下更新写入模块级持久状态：即使组件已卸载也照常执行，
+      // 用户切回页面时能看到完整的状态与结果。
       const fresh = await applySuccesses(result, snapshot, currentRunId)
       if (!fresh) {
         return
       }
       applyFailures(result, snapshot)
     } catch (e) {
-      // Failure: release the global progress state, then update local UI if mounted.
+      // Failure: release the global progress state, then record the error.
       progressStore.reset()
-      if (isUnmounted) {
-        return
-      }
       errorMsg.value = e instanceof Error ? e.message : String(e)
-      for (const entry of files.value) {
+      for (const entry of compressFiles.value) {
         if (fileStatuses.value[entry.path] === 'pending') {
           fileStatuses.value[entry.path] = 'failed'
         }
       }
     }
   }
-
-  onUnmounted(() => {
-    isUnmounted = true
-  })
 
   return {
     fileStatuses,

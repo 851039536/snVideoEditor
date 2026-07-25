@@ -82,6 +82,11 @@ function getFolderName(path: string): string {
   const parts = path.replace(/[/\\]+$/, '').split(/[/\\]/);
   return parts[parts.length - 1] || path;
 }
+
+// 模板中无法直接访问 window，需在 script 中包装
+async function selectPlayerFiles(): Promise<string[]> {
+  return window.electronAPI.selectPlayerFiles();
+}
 </script>
 
 <template>
@@ -89,7 +94,7 @@ function getFolderName(path: string): string {
     <!-- File Drop -->
     <FileDropZone
       :accepted-extensions="['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp', '.enc']"
-      :custom-select-func="async () => await window.electronAPI.selectPlayerFiles()"
+      :custom-select-func="selectPlayerFiles"
       @files-selected="(p: string[]) => emit('addFiles', p)"
     />
 

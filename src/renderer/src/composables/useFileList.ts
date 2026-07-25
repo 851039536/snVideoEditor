@@ -1,9 +1,18 @@
+// 文件列表管理：添加文件、获取元数据、移除与输出目录设置
 import { ref } from 'vue'
+import type { Ref } from 'vue'
 import type { FileEntry } from '@/types/file'
 import { useSettingsStore } from '@/stores/settings'
 
-export function useFileList(defaultSuffix?: string) {
-  const files = ref<FileEntry[]>([])
+export function useFileList(defaultSuffix?: string, externalFiles?: Ref<FileEntry[]>): {
+  files: Ref<FileEntry[]>
+  addFiles: (paths: string[]) => Promise<void>
+  removeFile: (index: number) => void
+  selectOutputDir: (suffix: string) => Promise<void>
+  setOutputDir: (dir: string | null, suffix: string) => void
+} {
+  // 支持传入外部（模块级/store 级）列表，使文件列表跨页面切换持久
+  const files = externalFiles ?? ref<FileEntry[]>([])
   const settingsStore = useSettingsStore()
 
   function makeOutputPath(inputPath: string, dir: string, suffix: string): string {
@@ -17,7 +26,7 @@ export function useFileList(defaultSuffix?: string) {
       if (files.value.some((f) => f.path === p)) { continue }
       const entry: FileEntry = {
         path: p,
-        outputPath: storedDir ? makeOutputPath(p, storedDir, defaultSuffix) : '',
+        outputPath: storedDir && defaultSuffix ? makeOutputPath(p, storedDir, defaultSuffix) : '',
         meta: null
       }
       files.value.push(entry)

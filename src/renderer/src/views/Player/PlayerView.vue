@@ -157,8 +157,9 @@ function setLoopA(): void {
   if (!player.value) {
     return;
   }
-  loopStart.value = player.value.currentTime || 0;
-  if (loopEnd.value !== null && loopEnd.value <= loopStart.value) {
+  const start = player.value.currentTime || 0;
+  loopStart.value = start;
+  if (loopEnd.value !== null && loopEnd.value <= start) {
     loopEnd.value = null;
   }
 }
