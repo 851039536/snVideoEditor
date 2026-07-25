@@ -2,12 +2,12 @@
 
 /* Slider color theme (structure from global slider-base) */
 .slider {
-  background: linear-gradient(to right, #3FB950, #D29922, #F85149);
+  background: linear-gradient(to right, var(--color-success), var(--color-warning), var(--color-danger));
 }
 
 .slider::-webkit-slider-thumb {
   border: 2px solid hsl(var(--primary));
-  box-shadow: 0 0 8px rgba(123, 92, 252, 0.4);
+  box-shadow: 0 0 8px hsl(var(--primary) / 0.4);
 }
 
 /* Video detail modal */

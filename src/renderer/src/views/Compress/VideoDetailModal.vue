@@ -1,3 +1,4 @@
+<!-- 视频详情弹窗：展示编码/分辨率/码率等元信息 -->
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
 import { FileVideo, X } from 'lucide-vue-next'

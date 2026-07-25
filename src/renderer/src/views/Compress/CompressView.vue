@@ -1,3 +1,4 @@
+<!-- 视频压缩页面：参数配置与批量压缩 -->
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import {
