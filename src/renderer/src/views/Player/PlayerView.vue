@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
+import { ref, shallowRef, computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, watch } from 'vue';
 import {
   Play,
   Lock,
@@ -260,6 +260,22 @@ async function generateThumbnailsIfNeeded(): Promise<void> {
   }
 }
 
+/** 终止进行中的缩略图生成：ffmpeg 全程持有源文件句柄，不终止会导致清空/删除后文件仍被占用 */
+async function cancelThumbnailGeneration(): Promise<void> {
+  if (!thumbnailGenerating.value) {
+    return;
+  }
+  thumbGenId++; // 使进行中的结果失效
+  thumbnailGenerating.value = false;
+  try {
+    await window.electronAPI.cancelOperation();
+    // taskkill 异步生效，稍候片刻确保 ffmpeg 退出并释放文件句柄
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  } catch (_e) {
+    /* ignore */
+  }
+}
+
 // Persisted settings store
 const settingsStore = useSettingsStore();
 
@@ -467,12 +483,19 @@ async function removeFile(index: number): Promise<void> {
     return;
   }
 
+  const wasCurrent = index === currentIndex.value;
+  if (wasCurrent) {
+    // 移除的是正在播放的文件：先释放播放器文件句柄并终止缩略图 ffmpeg，否则文件删除会失败
+    destroyPlayer();
+    releaseVideoSource();
+    await cancelThumbnailGeneration();
+  }
+
   if (removed.tempPath) {
     await cleanupTemp(removed.tempPath);
     removed.tempPath = null;
   }
 
-  const wasCurrent = index === currentIndex.value;
   files.value.splice(index, 1);
   if (wasCurrent) {
     if (files.value.length > 0) {
@@ -511,9 +534,13 @@ async function openTempDir(): Promise<void> {
 
 async function clearList(): Promise<void> {
   destroyPlayer();
+  // 先释放 video 元素持有的文件句柄，再删除临时文件，否则 Windows 下删除会因占用失败
+  releaseVideoSource();
+  await cancelThumbnailGeneration();
+  currentIndex.value = -1;
+  await nextTick();
   await cleanupAllTemps();
   files.value = [];
-  currentIndex.value = -1;
   errorMsg.value = '';
 }
 
@@ -545,9 +572,12 @@ async function rescanLastFolder(): Promise<void> {
     return;
   }
   destroyPlayer();
+  releaseVideoSource();
+  await cancelThumbnailGeneration();
+  currentIndex.value = -1;
+  await nextTick();
   await cleanupAllTemps();
   files.value = [];
-  currentIndex.value = -1;
   await addFilesAndLoadMeta(scanned);
 }
 
@@ -578,6 +608,11 @@ async function loadAllMeta(): Promise<void> {
 async function playFile(index: number): Promise<void> {
   errorMsg.value = '';
   clearLoop();
+  // 切换前释放上一个 video 元素的文件句柄（playerKey 重建元素不会自动释放）
+  destroyPlayer();
+  releaseVideoSource();
+  // 终止上一个文件的缩略图生成：释放其文件句柄，同时避免新任务因 thumbnail 锁冲突失败
+  await cancelThumbnailGeneration();
   playerKey.value++;
   currentIndex.value = index;
   const file = files.value[index];
@@ -741,6 +776,21 @@ function destroyPlayer(): void {
     player.value = null;
   }
   isPlaying.value = false;
+}
+
+/** 显式释放 video 元素资源（文件句柄 + 解码线程），避免 file:/// 延迟释放导致文件被线程占用无法删除 */
+function releaseVideoSource(): void {
+  const el = videoPlayer.value;
+  if (!el) {
+    return;
+  }
+  try {
+    el.pause();
+    el.removeAttribute('src');
+    el.load();
+  } catch (_e) {
+    /* ignore */
+  }
 }
 
 function initAndPlay(): void {
@@ -913,11 +963,18 @@ async function cleanupAllTemps(): Promise<void> {
 }
 
 // ---- Lifecycle ----
+// 卸载前释放（onUnmounted 时模板 ref 已为 null，无法再清除 src）
+onBeforeUnmount((): void => {
+  flushSave();
+  destroyPlayer();
+  releaseVideoSource();
+});
+
 onUnmounted(async (): Promise<void> => {
   window.removeEventListener('keydown', onKeydown);
   window.removeEventListener('beforeunload', flushSave);
-  flushSave();
-  destroyPlayer();
+  // 终止后台缩略图 ffmpeg，否则离开页面后源文件仍被占用
+  await cancelThumbnailGeneration();
   await cleanupAllTemps();
 });
 </script>
