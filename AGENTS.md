@@ -168,7 +168,7 @@ wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
 - 辅助判断指标：圈复杂度 >10~15、嵌套深度超过 4 层、一个文件做 >1 件事
 - 快速判断 3 问：滚轮超过 3~4 屏才能看完？不能用一个短句说清职责？改了需求 A 会不小心影响 B？——任一为"是"就该拆
 - **存量文件执行策略**：新增文件强制遵守；存量超标文件为已知技术债，仅在因功能变更触碰该文件时渐进拆分，**禁止主动发起纯重构**
-- 当前已知超标清单（技术债备案）：`PlayerView.vue`（约 1445 行）、`SplitMergeView.vue`（约 1082 行）、`CompressView.vue`（约 907 行）、`DownloadView.vue`（约 795 行）、`main/index.ts`（约 577 行）、`GifConvertView.vue`（约 522 行）
+- 当前已知超标清单（技术债备案）：`PlayerView.vue`（约 1445 行）、`SplitMergeView.vue`（约 1082 行）、`DownloadView.vue`（约 795 行）、`main/index.ts`（约 577 行）、`GifConvertView.vue`（约 522 行）。`CompressView.vue` 已于 2026-07 拆分（→ useCompressPreset / useCompressBatch / CompressParams.vue），降至约 330 行
 
 ### 模块提取判定标准
 
