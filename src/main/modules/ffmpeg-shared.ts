@@ -150,6 +150,10 @@ export function getFfprobePath(): string {
 export let isCancelled = false
 export let currentProc: ChildProcess | null = null
 
+// 被主动终止的进程集合：close 回调据此区分“用户取消”与真实失败
+// （全局 isCancelled 可能在 close 事件到达前已被下一次操作 resetCancelled 重置）
+const cancelledProcs = new WeakSet<ChildProcess>()
+
 export function resetCancelled(): void {
   isCancelled = false
 }
@@ -163,6 +167,7 @@ export function cancelFfmpegOperation(): void {
 }
 
 export function killFfmpegProc(proc: ChildProcess): void {
+  cancelledProcs.add(proc)
   if (process.platform === 'win32' && proc.pid) {
     spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'])
   } else {
@@ -170,8 +175,20 @@ export function killFfmpegProc(proc: ChildProcess): void {
   }
 }
 
+/** 该进程是否由用户取消而被终止 */
+export function wasProcCancelled(proc: ChildProcess): boolean {
+  return cancelledProcs.has(proc)
+}
+
 export function setFfmpegProc(proc: ChildProcess | null): void {
   currentProc = proc
+}
+
+/** 仅当 currentProc 仍指向该进程时才清除，避免旧进程的 close 回调清掉新进程引用 */
+export function clearFfmpegProc(proc: ChildProcess): void {
+  if (currentProc === proc) {
+    currentProc = null
+  }
 }
 
 // ---- Shared utilities ----

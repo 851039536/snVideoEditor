@@ -2,7 +2,7 @@ import { spawn } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
 import type { ProgressCallback } from './ffmpeg-shared'
-import { getFfmpegPath, isCancelled, resetCancelled, setFfmpegProc } from './ffmpeg-shared'
+import { getFfmpegPath, isCancelled, resetCancelled, setFfmpegProc, clearFfmpegProc, wasProcCancelled } from './ffmpeg-shared'
 
 export interface ScreenshotOptions {
   input: string
@@ -58,8 +58,8 @@ export function captureScreenshot(opts: ScreenshotOptions): Promise<boolean> {
     })
 
     proc.on('close', (code: number | null) => {
-      setFfmpegProc(null)
-      if (isCancelled) {
+      clearFfmpegProc(proc)
+      if (isCancelled || wasProcCancelled(proc)) {
         resolve(false)
         return
       }
@@ -80,7 +80,7 @@ export function captureScreenshot(opts: ScreenshotOptions): Promise<boolean> {
     })
 
     proc.on('error', (err: Error) => {
-      setFfmpegProc(null)
+      clearFfmpegProc(proc)
       reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
     })
   })
@@ -134,8 +134,8 @@ export function generateThumbnailSprite(opts: ThumbnailSpriteOptions): Promise<T
     })
 
     extractProc.on('close', (extractCode: number | null) => {
-      setFfmpegProc(null)
-      if (isCancelled) {
+      clearFfmpegProc(extractProc)
+      if (isCancelled || wasProcCancelled(extractProc)) {
         cleanupThumbnailDir(opts.outputDir)
         resolve({ spriteUrl: '', vttUrl: '', count: 0, interval })
         return
@@ -187,7 +187,7 @@ export function generateThumbnailSprite(opts: ThumbnailSpriteOptions): Promise<T
       })
 
       tileProc.on('close', (tileCode: number | null) => {
-        setFfmpegProc(null)
+        clearFfmpegProc(tileProc)
         try { fs.unlinkSync(concatFile) } catch { /* ignore */ }
         try {
           for (const f of frameFiles) {
@@ -196,7 +196,7 @@ export function generateThumbnailSprite(opts: ThumbnailSpriteOptions): Promise<T
           fs.rmdirSync(framesDir)
         } catch { /* ignore */ }
 
-        if (isCancelled) {
+        if (isCancelled || wasProcCancelled(tileProc)) {
           cleanupThumbnailDir(opts.outputDir)
           resolve({ spriteUrl: '', vttUrl: '', count: 0, interval })
           return
@@ -232,13 +232,13 @@ export function generateThumbnailSprite(opts: ThumbnailSpriteOptions): Promise<T
       })
 
       tileProc.on('error', (err: Error) => {
-        setFfmpegProc(null)
+        clearFfmpegProc(tileProc)
         reject(new Error(`启动 FFmpeg 拼接失败: ${err.message}`))
       })
     })
 
     extractProc.on('error', (err: Error) => {
-      setFfmpegProc(null)
+      clearFfmpegProc(extractProc)
       reject(new Error(`启动 FFmpeg 帧提取失败: ${err.message}`))
     })
   })
