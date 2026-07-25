@@ -1,3 +1,4 @@
+<!-- 播放列表面板：文件增删、搜索、拖拽排序 -->
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { Lock, FileVideo, X, GripVertical, FolderSync, FolderOpen, Search } from 'lucide-vue-next';

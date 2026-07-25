@@ -1,3 +1,4 @@
+// Player 模块共享类型与可播放路径解析
 import type { VideoMeta } from '@/types/file';
 
 export interface PlayerEntry {

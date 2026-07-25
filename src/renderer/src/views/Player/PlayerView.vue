@@ -1,3 +1,4 @@
+<!-- 视频播放器页面：播放列表、Plyr 播放、解密播放、缩略图与截图 -->
 <script setup lang="ts">
 import { ref, shallowRef, computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, watch } from 'vue';
 import {
@@ -8,8 +9,6 @@ import {
   FolderOpen,
   Trash2,
   Camera,
-  Loader,
-  Image,
   X,
   Eye,
   EyeOff,
@@ -31,12 +30,16 @@ import { formatSize, getFileName, toFileUrl } from '@/utils/format';
 import { secondsToHMS } from '@/utils/time';
 import type { VideoMeta } from '@/types/file';
 import { DEFAULT_ENCRYPT_KEY } from '@/config/crypto';
-import type { PlayerEntry, ScreenshotMarker, ThumbnailData, PlayMode } from './types';
+import type { PlayerEntry, ScreenshotMarker, PlayMode } from './types';
 import { resolvePlayablePath } from './types';
 import { useSettingsStore } from '@/stores/settings';
 import { useScreenshot } from '@/composables/useScreenshot';
+import { usePlayerThumbnails } from '@/composables/usePlayerThumbnails';
+import { usePlayerDecrypt } from '@/composables/usePlayerDecrypt';
 import { pLimit } from '@/utils/concurrency';
 import PlaylistPanel from './PlaylistPanel.vue';
+import PasswordModal from './PasswordModal.vue';
+import ScreenshotModal from './ScreenshotModal.vue';
 
 // Constants
 const ERR_NO_VIDEO = '未找到视频文件或加密文件';
@@ -56,15 +59,6 @@ const player = shallowRef<any>(null);
 // Path of the file the current player instance is actually playing (persistence key)
 const currentPlayingPath = ref('');
 
-// Password modal for encrypted files
-const showPasswordModal = ref(false);
-const passwordInput = ref('');
-const passwordError = ref('');
-const decryptingFile = ref<PlayerEntry | null>(null);
-
-// Auto-decrypt toggle (default: ON — use built-in key)
-const autoDecrypt = ref(true);
-
 // Temp dir — resolved once on mount, awaited before any decrypt
 const tempDir = ref('');
 let tempDirReady: Promise<void>;
@@ -75,14 +69,6 @@ tempDirReady = (async (): Promise<void> => {
     // tempDir stays '', decryptAndPlay will check before proceeding
   }
 })();
-
-// Guard against concurrent decrypts
-let decrypting = false;
-
-// Derived: how many files currently have a temp decrypted copy
-const tempCount = computed((): number => {
-  return files.value.filter((e) => e.tempPath).length;
-});
 
 // Error display
 const errorMsg = ref('');
@@ -138,7 +124,7 @@ const playModeLabel = computed((): string => {
   }
 });
 
-const playModeIcon = computed(() => {
+const playModeIcon = computed((): typeof Repeat => {
   switch (playMode.value) {
     case 'repeat-one':
       return Repeat1;
@@ -177,103 +163,6 @@ function setLoopB(): void {
 function clearLoop(): void {
   loopStart.value = null;
   loopEnd.value = null;
-}
-
-// ---- Thumbnails ----
-const thumbnailGenerating = ref(false);
-const thumbnailData = ref<ThumbnailData | null>(null);
-// Session-level cache: video path -> sprite/vtt, avoids regenerating on re-select
-const thumbnailCache = new Map<string, ThumbnailData>();
-let thumbGenId = 0;
-
-function hashPath(p: string): string {
-  let hash = 0;
-  for (let i = 0; i < p.length; i++) {
-    const ch = p.charCodeAt(i);
-    hash = (hash << 5) - hash + ch;
-    hash |= 0; // Convert to 32bit integer
-  }
-  return Math.abs(hash).toString(16);
-}
-
-function getThumbnailCacheDir(): string {
-  if (!tempDir.value) {
-    return '';
-  }
-  const hash = hashPath(currentFile.value?.path || '');
-  return tempDir.value + '/thumbnails_' + hash;
-}
-
-async function generateThumbnailsIfNeeded(): Promise<void> {
-  const cf = currentFile.value;
-  if (!cf || !tempDir.value) {
-    return;
-  }
-
-  const input = resolvePlayablePath(cf);
-  if (!input) {
-    return;
-  }
-
-  // Session cache reuse — skip ffmpeg if we already generated for this file
-  const cached = thumbnailCache.get(cf.path);
-  if (cached) {
-    thumbnailData.value = cached;
-    return;
-  }
-
-  const dur = cf.meta?.duration || 0;
-  if (dur < 5) {
-    return;
-  } // Too short, skip
-
-  const myGen = ++thumbGenId;
-  thumbnailData.value = null;
-  thumbnailGenerating.value = true;
-  try {
-    const result = await window.electronAPI.generateThumbnails({
-      input,
-      outputDir: getThumbnailCacheDir(),
-      thumbWidth: 160,
-      thumbHeight: 90,
-      interval: Math.max(5, Math.ceil(dur / 100)), // ~100 thumbnails total
-      cols: 10
-    });
-    // Dropped if user switched to another file meanwhile
-    if (myGen !== thumbGenId) {
-      return;
-    }
-    if (result.vttUrl) {
-      const data: ThumbnailData = { spriteUrl: result.spriteUrl, vttUrl: result.vttUrl };
-      thumbnailData.value = data;
-      thumbnailCache.set(cf.path, data);
-    }
-  } catch (_e) {
-    // Silently skip — thumbnail generation is best-effort
-    if (myGen === thumbGenId) {
-      console.warn('Thumbnail generation failed:', _e);
-    }
-  } finally {
-    if (myGen === thumbGenId) {
-      thumbnailGenerating.value = false;
-    }
-  }
-}
-
-/** 终止进行中的缩略图生成：ffmpeg 全程持有源文件句柄，不终止会导致清空/删除后文件仍被占用 */
-async function cancelThumbnailGeneration(): Promise<void> {
-  if (!thumbnailGenerating.value) {
-    return;
-  }
-  thumbGenId++; // 使进行中的结果失效
-  thumbnailGenerating.value = false;
-  try {
-    await window.electronAPI.cancelOperation();
-    // taskkill 异步生效，稍候片刻确保 ffmpeg 退出并释放文件句柄
-    await new Promise((resolve) => setTimeout(resolve, 300));
-  } catch (_e) {
-    /* ignore */
-  }
 }
 
 // Persisted settings store
@@ -343,6 +232,38 @@ const canPrev = computed((): boolean => {
     return true;
   }
   return hasPrev.value;
+});
+
+// ---- Thumbnails (composable) ----
+const { thumbnailData, generateThumbnailsIfNeeded, cancelThumbnailGeneration } = usePlayerThumbnails({
+  currentFile,
+  tempDir
+});
+
+// ---- Encrypted playback (composable) ----
+const {
+  showPasswordModal,
+  decryptingFile,
+  autoDecrypt,
+  tempCount,
+  decryptAndPlay,
+  openPasswordModal,
+  confirmDecrypt,
+  cancelDecrypt,
+  cleanupTemp,
+  cleanupAllTemps
+} = usePlayerDecrypt({
+  files,
+  currentIndex,
+  errorMsg,
+  tempDir,
+  tempDirReady,
+  loadMeta,
+  onDecrypted: async (): Promise<void> => {
+    await nextTick();
+    initAndPlay();
+    void generateThumbnailsIfNeeded();
+  }
 });
 
 // ---- Screenshot & markers (composable) ----
@@ -628,10 +549,7 @@ async function playFile(index: number): Promise<void> {
     } else if (autoDecrypt.value) {
       await decryptAndPlay(file, DEFAULT_ENCRYPT_KEY);
     } else {
-      decryptingFile.value = file;
-      passwordInput.value = '';
-      passwordError.value = '';
-      showPasswordModal.value = true;
+      openPasswordModal(file);
     }
   } else {
     if (!file.meta) {
@@ -898,81 +816,17 @@ function initAndPlay(): void {
 }
 
 // ---- Encryption Decrypt for Playback ----
-async function decryptAndPlay(file: PlayerEntry, password: string): Promise<void> {
-  if (decrypting) {
-    return;
+// 解密流程与临时文件清理已迁移至 usePlayerDecrypt composable
+
+/** 清理全部解密临时文件；若正在播放解密视频，先释放句柄再删除，否则删除会静默失败 */
+async function handleCleanupTemps(): Promise<void> {
+  const cf = currentFile.value;
+  if (cf?.isEncrypted && cf.tempPath) {
+    destroyPlayer();
+    releaseVideoSource();
+    await cancelThumbnailGeneration();
   }
-  decrypting = true;
-
-  try {
-    if (file.tempPath) {
-      await cleanupTemp(file.tempPath);
-      file.tempPath = null;
-    }
-
-    await tempDirReady;
-    if (!tempDir.value) {
-      errorMsg.value = '无法获取临时目录，解密失败';
-      return;
-    }
-
-    const tempPath = await window.electronAPI.decryptForPlayback(file.path, password, tempDir.value);
-
-    if (files.value[currentIndex.value]?.path !== file.path) {
-      await cleanupTemp(tempPath);
-      return;
-    }
-
-    file.tempPath = tempPath;
-
-    await loadMeta(file);
-    await nextTick();
-    initAndPlay();
-    void generateThumbnailsIfNeeded();
-  } finally {
-    decrypting = false;
-  }
-}
-
-async function confirmDecrypt(): Promise<void> {
-  if (!decryptingFile.value) {
-    return;
-  }
-  if (passwordInput.value.length < 4) {
-    passwordError.value = '密码至少需要4个字符';
-    return;
-  }
-
-  passwordError.value = '';
-  const file = decryptingFile.value;
-  const pwd = passwordInput.value;
-
-  showPasswordModal.value = false;
-  passwordInput.value = '';
-  decryptingFile.value = null;
-
-  await decryptAndPlay(file, pwd);
-}
-
-function cancelDecrypt(): void {
-  showPasswordModal.value = false;
-  passwordInput.value = '';
-  passwordError.value = '';
-  decryptingFile.value = null;
-}
-
-// ---- Temp Cleanup ----
-async function cleanupTemp(tempPath: string): Promise<void> {
-  await window.electronAPI.deleteFile(tempPath);
-}
-
-async function cleanupAllTemps(): Promise<void> {
-  for (const entry of files.value) {
-    if (entry.tempPath) {
-      await cleanupTemp(entry.tempPath);
-      entry.tempPath = null;
-    }
-  }
+  await cleanupAllTemps();
 }
 
 // ---- Lifecycle ----
@@ -1020,7 +874,7 @@ onUnmounted(async (): Promise<void> => {
           <!-- Clean temp files -->
           <button
             v-if="tempCount > 0"
-            @click="cleanupAllTemps()"
+            @click="handleCleanupTemps"
             class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors border border-bg-tertiary text-text-muted hover:text-danger hover:border-danger/30"
             title="清理所有解密临时文件"
           >
@@ -1320,168 +1174,29 @@ onUnmounted(async (): Promise<void> => {
     </div>
 
     <!-- Password Modal -->
-    <Teleport to="body">
-      <div
-        v-if="showPasswordModal"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-        @click.self="cancelDecrypt"
-      >
-        <div class="glass-card w-full max-w-sm mx-4" @click.stop>
-          <h3 class="text-lg font-semibold text-text-primary mb-2 flex items-center gap-2">
-            <Lock :size="18" class="text-warning" />
-            输入解密密码
-          </h3>
-          <p class="text-sm text-text-secondary mb-4">
-            播放加密视频需要输入密码进行解密。
-            <span class="text-xs text-text-muted truncate block mt-1">
-              {{ decryptingFile ? getFileName(decryptingFile.path) : '' }}
-            </span>
-          </p>
-
-          <input
-            v-model="passwordInput"
-            type="password"
-            placeholder="输入解密密码（至少4位）"
-            class="input-base w-full mb-2"
-            @keyup.enter="confirmDecrypt"
-          />
-
-          <p v-if="passwordError" class="text-xs text-danger mb-2">{{ passwordError }}</p>
-
-          <div class="flex justify-end gap-2 mt-4">
-            <button @click="cancelDecrypt" class="btn-secondary text-xs">取消</button>
-            <button
-              @click="confirmDecrypt"
-              :disabled="passwordInput.length < 4"
-              class="px-4 py-2 rounded-lg bg-gradient-to-r from-accent-blue to-accent-purple text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              解密并播放
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <PasswordModal
+      :show="showPasswordModal"
+      :file-name="decryptingFile ? getFileName(decryptingFile.path) : ''"
+      @confirm="confirmDecrypt"
+      @cancel="cancelDecrypt"
+    />
 
     <!-- Screenshot Modal -->
-    <Teleport to="body">
-      <div
-        v-if="showScreenshotModal"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-        @click.self="closeScreenshotModal"
-      >
-        <div class="glass-card w-full max-w-md mx-4" @click.stop>
-          <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-            <Camera :size="18" class="text-accent-purple" />
-            视频截图
-            <span class="text-xs text-text-muted ml-auto">{{ currentFileName }}</span>
-          </h3>
-
-          <!-- Mode Tabs -->
-          <div class="flex border-b border-bg-tertiary mb-4">
-            <button
-              v-for="mode in ['current', 'custom', 'batch'] as const"
-              :key="mode"
-              @click="screenshotMode = mode"
-              class="flex-1 pb-2 text-xs font-medium border-b-2 transition-colors"
-              :class="
-                screenshotMode === mode
-                  ? 'border-accent-purple text-accent-purple'
-                  : 'border-transparent text-text-muted hover:text-text-secondary'
-              "
-            >
-              {{ mode === 'current' ? '当前画面' : mode === 'custom' ? '指定时间' : '批量截图' }}
-            </button>
-          </div>
-
-          <!-- Current Frame -->
-          <div v-if="screenshotMode === 'current'" class="space-y-3">
-            <div class="flex items-center gap-3 p-3 rounded-lg bg-bg-tertiary/40">
-              <Image :size="32" class="text-text-muted" />
-              <div>
-                <p class="text-sm text-text-primary">截取当前播放画面</p>
-                <p class="text-xs text-text-muted">时间点：{{ secondsToHMS(player?.currentTime || 0) }}</p>
-              </div>
-            </div>
-            <button
-              @click="captureCurrentFrame"
-              :disabled="capturing"
-              class="w-full px-4 py-2.5 rounded-lg bg-gradient-to-r from-accent-purple to-pink-500 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              <Loader v-if="capturing" :size="14" class="animate-spin" />
-              <Camera v-else :size="14" />
-              {{ capturing ? '截图中...' : '截取当前画面' }}
-            </button>
-          </div>
-
-          <!-- Custom Time -->
-          <div v-if="screenshotMode === 'custom'" class="space-y-3">
-            <div>
-              <label class="text-xs text-text-secondary mb-1 block">截图时间点</label>
-              <input
-                v-model="screenshotTimeInput"
-                type="text"
-                placeholder="秒数，如 30 或 1:30"
-                class="input-base w-full"
-                :disabled="capturing"
-                @keyup.enter="captureByTime"
-              />
-              <p class="text-xs text-text-muted mt-1">支持格式：秒数（30）、分:秒（1:30）、时:分:秒（0:01:30）</p>
-            </div>
-            <button
-              @click="captureByTime"
-              :disabled="!screenshotTimeInput || capturing"
-              class="w-full px-4 py-2.5 rounded-lg bg-accent-purple text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              <Loader v-if="capturing" :size="14" class="animate-spin" />
-              截图
-            </button>
-          </div>
-
-          <!-- Batch -->
-          <div v-if="screenshotMode === 'batch'" class="space-y-3">
-            <div v-if="!capturing">
-              <label class="text-xs text-text-secondary mb-1 block">截图间隔（秒）</label>
-              <input v-model.number="batchInterval" type="number" min="1" step="1" class="input-base w-full" />
-              <p class="text-xs text-text-muted mt-1">
-                预计 {{ Math.floor((currentFile?.meta?.duration || 0) / (batchInterval || 1)) }} 帧， 每
-                {{ batchInterval }} 秒一帧
-              </p>
-            </div>
-
-            <!-- Progress bar (batch only) -->
-            <div v-if="capturing" class="space-y-2">
-              <div class="flex items-center justify-between text-xs">
-                <span class="text-text-secondary">批量截图进度</span>
-                <span class="text-text-primary font-mono">
-                  {{ captureProgress.current }} / {{ captureProgress.total }}
-                </span>
-              </div>
-              <div class="w-full h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
-                <div
-                  class="h-full rounded-full bg-gradient-to-r from-accent-purple to-pink-500 transition-all duration-300"
-                  :style="{
-                    width:
-                      (captureProgress.total > 0 ? (captureProgress.current / captureProgress.total) * 100 : 0) + '%'
-                  }"
-                />
-              </div>
-            </div>
-
-            <button
-              @click="batchCapture"
-              :disabled="capturing || !batchInterval || batchInterval < 1"
-              class="w-full px-4 py-2.5 rounded-lg bg-accent-purple text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              <Loader v-if="capturing" :size="14" class="animate-spin" />
-              {{ capturing ? '批量截图中...' : '开始批量截图' }}
-            </button>
-          </div>
-
-          <!-- Output hint -->
-          <p class="text-xs text-text-muted mt-4 pt-3 border-t border-bg-tertiary">保存位置：视频文件同目录</p>
-        </div>
-      </div>
-    </Teleport>
+    <ScreenshotModal
+      :show="showScreenshotModal"
+      :capturing="capturing"
+      :capture-progress="captureProgress"
+      :current-file-name="currentFileName"
+      :duration="currentFile?.meta?.duration || 0"
+      :current-time="player?.currentTime || 0"
+      v-model:screenshot-mode="screenshotMode"
+      v-model:screenshot-time-input="screenshotTimeInput"
+      v-model:batch-interval="batchInterval"
+      @close="closeScreenshotModal"
+      @capture-current="captureCurrentFrame"
+      @capture-by-time="captureByTime"
+      @batch-capture="batchCapture"
+    />
   </div>
 </template>
 
