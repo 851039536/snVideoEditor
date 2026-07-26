@@ -109,12 +109,10 @@ const videoSrc = computed((): string => {
 })
 
 // ---- Timeline drag (aligned with SplitMerge) ----
-const lastDragClientX = ref(0)
 const scrubbing = ref(false)
 
 function startHandleDrag(handle: 'start' | 'end', e: PointerEvent): void {
   dragging.value = handle
-  lastDragClientX.value = e.clientX
   const el = e.currentTarget as HTMLElement
   el.setPointerCapture(e.pointerId)
   e.preventDefault()
@@ -124,13 +122,12 @@ function startHandleDrag(handle: 'start' | 'end', e: PointerEvent): void {
 function startScrub(e: PointerEvent): void {
   if (maxDuration.value <= 0) { return }
   scrubbing.value = true
-  lastDragClientX.value = e.clientX
   const el = timelineRef.value
   if (el) { el.setPointerCapture(e.pointerId) }
   seekVideoPlayer(getTimelineTime(e.clientX))
 }
 
-function onGlobalPointerMove(e: PointerEvent): void {
+function onTrackPointerMove(e: PointerEvent): void {
   if (scrubbing.value) {
     seekVideoPlayer(getTimelineTime(e.clientX))
     return
@@ -153,19 +150,15 @@ function onGlobalPointerMove(e: PointerEvent): void {
   }
 }
 
-function onGlobalPointerUp(e: PointerEvent): void {
+function onTrackPointerUp(e: PointerEvent): void {
   if (scrubbing.value) {
     scrubbing.value = false
+    ;(e.currentTarget as HTMLElement)?.releasePointerCapture?.(e.pointerId)
     return
   }
   if (!dragging.value) { return }
-  ;(e.target as HTMLElement)?.releasePointerCapture?.(e.pointerId)
+  ;(e.currentTarget as HTMLElement)?.releasePointerCapture?.(e.pointerId)
   dragging.value = null
-}
-
-if (typeof window !== 'undefined') {
-  document.addEventListener('pointermove', onGlobalPointerMove)
-  document.addEventListener('pointerup', onGlobalPointerUp)
 }
 
 const computedWidth = computed((): number => {
@@ -269,8 +262,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  document.removeEventListener('pointermove', onGlobalPointerMove)
-  document.removeEventListener('pointerup', onGlobalPointerUp)
   window.electronAPI?.removeProgressListener()
 })
 </script>
@@ -361,6 +352,8 @@ onUnmounted(() => {
               ref="timelineRef"
               class="timeline-track"
               @pointerdown="startScrub"
+              @pointermove="onTrackPointerMove"
+              @pointerup="onTrackPointerUp"
             >
               <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
               <div class="timeline-selected" :style="{ width: (endPercent - startPercent) + '%' }">
