@@ -1,3 +1,4 @@
+<!-- 视频转GIF页面：参数配置、裁剪预览与批量转换 -->
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Image, Folder, X, Zap, Clock, Play, Pause } from 'lucide-vue-next'
@@ -6,7 +7,7 @@ import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
 import { secondsToHMS, formatDuration } from '@/utils/time'
 import { clamp } from '@/utils/math'
-import { getFileName, toFileUrl } from '@/utils/format'
+import { getFileName, toFileUrl, getDirName } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
 import { useVideoPlayer } from '@/composables/useVideoPlayer'
 import { useTrimTimeline } from '@/composables/useTrimTimeline'
@@ -74,17 +75,31 @@ const {
 })
 const playheadPercent = playheadPercentFn(currentTime)
 
+const playheadInTrim = computed((): number => {
+  const range = endPercent.value - startPercent.value
+  if (range <= 0) { return 0 }
+  return clamp(((playheadPercent.value - startPercent.value) / range) * 100, 0, 100)
+})
+
 // Loop
 const loopCount = ref(0)
 
 // Auto-set end time when first file metadata loads
 watch(() => files.value[0]?.meta, (meta) => {
-  if (!meta || meta.duration <= 0) { return }
+  if (!meta || meta.duration <= 0) {
+    maxDuration.value = 0
+    return
+  }
   maxDuration.value = meta.duration
   // Only auto-set end if not yet set by user (keep visible selection range)
   if (trimDuration.value <= 0 || trimEndSec.value > meta.duration) {
     trimEndSec.value = Math.min(5, meta.duration)
   }
+})
+
+// Reset video position when trim toggle changes
+watch(enableTrim, (enabled) => {
+  seekVideoPlayer(enabled ? trimStartSec.value : 0)
 })
 const errorMsg = ref('')
 
@@ -190,8 +205,12 @@ async function startConvert(): Promise<void> {
         duration: trimmedDuration,
         loop: loopCount.value
       })
+      // 用户已取消（progressStore.cancel() 已 reset），不再更新状态
+      if (!progressStore.isProcessing) { return }
       if (result) {
         progressStore.finish()
+      } else {
+        progressStore.reset()
       }
     } else {
       const batchFiles = files.value.map((f) => ({
@@ -205,6 +224,8 @@ async function startConvert(): Promise<void> {
         loop: loopCount.value
       }))
       const result = await window.electronAPI.batchConvertToGif({ files: batchFiles })
+      // 用户已取消（progressStore.cancel() 已 reset），不再更新状态
+      if (!progressStore.isProcessing) { return }
       if (result.failed.length === 0) {
         progressStore.finish()
       } else {
@@ -320,7 +341,7 @@ onUnmounted(() => {
             >
               <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
               <div class="timeline-selected" :style="{ width: (endPercent - startPercent) + '%' }">
-                <div class="timeline-playhead" :style="{ left: ((playheadPercent - startPercent) / (endPercent - startPercent) * 100) + '%' }" />
+                <div class="timeline-playhead" :style="{ left: playheadInTrim + '%' }" />
                 <div class="trim-handle trim-handle-start" @pointerdown="startHandleDrag('start', $event)" />
                 <div class="trim-handle trim-handle-end" @pointerdown="startHandleDrag('end', $event)" />
               </div>
@@ -488,7 +509,7 @@ onUnmounted(() => {
             选择输出目录
           </button>
           <p v-if="files.length > 0 && files[0].outputPath" class="text-xs text-warning mt-2 truncate">
-            {{ files[0].outputPath.split('/').slice(0, -1).join('/') }}
+            {{ getDirName(files[0].outputPath) }}
           </p>
         </div>
 
