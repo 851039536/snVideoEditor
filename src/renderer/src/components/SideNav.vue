@@ -13,8 +13,23 @@ const isActive = (path: string): boolean => {
   return router.currentRoute.value.path === path
 }
 
+const navigateTo = (path: string): void => {
+  if (router.currentRoute.value.path !== path) {
+    router.push(path)
+  }
+}
+
 const toggleCollapsed = (): void => {
   settingsStore.toggleSidebar()
+}
+
+const onNavEnter = (): void => {
+  if (settingsStore.sidebarCollapsed) {
+    hoverExpanded.value = true
+  }
+}
+
+const onNavLeave = (): void => {
   hoverExpanded.value = false
 }
 
@@ -27,8 +42,8 @@ const isExpanded = computed((): boolean => {
   <nav
     class="h-full bg-bg-secondary border-r border-bg-tertiary flex flex-col flex-shrink-0 z-10 side-nav"
     :class="isExpanded ? 'nav-expanded' : 'nav-collapsed'"
-    @mouseenter="hoverExpanded = true"
-    @mouseleave="hoverExpanded = false"
+    @mouseenter="onNavEnter"
+    @mouseleave="onNavLeave"
   >
     <!-- Logo Header -->
     <div class="nav-logo h-14 flex items-center justify-center border-b border-bg-tertiary overflow-hidden px-2">
@@ -47,10 +62,10 @@ const isExpanded = computed((): boolean => {
       <button
         v-for="item in FEATURE_CONFIG"
         :key="item.path"
-        @click="router.push(item.path)"
+        @click="navigateTo(item.path)"
         class="nav-item flex items-center px-3 py-2.5 rounded-lg relative"
         :class="isActive(item.path) ? 'active' : ''"
-        :title="!isExpanded ? item.name : undefined"
+        :title="settingsStore.sidebarCollapsed ? item.name : undefined"
       >
         <component
           :is="item.icon"
@@ -89,7 +104,7 @@ const isExpanded = computed((): boolean => {
       <button
         @click="toggleCollapsed"
         class="w-full flex items-center justify-center p-2 rounded-lg"
-        :title="settingsStore.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+        :title="settingsStore.sidebarCollapsed ? '固定展开侧边栏' : '收起侧边栏'"
       >
         <component
           :is="settingsStore.sidebarCollapsed ? ChevronRight : ChevronLeft"
