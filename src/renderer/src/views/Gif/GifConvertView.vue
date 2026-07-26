@@ -516,6 +516,6 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 @use "../../assets/styles/gif";
 </style>

@@ -1225,6 +1225,6 @@ onUnmounted(async (): Promise<void> => {
 }
 </style>
 
-<style scoped>
+<style scoped lang="scss">
 @use './_player';
 </style>

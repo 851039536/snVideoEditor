@@ -235,6 +235,6 @@ async function selectPlayerFiles(): Promise<string[]> {
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 @use './_player';
 </style>

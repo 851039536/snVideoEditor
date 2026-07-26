@@ -124,6 +124,6 @@ onUnmounted(() => {
   </Teleport>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 @use "../../assets/styles/compress";
 </style>
