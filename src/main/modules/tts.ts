@@ -119,35 +119,50 @@ export function cleanMarkdown(text: string): string {
 }
 
 /**
- * 合成文本到 MP3 文件
+ * 合成文本到 MP3 文件（带重试）
  */
-async function synthesizeToFile(text: string, voice: string, rate: number, outputPath: string): Promise<boolean> {
-  const communicate = new Communicate(text, {
-    voice,
-    rate: formatRate(rate)
-  })
+async function synthesizeToFile(text: string, voice: string, rate: number, outputPath: string, retries = 2): Promise<boolean> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const communicate = new Communicate(text, {
+        voice,
+        rate: formatRate(rate)
+      })
 
-  const chunks: Buffer[] = []
-  for await (const chunk of communicate.stream()) {
-    if (isCancelled) {
-      return false
+      const chunks: Buffer[] = []
+      for await (const chunk of communicate.stream()) {
+        if (isCancelled) {
+          return false
+        }
+        if (chunk.type === 'audio' && chunk.data) {
+          chunks.push(chunk.data)
+        }
+      }
+
+      if (chunks.length === 0) {
+        if (attempt < retries) {
+          continue
+        }
+        return false
+      }
+
+      const audioBuffer = Buffer.concat(chunks)
+      const dir = path.dirname(outputPath)
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true })
+      }
+      fs.writeFileSync(outputPath, audioBuffer)
+      return true
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e)
+      // NoAudioReceived 错误时重试
+      if (errMsg.includes('No audio was received') && attempt < retries) {
+        continue
+      }
+      throw e
     }
-    if (chunk.type === 'audio' && chunk.data) {
-      chunks.push(chunk.data)
-    }
   }
-
-  if (chunks.length === 0) {
-    return false
-  }
-
-  const audioBuffer = Buffer.concat(chunks)
-  const dir = path.dirname(outputPath)
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-  fs.writeFileSync(outputPath, audioBuffer)
-  return true
+  return false
 }
 
 /**
@@ -242,11 +257,23 @@ export async function previewVoice(opts: PreviewTtsOptions): Promise<string> {
   }
 
   const outputPath = path.join(previewDir, `preview_${Date.now()}.mp3`)
-  const ok = await synthesizeToFile(text, voice, rate, outputPath)
-  if (!ok) {
-    throw new Error('语音合成失败，请检查网络连接或尝试其他声音')
+
+  try {
+    const ok = await synthesizeToFile(text, voice, rate, outputPath)
+    if (!ok) {
+      throw new Error('empty')
+    }
+    return outputPath
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e)
+    if (errMsg.includes('No audio was received') || errMsg === 'empty') {
+      throw new Error(`该语音暂时不可用，请尝试其他声音或调整语速为 0% 后重试`)
+    }
+    if (errMsg.includes('network') || errMsg.includes('ECONNREFUSED') || errMsg.includes('ETIMEDOUT')) {
+      throw new Error('网络连接失败，请检查网络后重试')
+    }
+    throw new Error(`语音合成失败: ${errMsg}`)
   }
-  return outputPath
 }
 
 /**
