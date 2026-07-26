@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 export interface ProgressInfo {
-  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail';
+  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail' | 'tts';
   percent: number;
   currentFile: number;
   totalFiles: number;
@@ -185,6 +185,23 @@ const electronAPI = {
     cols?: number;
   }): Promise<{ spriteUrl: string; vttUrl: string; count: number; interval: number }> =>
     ipcRenderer.invoke('video:generateThumbnails', opts),
+
+  // TTS
+  selectTextFiles: (): Promise<string[]> => ipcRenderer.invoke('file:selectTextFiles'),
+
+  scanTextFiles: (dirPath: string): Promise<string[]> => ipcRenderer.invoke('file:scanTextFiles', dirPath),
+
+  ttsGetVoices: (): Promise<{ id: string; label: string; gender: string; style: string }[]> =>
+    ipcRenderer.invoke('tts:getVoices'),
+
+  ttsPreview: (opts: { text: string; voice: string; rate: number }): Promise<string> =>
+    ipcRenderer.invoke('tts:preview', opts),
+
+  ttsBatchConvert: (opts: {
+    files: { input: string; output: string }[];
+    voice: string;
+    rate: number;
+  }): Promise<{ success: number; failed: string[] }> => ipcRenderer.invoke('tts:batchConvert', opts),
 
   // Progress
   onProgress: (callback: (info: ProgressInfo) => void): void => {

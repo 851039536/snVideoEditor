@@ -36,6 +36,11 @@ const routes: RouteRecordRaw[] = [
     path: '/player',
     name: 'Player',
     component: () => import('@/views/Player/PlayerView.vue')
+  },
+  {
+    path: '/tts',
+    name: 'Tts',
+    component: () => import('@/views/Tts/TtsView.vue')
   }
 ]
 

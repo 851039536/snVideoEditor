@@ -29,6 +29,17 @@ const PLAYER_FILTERS: FileFilter[] = [
   }
 ]
 
+const TEXT_FILTERS: FileFilter[] = [
+  {
+    name: '文本文件',
+    extensions: ['txt', 'md', 'markdown']
+  },
+  {
+    name: '所有文件',
+    extensions: ['*']
+  }
+]
+
 /**
  * Open native dialog to select video files
  */
@@ -77,6 +88,24 @@ export async function selectPlayerFiles(): Promise<string[]> {
   const result = await dialog.showOpenDialog(window, {
     title: '选择视频文件',
     filters: PLAYER_FILTERS,
+    properties: ['openFile', 'multiSelections']
+  })
+
+  return result.canceled ? [] : result.filePaths
+}
+
+/**
+ * Open native dialog to select text files for TTS
+ */
+export async function selectTextFiles(): Promise<string[]> {
+  const window = BrowserWindow.getFocusedWindow()
+  if (!window) {
+    return []
+  }
+
+  const result = await dialog.showOpenDialog(window, {
+    title: '选择文本文件',
+    filters: TEXT_FILTERS,
     properties: ['openFile', 'multiSelections']
   })
 
@@ -180,6 +209,13 @@ export function scanVideoFiles(dirPath: string): string[] {
  */
 export function scanPlayerFiles(dirPath: string): string[] {
   return scanFiles(dirPath, new Set(PLAYER_FILTERS[0].extensions))
+}
+
+/**
+ * Scan directory for text files (.txt, .md) for TTS
+ */
+export function scanTextFiles(dirPath: string): string[] {
+  return scanFiles(dirPath, new Set(TEXT_FILTERS[0].extensions))
 }
 
 /**

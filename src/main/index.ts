@@ -34,8 +34,11 @@ import {
   formatFileSize,
   formatDuration,
   selectPlayerFiles,
-  scanPlayerFiles
+  scanPlayerFiles,
+  selectTextFiles,
+  scanTextFiles
 } from './modules/file';
+import { getTtsVoices, previewVoice, batchSynthesize, cancelTts } from './modules/tts';
 import type { ProgressInfo } from '../preload/index';
 
 // Temp directory for clip segments
@@ -113,10 +116,11 @@ function wrapOperation<TOpts>(
   channel: string,
   lockType: string,
   progressType: ProgressInfo['type'],
-  executor: (opts: TOpts, onProgress: (data: ProgressData) => void) => Promise<unknown>
+  executor: (opts: TOpts, onProgress: (data: ProgressData) => void) => Promise<unknown>,
+  timeoutMs?: number
 ): void {
   ipcMain.handle(channel, async (event, opts: TOpts) => {
-    acquireLock(lockType);
+    acquireLock(lockType, timeoutMs);
     try {
       return executor(opts, (data) => {
         sendProgress(event, { ...data, type: progressType });
@@ -473,6 +477,35 @@ function registerAppHandlers(): void {
   });
 }
 
+// TTS operations
+function registerTtsHandlers(): void {
+  ipcMain.handle('tts:getVoices', async () => {
+    return getTtsVoices();
+  });
+
+  ipcMain.handle('tts:preview', async (_event, opts: { text: string; voice: string; rate: number }) => {
+    return previewVoice(opts);
+  });
+
+  ipcMain.handle('file:selectTextFiles', async () => {
+    return selectTextFiles();
+  });
+
+  ipcMain.handle('file:scanTextFiles', async (_event, dirPath: string) => {
+    return scanTextFiles(dirPath);
+  });
+
+  wrapOperation<{ files: { input: string; output: string }[]; voice: string; rate: number }>(
+    'tts:batchConvert',
+    'tts',
+    'tts',
+    (opts, onProgress) => {
+      return batchSynthesize({ ...opts, onProgress });
+    },
+    600000 // 10 minutes timeout for batch TTS
+  );
+}
+
 // Cancel operation
 function registerCancelHandler(): void {
   ipcMain.handle('operation:cancel', async () => {
@@ -483,6 +516,8 @@ function registerCancelHandler(): void {
       // Cancel both queue items AND standalone download (video:download via wrapOperation)
       DownloadQueueManager.getInstance().cancelAll();
       cancelFfmpegOperation();
+    } else if (activeType === 'tts') {
+      cancelTts();
     } else {
       cancelFfmpegOperation();
     }
@@ -543,6 +578,7 @@ app.whenReady().then(() => {
   registerGifHandlers();
   registerCryptoHandlers();
   registerDownloadHandlers();
+  registerTtsHandlers();
   registerCancelHandler();
   registerWindowHandlers();
   registerPlayerHandlers();

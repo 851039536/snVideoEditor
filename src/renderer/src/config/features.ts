@@ -1,5 +1,5 @@
 import {
-  Home, Scissors, FileVideo, Shield, Image, Globe, Video
+  Home, Scissors, FileVideo, Shield, Image, Globe, Video, AudioLines
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -68,5 +68,13 @@ export const FEATURE_CONFIG: FeatureMeta[] = [
     color: 'var(--color-info)',
     desc: '播放普通与加密视频',
     gradient: 'from-red-500/20 to-orange-500/20'
+  },
+  {
+    name: '文字转语音',
+    path: '/tts',
+    icon: AudioLines,
+    color: 'var(--color-accent-purple)',
+    desc: '文本批量转换为 MP3 语音',
+    gradient: 'from-indigo-500/20 to-violet-500/20'
   }
 ]

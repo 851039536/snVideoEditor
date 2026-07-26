@@ -1,5 +1,5 @@
 export interface ProgressInfo {
-  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail';
+  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail' | 'tts';
   percent: number;
   currentFile: number;
   totalFiles: number;
@@ -53,6 +53,13 @@ export interface QueueStatusDTO {
   isProcessing: boolean;
   activeIds: string[];
   concurrency: number;
+}
+
+export interface TtsVoicePreset {
+  id: string;
+  label: string;
+  gender: string;
+  style: string;
 }
 
 export interface ElectronAPI {
@@ -169,6 +176,17 @@ export interface ElectronAPI {
     interval?: number;
     cols?: number;
   }) => Promise<{ spriteUrl: string; vttUrl: string; count: number; interval: number }>;
+
+  // TTS
+  selectTextFiles: () => Promise<string[]>;
+  scanTextFiles: (dirPath: string) => Promise<string[]>;
+  ttsGetVoices: () => Promise<TtsVoicePreset[]>;
+  ttsPreview: (opts: { text: string; voice: string; rate: number }) => Promise<string>;
+  ttsBatchConvert: (opts: {
+    files: { input: string; output: string }[];
+    voice: string;
+    rate: number;
+  }) => Promise<{ success: number; failed: string[] }>;
 
   // Progress
   onProgress: (callback: (info: ProgressInfo) => void) => void;
