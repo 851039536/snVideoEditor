@@ -64,7 +64,7 @@ const {
   timelineRef, dragging,
   startHour, startMin, startSec, endHour, endMin, endSec,
   startPercent, endPercent, playheadPercent: playheadPercentFn,
-  getTimelineTime, startHandleDrag,
+  getTimelineTime,
   trimDuration, trimDurationStr
 } = useTrimTimeline({
   duration: maxDuration,
@@ -108,16 +108,35 @@ const videoSrc = computed((): string => {
   return toFileUrl(files.value[0].path)
 })
 
-// ---- Timeline interaction ----
+// ---- Timeline drag (aligned with SplitMerge) ----
+const lastDragClientX = ref(0)
+const scrubbing = ref(false)
 
-function onTimelineClick(e: MouseEvent): void {
-  if (dragging.value) { return }
-  const t = getTimelineTime(e.clientX)
-  seekVideoPlayer(t)
+function startHandleDrag(handle: 'start' | 'end', e: PointerEvent): void {
+  dragging.value = handle
+  lastDragClientX.value = e.clientX
+  const el = e.currentTarget as HTMLElement
+  el.setPointerCapture(e.pointerId)
+  e.preventDefault()
+  e.stopPropagation()
 }
 
-function onTimelineMove(e: PointerEvent): void {
+function startScrub(e: PointerEvent): void {
+  if (maxDuration.value <= 0) { return }
+  scrubbing.value = true
+  lastDragClientX.value = e.clientX
+  const el = timelineRef.value
+  if (el) { el.setPointerCapture(e.pointerId) }
+  seekVideoPlayer(getTimelineTime(e.clientX))
+}
+
+function onGlobalPointerMove(e: PointerEvent): void {
+  if (scrubbing.value) {
+    seekVideoPlayer(getTimelineTime(e.clientX))
+    return
+  }
   if (!dragging.value) { return }
+
   const t = getTimelineTime(e.clientX)
   if (dragging.value === 'start') {
     const clamped = clamp(t, 0, trimEndSec.value - MIN_TRIM_GAP)
@@ -134,9 +153,13 @@ function onTimelineMove(e: PointerEvent): void {
   }
 }
 
-function onGlobalPointerMove(e: PointerEvent): void { onTimelineMove(e) }
-function onGlobalPointerUp(_e: PointerEvent): void {
+function onGlobalPointerUp(e: PointerEvent): void {
+  if (scrubbing.value) {
+    scrubbing.value = false
+    return
+  }
   if (!dragging.value) { return }
+  ;(e.target as HTMLElement)?.releasePointerCapture?.(e.pointerId)
   dragging.value = null
 }
 
@@ -337,7 +360,7 @@ onUnmounted(() => {
             <div
               ref="timelineRef"
               class="timeline-track"
-              @click="onTimelineClick"
+              @pointerdown="startScrub"
             >
               <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
               <div class="timeline-selected" :style="{ width: (endPercent - startPercent) + '%' }">

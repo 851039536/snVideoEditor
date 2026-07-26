@@ -123,8 +123,6 @@ export function useTrimTimeline(opts: UseTrimTimelineOptions): {
 
   function startHandleDrag(handle: 'start' | 'end', e: PointerEvent): void {
     dragging.value = handle
-    const el = e.currentTarget as HTMLElement
-    el.setPointerCapture(e.pointerId)
     e.preventDefault()
     e.stopPropagation()
   }
