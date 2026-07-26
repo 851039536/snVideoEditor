@@ -35,13 +35,29 @@ export interface PreviewTtsOptions {
 
 /** 预设中文语音列表 */
 export const TTS_VOICE_PRESETS: TtsVoicePreset[] = [
+  // 女声
   { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓 (女声·自然)', gender: '女', style: '自然风格，适合小说朗读' },
+  { id: 'zh-CN-XiaoyiNeural', label: '晓伊 (女声·温柔)', gender: '女', style: '温柔风格' },
+  { id: 'zh-CN-XiaochenNeural', label: '晓辰 (女声·新闻)', gender: '女', style: '新闻风格' },
+  { id: 'zh-CN-XiaoyouNeural', label: '晓悠 (女声·轻松)', gender: '女', style: '轻松愉快风格' },
+  { id: 'zh-CN-XiaohanNeural', label: '晓涵 (女声·知性)', gender: '女', style: '知性风格，适合教程讲解' },
+  { id: 'zh-CN-XiaomengNeural', label: '晓梦 (女声·甜美)', gender: '女', style: '甜美可爱风格' },
+  { id: 'zh-CN-XiaoxuanNeural', label: '晓萱 (女声·活泼)', gender: '女', style: '活泼风格，适合娱乐内容' },
+  { id: 'zh-CN-XiaoruiNeural', label: '晓睿 (女声·成熟)', gender: '女', style: '成熟稳重，适合纪录片' },
+  { id: 'zh-CN-XiaoshuangNeural', label: '晓双 (女声·儿童)', gender: '女', style: '儿童声音，适合儿童故事' },
+  { id: 'zh-CN-XiaozhenNeural', label: '晓甄 (女声·优雅)', gender: '女', style: '优雅风格，适合文学作品' },
+  // 男声
   { id: 'zh-CN-YunxiNeural', label: '云希 (男声·年轻)', gender: '男', style: '年轻风格，适合男主故事' },
   { id: 'zh-CN-YunyangNeural', label: '云扬 (男声·播报)', gender: '男', style: '新闻播报风格' },
-  { id: 'zh-CN-XiaoyiNeural', label: '晓伊 (女声·温柔)', gender: '女', style: '温柔风格' },
   { id: 'zh-CN-YunjianNeural', label: '云健 (男声·沉稳)', gender: '男', style: '沉稳风格' },
-  { id: 'zh-CN-XiaochenNeural', label: '晓辰 (女声·新闻)', gender: '女', style: '新闻风格' },
-  { id: 'zh-CN-XiaoyouNeural', label: '晓悠 (女声·轻松)', gender: '女', style: '轻松愉快风格' }
+  { id: 'zh-CN-YunfengNeural', label: '云枫 (男声·磁性)', gender: '男', style: '磁性嗓音，适合有声书' },
+  { id: 'zh-CN-YunhaoNeural', label: '云皓 (男声·广告)', gender: '男', style: '广告风格，充满活力' },
+  { id: 'zh-CN-YunxiaNeural', label: '云夏 (男声·少年)', gender: '男', style: '少年音，适合青春题材' },
+  { id: 'zh-CN-YunzeNeural', label: '云泽 (男声·标准)', gender: '男', style: '标准男声，通用场景' },
+  // 方言/地区
+  { id: 'zh-CN-liaoning-XiaobeiNeural', label: '晓北 (女声·东北)', gender: '女', style: '东北方言风格' },
+  { id: 'zh-TW-HsiaoChenNeural', label: '晓臻 (女声·台湾)', gender: '女', style: '台湾口音中文' },
+  { id: 'zh-HK-HiuGaaiNeural', label: '晓佳 (女声·粤语)', gender: '女', style: '粤语风格' }
 ]
 
 /** 模块级取消标志 */

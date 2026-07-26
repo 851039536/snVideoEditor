@@ -31,6 +31,18 @@ const selectedVoiceInfo = computed((): TtsVoiceOption | undefined => {
   return voices.value.find((v) => v.id === selectedVoice.value)
 })
 
+const femaleVoices = computed((): TtsVoiceOption[] => {
+  return voices.value.filter((v) => v.gender === '女' && !v.id.includes('-TW-') && !v.id.includes('-HK-') && !v.id.includes('liaoning'))
+})
+
+const maleVoices = computed((): TtsVoiceOption[] => {
+  return voices.value.filter((v) => v.gender === '男')
+})
+
+const dialectVoices = computed((): TtsVoiceOption[] => {
+  return voices.value.filter((v) => v.id.includes('-TW-') || v.id.includes('-HK-') || v.id.includes('liaoning'))
+})
+
 const canStart = computed((): boolean => {
   return files.value.length > 0 && selectedVoice.value !== '' && !progressStore.isProcessing
 })
@@ -256,9 +268,21 @@ onUnmounted(() => {
             v-model="selectedVoice"
             class="w-full p-2.5 rounded-lg bg-bg-tertiary border border-bg-tertiary text-text-primary text-sm focus:border-accent-purple/50 focus:outline-none"
           >
-            <option v-for="voice in voices" :key="voice.id" :value="voice.id">
-              {{ voice.label }}
-            </option>
+            <optgroup label="女声">
+              <option v-for="voice in femaleVoices" :key="voice.id" :value="voice.id">
+                {{ voice.label }}
+              </option>
+            </optgroup>
+            <optgroup label="男声">
+              <option v-for="voice in maleVoices" :key="voice.id" :value="voice.id">
+                {{ voice.label }}
+              </option>
+            </optgroup>
+            <optgroup label="方言/地区">
+              <option v-for="voice in dialectVoices" :key="voice.id" :value="voice.id">
+                {{ voice.label }}
+              </option>
+            </optgroup>
           </select>
           <p v-if="selectedVoiceInfo" class="mt-2 text-xs text-text-secondary">
             {{ selectedVoiceInfo.style }}
