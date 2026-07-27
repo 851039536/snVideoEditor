@@ -5,6 +5,7 @@ export interface TtsFileEntry {
   fileName: string
   size: number
   status: 'pending' | 'converting' | 'done' | 'error'
+  outputPath?: string
 }
 
 export interface TtsVoiceOption {

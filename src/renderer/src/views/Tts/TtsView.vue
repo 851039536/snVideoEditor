@@ -1,7 +1,7 @@
 <!-- TTS 语音合成页面：文本批量转 MP3，语音选择与试听 -->
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { AudioLines, Folder, FolderOpen, X, FileText, Volume2, Square } from 'lucide-vue-next'
+import { AudioLines, Folder, FolderOpen, X, FileText, Volume2, Square, Play, Music } from 'lucide-vue-next'
 import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
@@ -9,6 +9,13 @@ import { formatSize, getFileName, toFileUrl } from '@/utils/format'
 import type { TtsFileEntry, TtsVoiceOption } from './types'
 
 const progressStore = useProgressStore()
+
+const AUDIO_EXTS = ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac', '.wma']
+
+function isAudioFile(filePath: string): boolean {
+  const ext = filePath.toLowerCase().slice(filePath.lastIndexOf('.'))
+  return AUDIO_EXTS.includes(ext)
+}
 
 // Files
 const files = ref<TtsFileEntry[]>([])
@@ -23,6 +30,10 @@ const rate = ref(0)
 const isPreviewing = ref(false)
 const previewAudioPath = ref('')
 const previewAudio = ref<HTMLAudioElement | null>(null)
+
+// Output audio playback
+const outputAudio = ref<HTMLAudioElement | null>(null)
+const playingOutputPath = ref('')
 
 // Output
 const outputDir = ref('')
@@ -44,7 +55,7 @@ const dialectVoices = computed((): TtsVoiceOption[] => {
 })
 
 const canStart = computed((): boolean => {
-  return files.value.length > 0 && selectedVoice.value !== '' && !progressStore.isProcessing
+  return files.value.some((f) => f.status === 'pending') && selectedVoice.value !== '' && !progressStore.isProcessing
 })
 
 // ---- File select wrapper ----
@@ -59,11 +70,13 @@ async function addFiles(paths: string[]): Promise<void> {
       continue
     }
     const info = await window.electronAPI.getFileInfo(p)
+    const audio = isAudioFile(p)
     files.value.push({
       path: p,
       fileName: info.name,
       size: info.size,
-      status: 'pending'
+      status: audio ? 'done' : 'pending',
+      outputPath: audio ? p : undefined
     })
   }
 }
@@ -82,10 +95,15 @@ async function selectDir(): Promise<void> {
 }
 
 function removeFile(index: number): void {
+  const removed = files.value[index]
+  if (removed && playingOutputPath.value === removed.outputPath) {
+    stopOutput()
+  }
   files.value.splice(index, 1)
 }
 
 function clearFiles(): void {
+  stopOutput()
   files.value = []
 }
 
@@ -97,11 +115,35 @@ async function selectOutputDir(): Promise<void> {
   }
 }
 
+// ---- Output audio playback ----
+function playOutput(file: TtsFileEntry): void {
+  if (!file.outputPath || !outputAudio.value) {
+    return
+  }
+  if (playingOutputPath.value === file.outputPath) {
+    stopOutput()
+    return
+  }
+  stopPreview()
+  playingOutputPath.value = file.outputPath
+  outputAudio.value.src = toFileUrl(file.outputPath)
+  outputAudio.value.play()
+}
+
+function stopOutput(): void {
+  if (outputAudio.value) {
+    outputAudio.value.pause()
+    outputAudio.value.currentTime = 0
+  }
+  playingOutputPath.value = ''
+}
+
 // ---- Voice preview ----
 async function previewCurrentVoice(): Promise<void> {
   if (!selectedVoice.value) {
     return
   }
+  stopOutput()
   if (isPreviewing.value) {
     stopPreview()
     return
@@ -158,18 +200,23 @@ async function startConvert(): Promise<void> {
   progressStore.start('tts')
 
   try {
-    const batchFiles = files.value.map((f) => {
+    const pendingFiles = files.value.filter((f) => f.status === 'pending')
+    const batchFiles = pendingFiles.map((f) => {
       const baseName = getFileName(f.path).replace(/\.(txt|md|markdown)$/i, '')
-      return {
-        input: f.path,
-        output: `${outputDir.value}/${baseName}.mp3`
-      }
+      const output = `${outputDir.value}/${baseName}.mp3`
+      f.outputPath = output
+      return { input: f.path, output }
     })
 
     const result = await window.electronAPI.ttsBatchConvert({
       files: batchFiles,
       voice: selectedVoice.value,
       rate: rate.value
+    })
+
+    const failedSet = new Set(result.failed)
+    pendingFiles.forEach((f) => {
+      f.status = failedSet.has(f.path) ? 'error' : 'done'
     })
 
     if (result.failed.length === 0) {
@@ -203,6 +250,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.electronAPI?.removeProgressListener()
+  stopOutput()
   cleanupPreview()
 })
 </script>
@@ -225,7 +273,7 @@ onUnmounted(() => {
       <div class="space-y-3">
         <FileDropZone
           @files-selected="addFiles"
-          :accepted-extensions="['.txt', '.md', '.markdown']"
+          :accepted-extensions="['.txt', '.md', '.markdown', '.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac', '.wma']"
           :custom-select-func="selectTextFilesWrapper"
         />
 
@@ -248,10 +296,21 @@ onUnmounted(() => {
             v-for="(file, idx) in files"
             :key="file.path"
             class="flex items-center gap-2 p-2 rounded-lg bg-bg-tertiary/50 transition-colors"
+            :class="{ 'ring-1 ring-accent-purple/40': playingOutputPath === file.outputPath }"
           >
-            <FileText :size="16" class="text-accent-purple flex-shrink-0" />
+            <Music v-if="file.outputPath === file.path" :size="16" class="text-accent-blue flex-shrink-0" />
+            <FileText v-else :size="16" class="text-accent-purple flex-shrink-0" />
             <span class="text-sm text-text-primary truncate flex-1">{{ file.fileName }}</span>
             <span class="text-xs text-text-muted">{{ formatSize(file.size) }}</span>
+            <button
+              v-if="file.status === 'done'"
+              @click="playOutput(file)"
+              class="p-1 rounded hover:bg-accent-purple/10"
+              :title="playingOutputPath === file.outputPath ? '停止播放' : '播放'"
+            >
+              <Square v-if="playingOutputPath === file.outputPath" :size="14" class="text-danger" />
+              <Play v-else :size="14" class="text-accent-purple" />
+            </button>
             <button @click="removeFile(idx)" class="p-1 rounded hover:bg-danger/10">
               <X :size="14" class="text-danger" />
             </button>
@@ -323,6 +382,7 @@ onUnmounted(() => {
             {{ isPreviewing ? '停止试听' : '试听当前声音' }}
           </button>
           <audio ref="previewAudio" class="hidden" @ended="isPreviewing = false" />
+          <audio ref="outputAudio" class="hidden" @ended="playingOutputPath = ''" @error="playingOutputPath = ''" />
         </div>
 
         <!-- Output Settings -->
