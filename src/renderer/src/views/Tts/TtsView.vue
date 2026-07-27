@@ -6,6 +6,7 @@ import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
 import { formatSize, getFileName, toFileUrl } from '@/utils/format'
+import { formatDuration } from '@/utils/time'
 import type { TtsFileEntry, TtsVoiceOption } from './types'
 
 const progressStore = useProgressStore()
@@ -34,6 +35,8 @@ const previewAudio = ref<HTMLAudioElement | null>(null)
 // Output audio playback
 const outputAudio = ref<HTMLAudioElement | null>(null)
 const playingOutputPath = ref('')
+const audioCurrentTime = ref(0)
+const audioDuration = ref(0)
 
 // Output
 const outputDir = ref('')
@@ -116,6 +119,13 @@ async function selectOutputDir(): Promise<void> {
 }
 
 // ---- Output audio playback ----
+const audioProgress = computed((): number => {
+  if (audioDuration.value === 0) {
+    return 0
+  }
+  return (audioCurrentTime.value / audioDuration.value) * 100
+})
+
 function playOutput(file: TtsFileEntry): void {
   if (!file.outputPath || !outputAudio.value) {
     return
@@ -126,6 +136,8 @@ function playOutput(file: TtsFileEntry): void {
   }
   stopPreview()
   playingOutputPath.value = file.outputPath
+  audioCurrentTime.value = 0
+  audioDuration.value = 0
   outputAudio.value.src = toFileUrl(file.outputPath)
   outputAudio.value.play()
 }
@@ -136,6 +148,30 @@ function stopOutput(): void {
     outputAudio.value.currentTime = 0
   }
   playingOutputPath.value = ''
+  audioCurrentTime.value = 0
+  audioDuration.value = 0
+}
+
+function onOutputTimeUpdate(): void {
+  if (outputAudio.value) {
+    audioCurrentTime.value = outputAudio.value.currentTime
+  }
+}
+
+function onOutputLoadedMetadata(): void {
+  if (outputAudio.value) {
+    audioDuration.value = outputAudio.value.duration
+  }
+}
+
+function seekOutput(e: MouseEvent): void {
+  if (!outputAudio.value || audioDuration.value === 0) {
+    return
+  }
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const ratio = (e.clientX - rect.left) / rect.width
+  outputAudio.value.currentTime = ratio * audioDuration.value
 }
 
 // ---- Voice preview ----
@@ -316,6 +352,26 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+
+        <!-- Audio progress bar -->
+        <div v-if="playingOutputPath" class="glass-card flex items-center gap-3 px-3 py-2">
+          <span class="text-xs text-text-muted font-mono w-9 text-right">{{ formatDuration(audioCurrentTime) }}</span>
+          <div
+            class="flex-1 h-1.5 rounded-full bg-bg-tertiary cursor-pointer group"
+            @click="seekOutput"
+          >
+            <div
+              class="h-full rounded-full bg-gradient-to-r from-accent-blue to-accent-purple relative transition-[width] duration-150"
+              :style="{ width: audioProgress + '%' }"
+            >
+              <div class="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-white shadow opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+          </div>
+          <span class="text-xs text-text-muted font-mono w-9">{{ formatDuration(audioDuration) }}</span>
+          <button @click="stopOutput" class="p-1 rounded hover:bg-danger/10">
+            <Square :size="12" class="text-danger" />
+          </button>
+        </div>
       </div>
 
       <!-- Right: Settings -->
@@ -382,7 +438,14 @@ onUnmounted(() => {
             {{ isPreviewing ? '停止试听' : '试听当前声音' }}
           </button>
           <audio ref="previewAudio" class="hidden" @ended="isPreviewing = false" />
-          <audio ref="outputAudio" class="hidden" @ended="playingOutputPath = ''" @error="playingOutputPath = ''" />
+          <audio
+            ref="outputAudio"
+            class="hidden"
+            @ended="playingOutputPath = ''"
+            @error="playingOutputPath = ''"
+            @timeupdate="onOutputTimeUpdate"
+            @loadedmetadata="onOutputLoadedMetadata"
+          />
         </div>
 
         <!-- Output Settings -->
