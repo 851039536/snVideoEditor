@@ -157,6 +157,7 @@ wrapOperation<TOpts>(channel, lockType, progressType, (opts, onProgress) => {
 
 - `.vue` 注释放在**文件最顶部、第一个块之前**（本项目 .vue 均以 `<script setup>` 开头，注释写在 `<script setup>` 之前）
 - 描述文件的职责而非实现细节，不要求写文件路径前缀
+- **注释语言统一使用中文**（包括文件头、行内注释、JSDoc `/** */` 描述）；代码标识符保持英文
 - 执行策略：新增文件必须；修改已有文件时建议顺带补上缺失的注释；禁止专门发起批量补注释的变更
 - 正面示例：`src/main/modules/ffmpeg.ts`、`src/renderer/src/composables/useScreenshot.ts`
 
