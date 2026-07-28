@@ -1,13 +1,4 @@
-/**
- * chromium-downloader.ts
- *
- * Downloads m3u8 playlists and their TS segments through Electron's Chromium
- * network stack (net.fetch). This bypasses Cloudflare anti-bot protection
- * because all HTTP requests use the real browser TLS fingerprint and cookies.
- *
- * After all segments are downloaded locally, ffmpeg handles the local-only
- * m3u8 → MP4 conversion.
- */
+// 通过 Electron Chromium 网络栈下载 m3u8 分片并本地转码为 MP4
 
 import { net } from 'electron'
 import * as fs from 'fs'
@@ -21,69 +12,69 @@ import {
 } from './ffmpeg-shared'
 import { DEFAULT_UA } from './download'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── 类型 ────────────────────────────────────────────────────────────────────
 
 export interface ChromiumDownloadOptions {
-  /** The remote m3u8 playlist URL. */
+  /** 远程 m3u8 播放列表地址 */
   url: string
-  /** Final output path (e.g. /Users/.../video.mp4). */
+  /** 最终输出路径（如 D:/Videos/video.mp4） */
   output: string
-  /** HTTP headers (Cookie, Referer, etc.) forwarded to every net.fetch request. */
+  /** 附加到每个 net.fetch 请求的 HTTP 头（Cookie、Referer 等） */
   headers?: Record<string, string>
-  /** Per-item abort signal for cancellation. Replaces global isCancelled. */
+  /** 逐项取消信号，替代全局 isCancelled */
   abortSignal?: AbortSignal
-  /** Persistent cache directory for TS segments (enables resume). If omitted, uses a temp dir. */
+  /** TS 分片持久缓存目录（支持断点续传），省略则使用临时目录 */
   cacheDir?: string
-  /** Progress callback (0-100). phase indicates download vs merge stage. */
+  /** 进度回调（0-100），phase 区分下载/转码阶段 */
   onProgress?: (data: {
     percent: number
     speed: string
     eta: string
     phase?: 'download' | 'merge'
   }) => void
-  /** Called when ffmpeg process is spawned (for cancellation). */
+  /** ffmpeg 进程创建后回调（用于外部取消） */
   onProcCreated?: (proc: ChildProcess) => void
-  /** Called when total duration is detected. */
+  /** 检测到总时长后回调 */
   onDurationDetected?: (durationSec: number) => void
 }
 
 interface SegmentInfo {
-  /** Remote URL of the TS segment. */
+  /** TS 分片远程地址 */
   url: string
-  /** Local file path where the segment will be saved. */
+  /** 分片本地保存路径 */
   localPath: string
-  /** Zero-based index. */
+  /** 从 0 开始的索引 */
   index: number
-  /** Segment duration in seconds (from #EXTINF). */
+  /** 分片时长（秒），来自 #EXTINF */
   duration: number
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── 常量 ────────────────────────────────────────────────────────────────────
 
-/** Max concurrent segment downloads. */
+/** 最大并发下载数 */
 const MAX_CONCURRENT = 6
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── 工具函数 ────────────────────────────────────────────────────────────────
 
-/** Parse an m3u8 playlist and return absolute TS segment URLs with durations. */
+/** 解析 m3u8 播放列表，返回绝对路径的 TS 分片地址及时长 */
 function parseTsSegments(m3u8Content: string, baseUrl: string): { url: string; duration: number }[] {
   const lines = m3u8Content.split(/\r?\n/)
   const segments: { url: string; duration: number }[] = []
-  let nextDuration = 10.0 // default if #EXTINF missing
+  let nextDuration = 10.0 // #EXTINF 缺失时的默认值
 
   for (const rawLine of lines) {
     const line = rawLine.trim()
     if (!line) { continue }
 
     if (line.startsWith('#EXTINF')) {
-      // Extract duration: #EXTINF:10.000, or #EXTINF:5.5,title
+      // 提取时长：#EXTINF:10.000, 或 #EXTINF:5.5,title
       const match = line.match(/#EXTINF:([\d.]+)/i)
       nextDuration = match ? parseFloat(match[1]) : 10.0
       continue
     }
 
     if (line.startsWith('#EXT-X-STREAM-INF')) {
-      // This is a master playlist — not a direct TS playlist.
+      // 主播放列表（master playlist），非直接 TS 列表
       return []
     }
 
@@ -92,7 +83,7 @@ function parseTsSegments(m3u8Content: string, baseUrl: string): { url: string; d
       continue
     }
 
-    // Non-comment line after #EXTINF = segment URL
+    // 非注释行 = 分片 URL
     try {
       segments.push({ url: new URL(line, baseUrl).href, duration: nextDuration })
     } catch {
@@ -104,7 +95,7 @@ function parseTsSegments(m3u8Content: string, baseUrl: string): { url: string; d
   return segments
 }
 
-/** Download a single URL via Chromium's network stack and return the response body as a Buffer. */
+/** 通过 Chromium 网络栈下载单个 URL，返回响应体 Buffer */
 async function chromiumFetch(
   url: string,
   signal?: AbortSignal,
@@ -126,25 +117,21 @@ async function chromiumFetch(
   return { body: Buffer.from(arrayBuffer), status: resp.status }
 }
 
-/** Format bitrate string (e.g. "1677.7kbits/s") to human-readable speed. */
-function formatSpeed(bitrate?: string): string {
-  if (!bitrate) { return '' }
-  const match = bitrate.match(/^([\d.]+)\s*(k|M|G)?bits\/s$/i)
-  if (!match) { return bitrate }
-  const value = parseFloat(match[1])
-  const unit = (match[2] || '').toUpperCase()
-  if (unit === 'G') { return `${(value * 1000).toFixed(0)} Mbps` }
-  if (unit === 'M') { return `${value.toFixed(1)} Mbps` }
-  if (unit === 'K') { return `${(value / 1000).toFixed(1)} Mbps` }
-  return `${(value / 1_000_000).toFixed(2)} Mbps`
+/** 将 bytes/sec 格式化为可读速度字符串 */
+function formatSpeed(bytesPerSec: number): string {
+  if (bytesPerSec <= 0) { return '' }
+  const mbps = (bytesPerSec * 8) / 1_000_000
+  if (mbps >= 1000) { return `${(mbps / 1000).toFixed(1)} Gbps` }
+  if (mbps >= 1) { return `${mbps.toFixed(1)} Mbps` }
+  return `${(mbps * 1000).toFixed(0)} Kbps`
 }
 
-// ─── Main: download via Chromium, then convert locally with ffmpeg ───────────
+// ─── 主流程：Chromium 下载分片 → ffmpeg 本地转码 ─────────────────────────────
 
 export async function downloadViaChromium(
   opts: ChromiumDownloadOptions
 ): Promise<boolean> {
-  // Use external cacheDir (persistent, for resume) or create a temp one
+  // 使用外部 cacheDir（持久化，支持续传）或创建临时目录
   const isPersistentCache = !!opts.cacheDir
   const workDir = opts.cacheDir || path.join(
     os.tmpdir(),
@@ -152,11 +139,11 @@ export async function downloadViaChromium(
   )
   fs.mkdirSync(workDir, { recursive: true })
 
-  // Use external abort signal (per-item) or create internal one (backward compat)
+  // 使用外部取消信号（逐项），向后兼容
   const signal = opts.abortSignal
   const isAborted = (): boolean => signal?.aborted === true
 
-  /** Delete workDir only if it's a temporary dir, not a persistent cache. */
+  /** 仅删除临时目录，保留持久缓存 */
   const cleanupIfTemp = (): void => {
     if (!isPersistentCache) {
       try { fs.rmSync(workDir, { recursive: true, force: true }) } catch { /* ignore */ }
@@ -164,7 +151,7 @@ export async function downloadViaChromium(
   }
 
   try {
-    // ─── Phase 1: Download the m3u8 playlist ───
+    // ─── 阶段 1：下载 m3u8 播放列表 ───
     if (isAborted()) { return false }
     if (opts.onProgress) {
       opts.onProgress({ percent: 0, speed: '解析 m3u8...', eta: '', phase: 'download' })
@@ -173,20 +160,20 @@ export async function downloadViaChromium(
     const m3u8Resp = await chromiumFetch(opts.url, signal, opts.headers)
     const m3u8Content = m3u8Resp.body.toString('utf-8')
 
-    // Detect master playlist (contains #EXT-X-STREAM-INF)
+    // 检测主播放列表（含 #EXT-X-STREAM-INF）
     if (m3u8Content.includes('#EXT-X-STREAM-INF')) {
       throw new Error(
         '检测到主播放列表 (master playlist)，请先选择具体清晰度的 m3u8 地址。'
       )
     }
 
-    // Parse TS segments with real durations
+    // 解析 TS 分片及真实时长
     const parsedSegs = parseTsSegments(m3u8Content, opts.url)
     if (parsedSegs.length === 0) {
       throw new Error('m3u8 播放列表中未找到视频分片，可能不是有效的流媒体地址。')
     }
 
-    // ─── Phase 2: Download all TS segments via Chromium ───
+    // ─── 阶段 2：通过 Chromium 下载所有 TS 分片 ───
     const segments: SegmentInfo[] = parsedSegs.map((s, i) => ({
       url: s.url,
       localPath: path.join(workDir, `seg_${String(i).padStart(6, '0')}.ts`),
@@ -196,43 +183,41 @@ export async function downloadViaChromium(
 
     const total = segments.length
     let completed = 0
-    let totalDownloadedBytes = 0  // cumulative (for accurate ETA)
-    let totalElapsedMs = 0
+    let totalDownloadedBytes = 0  // 累计字节（用于精确 ETA）
     const downloadStartTime = Date.now()
     let lastReportTime = Date.now()
 
-    // Download a single segment with retry (3 attempts, linear backoff)
+    // 下载单个分片（3 次重试，线性退避）
     const downloadSegmentWithRetry = async (seg: SegmentInfo): Promise<void> => {
       for (let attempt = 0; attempt < 3; attempt++) {
         if (isAborted()) { return }
         try {
           const resp = await chromiumFetch(seg.url, signal, opts.headers)
-          // Atomic write: write to .tmp then rename, so a crash mid-write
-          // leaves a .tmp file (skipped by resume scan) instead of a truncated
-          // .ts file that would be mistaken for a complete segment.
+          // 原子写入：先写 .tmp 再 rename，崩溃时留下 .tmp（续传扫描会跳过）
+          // 而非截断的 .ts 被误判为已完成
           const tmpPath = `${seg.localPath}.tmp`
           await fs.promises.writeFile(tmpPath, resp.body)
           await fs.promises.rename(tmpPath, seg.localPath)
           totalDownloadedBytes += resp.body.length
-          return // success
+          return // 成功
         } catch (e) {
           if (isAborted()) { return }
           if (attempt < 2) {
-            // Wait before retry (1s, 2s)
+            // 重试前等待（1s、2s）
             await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
             if (isAborted()) { return }
           } else {
-            throw e // all retries exhausted
+            throw e // 重试耗尽
           }
         }
       }
     }
 
-    // Pre-scan existing segments for resume (one readdirSync vs N existsSync)
+    // 预扫描已有分片以支持续传（一次 readdirSync 代替 N 次 existsSync）
     const existingFiles = new Set<string>()
     try {
       for (const name of fs.readdirSync(workDir)) {
-        // Clean up stale .tmp files from crashed writes (atomic write leftover)
+        // 清理崩溃残留的 .tmp 文件（原子写入遗留）
         if (name.endsWith('.tmp')) {
           try { fs.unlinkSync(path.join(workDir, name)) } catch { /* ignore */ }
           continue
@@ -241,7 +226,7 @@ export async function downloadViaChromium(
       }
     } catch { /* ignore */ }
 
-    // Process segments in batches (use index pointer to avoid O(n²) shift)
+    // 并发工作池（索引指针避免 O(n²) shift）
     let queuePtr = 0
     const workers: Promise<void>[] = []
 
@@ -249,7 +234,7 @@ export async function downloadViaChromium(
       while (queuePtr < total && !isAborted()) {
         const seg = segments[queuePtr++]
 
-        // Skip already-downloaded segments (resume support)
+        // 跳过已下载的分片（断点续传）
         if (existingFiles.has(seg.localPath)) {
           completed++
           continue
@@ -258,14 +243,14 @@ export async function downloadViaChromium(
         await downloadSegmentWithRetry(seg)
         completed++
 
-        // Report progress (10%–85% range for segment downloads)
+        // 上报进度（分片下载占 10%–85%）
         const now = Date.now()
         if (now - lastReportTime > 300 && opts.onProgress) {
-          totalElapsedMs = now - downloadStartTime
+          const elapsedMs = now - downloadStartTime
           const segPercent = Math.round((completed / total) * 75) + 10
-          // Use cumulative averages for accurate speed/ETA
-          const avgBytesPerSec = totalElapsedMs > 0
-            ? (totalDownloadedBytes / totalElapsedMs) * 1000
+          // 使用累计平均值计算速度/ETA
+          const avgBytesPerSec = elapsedMs > 0
+            ? (totalDownloadedBytes / elapsedMs) * 1000
             : 0
           const avgSegmentBytes = completed > 0
             ? totalDownloadedBytes / completed
@@ -276,7 +261,7 @@ export async function downloadViaChromium(
             : 0
           opts.onProgress({
             percent: Math.min(segPercent, 99),
-            speed: formatSpeed(`${(avgBytesPerSec * 8).toFixed(0)}bits/s`),
+            speed: formatSpeed(avgBytesPerSec),
             eta: etaSec > 0
               ? `${Math.floor(etaSec / 60)}:${String(etaSec % 60).padStart(2, '0')}`
               : '',
@@ -287,7 +272,7 @@ export async function downloadViaChromium(
       }
     }
 
-    // Start concurrent workers
+    // 启动并发 worker
     const concurrency = Math.min(MAX_CONCURRENT, total)
     for (let i = 0; i < concurrency; i++) {
       workers.push(worker())
@@ -296,7 +281,7 @@ export async function downloadViaChromium(
 
     if (isAborted()) { return false }
 
-    // ─── Phase 3: Build a local m3u8 playlist with real durations ───
+    // ─── 阶段 3：生成本地 m3u8 播放列表（含真实时长） ───
     const localM3u8Path = path.join(workDir, 'local.m3u8')
     const maxDuration = Math.ceil(Math.max(...segments.map((s) => s.duration), 10))
     const localLines: string[] = [
@@ -315,15 +300,18 @@ export async function downloadViaChromium(
       opts.onProgress({ percent: 88, speed: '转码中...', eta: '', phase: 'merge' })
     }
 
-    // ─── Phase 4: Convert with ffmpeg (local files only, no network) ───
+    // 确保输出目录存在
+    fs.mkdirSync(path.dirname(opts.output), { recursive: true })
+
+    // ─── 阶段 4：ffmpeg 本地转码（纯本地文件，无网络） ───
     const result = await convertLocalM3u8(localM3u8Path, opts)
 
-    // Clean up temp files (only temp dir, not persistent cache)
+    // 清理临时文件（仅临时目录，保留持久缓存）
     cleanupIfTemp()
 
     return result
   } catch (e) {
-    // On error: clean up temp dir but preserve persistent cache for resume
+    // 出错时清理临时目录，保留持久缓存以供续传
     cleanupIfTemp()
 
     if (isAborted()) { return false }
@@ -331,7 +319,7 @@ export async function downloadViaChromium(
   }
 }
 
-// ─── Local ffmpeg conversion ──────────────────────────────────────────────────
+// ─── 本地 ffmpeg 转码 ─────────────────────────────────────────────────────────
 
 async function convertLocalM3u8(
   localM3u8Path: string,
@@ -339,7 +327,7 @@ async function convertLocalM3u8(
 ): Promise<boolean> {
   return new Promise((resolve, reject) => {
     const args: string[] = [
-      '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
+      '-protocol_whitelist', 'file',
       '-allowed_extensions', 'ALL',
       '-i', localM3u8Path,
       '-c', 'copy',
@@ -349,12 +337,24 @@ async function convertLocalM3u8(
     ]
 
     const proc = spawn(getFfmpegPath(), args)
-    // Lower process priority so ffmpeg merge doesn't hog CPU/IO and freeze the system
+    // 降低进程优先级，避免 ffmpeg 转码占满 CPU/IO 导致系统卡顿
     if (process.platform === 'win32' && proc.pid) {
       try { os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch { /* ignore */ }
     }
     if (opts.onProcCreated) {
       opts.onProcCreated(proc)
+    }
+
+    // 响应取消信号：终止 ffmpeg 并 resolve(false)
+    const onAbort = (): void => {
+      proc.kill('SIGTERM')
+    }
+    if (opts.abortSignal) {
+      if (opts.abortSignal.aborted) {
+        proc.kill('SIGTERM')
+      } else {
+        opts.abortSignal.addEventListener('abort', onAbort, { once: true })
+      }
     }
 
     const MAX_STDERR_LINES = 50
@@ -368,7 +368,7 @@ async function convertLocalM3u8(
         stderrLines.splice(0, stderrLines.length - MAX_STDERR_LINES)
       }
 
-      // Extract total duration
+      // 提取总时长
       if (durationSec === 0) {
         const durMatch = chunk.match(/Duration: (\d{2}:\d{2}:\d{2}\.\d{2})/)
         if (durMatch) {
@@ -379,17 +379,15 @@ async function convertLocalM3u8(
         }
       }
 
-      // Parse progress for local conversion (88%–99%)
+      // 解析本地转码进度（88%–99%）
       const parsed = parseProgressLine(chunk)
       if (parsed && opts.onProgress && durationSec > 0) {
         const current = timeToSeconds(parsed.time)
-        const segmentPercent = durationSec > 0
-          ? Math.round((current / durationSec) * 100)
-          : 0
+        const segmentPercent = Math.round((current / durationSec) * 100)
         const percent = Math.min(88 + Math.round((segmentPercent * 11) / 100), 99)
         opts.onProgress({
           percent,
-          speed: formatSpeed(parsed.bitrate),
+          speed: parsed.speed,
           eta: parsed.time,
           phase: 'merge'
         })
@@ -401,6 +399,13 @@ async function convertLocalM3u8(
     })
 
     proc.on('close', (code: number | null) => {
+      if (opts.abortSignal) {
+        opts.abortSignal.removeEventListener('abort', onAbort)
+      }
+      if (opts.abortSignal?.aborted) {
+        resolve(false)
+        return
+      }
       if (code === 0) {
         if (opts.onProgress) {
           opts.onProgress({ percent: 100, speed: '完成', eta: '0:00', phase: 'merge' })
@@ -413,6 +418,9 @@ async function convertLocalM3u8(
     })
 
     proc.on('error', (err: Error) => {
+      if (opts.abortSignal) {
+        opts.abortSignal.removeEventListener('abort', onAbort)
+      }
       reject(new Error(`启动 FFmpeg 失败 (${getFfmpegPath()}): ${err.message}`))
     })
   })
