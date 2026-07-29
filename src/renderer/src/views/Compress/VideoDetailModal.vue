@@ -1,6 +1,6 @@
 <!-- 视频详情弹窗：展示编码/分辨率/码率等元信息 -->
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { FileVideo, X } from 'lucide-vue-next'
 import { formatSize, getFileName } from '@/utils/format'
 import { secondsToHMS } from '@/utils/time'
@@ -17,25 +17,20 @@ const emit = defineEmits<{
 const detailLoading = ref(false)
 let isUnmounted = false
 
+/** 拉取视频元信息，完成后写入 entry.meta 缓存 */
 function fetchMeta(entry: FileEntry): void {
   detailLoading.value = true
   window.electronAPI.getVideoMeta(entry.path).then((meta) => {
-    if (!isUnmounted) {
-      entry.meta = meta
+    entry.meta = meta
+    // 仅当弹窗仍显示同一文件时才清除 loading，避免旧请求覆盖新弹窗状态
+    if (!isUnmounted && props.entry === entry) {
       detailLoading.value = false
     }
   }).catch(() => {
-    if (!isUnmounted) {
+    if (!isUnmounted && props.entry === entry) {
       detailLoading.value = false
     }
   })
-}
-
-// Watch for entry changes to auto-fetch meta
-function onOpen(): void {
-  if (props.entry && !props.entry.meta) {
-    fetchMeta(props.entry)
-  }
 }
 
 function close(): void {
@@ -43,11 +38,28 @@ function close(): void {
   emit('close')
 }
 
-// Expose onOpen for parent to call when modal becomes visible
-defineExpose({ onOpen })
+// Escape 键关闭弹窗
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') {
+    close()
+  }
+}
+
+// 监听 entry 变化：非 null 时自动拉取元信息并注册 Esc 监听，null 时移除
+watch(() => props.entry, (entry) => {
+  if (entry) {
+    if (!entry.meta) {
+      fetchMeta(entry)
+    }
+    document.addEventListener('keydown', onKeydown)
+  } else {
+    document.removeEventListener('keydown', onKeydown)
+  }
+})
 
 onUnmounted(() => {
   isUnmounted = true
+  document.removeEventListener('keydown', onKeydown)
 })
 </script>
 
@@ -58,9 +70,8 @@ onUnmounted(() => {
         v-if="entry"
         class="detail-overlay"
         @click.self="close"
-        @keydown.escape="close"
       >
-        <div class="detail-modal glass-card" role="dialog" aria-label="视频详细信息">
+        <div class="detail-modal glass-card" role="dialog" aria-modal="true" aria-label="视频详细信息">
           <div class="detail-header">
             <div class="flex items-center gap-2 min-w-0">
               <FileVideo :size="18" class="text-accent-purple flex-shrink-0" />

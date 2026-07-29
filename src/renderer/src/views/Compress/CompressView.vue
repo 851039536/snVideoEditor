@@ -1,6 +1,6 @@
 <!-- 视频压缩页面：参数配置与批量压缩 -->
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import {
   FileVideo,
   Folder,
@@ -59,15 +59,11 @@ const {
 
 let isUnmounted = false;
 
-// Video detail modal
+// 视频详情弹窗
 const detailEntry = ref<FileEntry | null>(null);
-const detailModalRef = ref<InstanceType<typeof VideoDetailModal> | null>(null);
 
 function openDetail(entry: FileEntry): void {
   detailEntry.value = entry;
-  nextTick(() => {
-    detailModalRef.value?.onOpen();
-  });
 }
 
 function closeDetail(): void {
@@ -342,6 +338,6 @@ onUnmounted(() => {
     </div>
 
     <!-- Video Detail Modal -->
-    <VideoDetailModal ref="detailModalRef" :entry="detailEntry" @close="closeDetail" />
+    <VideoDetailModal :entry="detailEntry" @close="closeDetail" />
   </div>
 </template>
