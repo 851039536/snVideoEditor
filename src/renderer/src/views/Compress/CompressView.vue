@@ -23,6 +23,7 @@ import { useFileList } from '@/composables/useFileList';
 import { useCompressPreset } from '@/composables/useCompressPreset';
 import { useCompressBatch, compressFiles } from '@/composables/useCompressBatch';
 import type { FileEntry } from '@/types/file';
+import type { CompressResultItem } from './types';
 
 /** Output filename suffix for compressed videos. */
 const COMPRESS_SUFFIX = '_compressed.mp4';
@@ -73,6 +74,23 @@ function closeDetail(): void {
   detailEntry.value = null;
 }
 
+/** 计算体积变化百分比文案：压缩为负显示 -N%，膨胀显示 +N% */
+function sizeChangeText(item: CompressResultItem): { text: string; grew: boolean } {
+  if (item.originalSize <= 0) {
+    return { text: '-0%', grew: false };
+  }
+  const pct = Math.round((1 - item.compressedSize / item.originalSize) * 100);
+  if (pct >= 0) {
+    return { text: `-${pct}%`, grew: false };
+  }
+  return { text: `+${Math.abs(pct)}%`, grew: true };
+}
+
+// 压缩结果展示行：预计算体积变化文案与颜色，避免模板内重复调用
+const compressResultRows = computed(() =>
+  compressResult.value.map((item) => ({ ...item, change: sizeChangeText(item) }))
+);
+
 // Common paths for quick output selection
 const commonPaths = ref<{ desktop: string; downloads: string }>({ desktop: '', downloads: '' });
 const loadingPath = ref('');
@@ -87,15 +105,14 @@ const selectedOutputDir = computed(() => {
   return path ? getDirName(path) : '';
 });
 
-async function fetchCommonPaths(): Promise<boolean> {
+async function fetchCommonPaths(): Promise<void> {
   try {
     const paths = await window.electronAPI.getCommonPaths();
     if (!isUnmounted) {
       commonPaths.value = paths;
     }
-    return true;
-  } catch (_e) {
-    return false;
+  } catch {
+    // 静默失败，selectQuickDir 已有兜底提示
   }
 }
 
@@ -106,7 +123,7 @@ async function selectQuickDir(type: 'desktop' | 'downloads' | 'source'): Promise
     dir = sourceDir.value;
   } else {
     loadingPath.value = type;
-    if (!commonPaths.value.desktop) {
+    if (!commonPaths.value[type]) {
       await fetchCommonPaths();
     }
     dir = commonPaths.value[type];
@@ -273,7 +290,7 @@ onUnmounted(() => {
           </p>
 
           <div class="mt-3 pt-3 border-t border-bg-tertiary">
-            <button @click="selectOutputDir('_compressed.mp4')" class="btn-secondary">
+            <button @click="selectOutputDir(COMPRESS_SUFFIX)" class="btn-secondary">
               <Folder :size="16" />
               自定义目录
             </button>
@@ -300,11 +317,11 @@ onUnmounted(() => {
         <ProgressPanel />
 
         <!-- Compression Result Comparison -->
-        <div v-if="compressResult.length > 0" class="glass-card p-4">
+        <div v-if="compressResultRows.length > 0" class="glass-card p-4">
           <h3 class="text-base font-semibold text-text-primary mb-3">压缩结果对比</h3>
           <div class="space-y-2">
             <div
-              v-for="(item, idx) in compressResult"
+              v-for="(item, idx) in compressResultRows"
               :key="idx"
               class="flex items-center justify-between gap-2 py-1.5 border-b border-bg-tertiary/50 last:border-0"
             >
@@ -312,8 +329,11 @@ onUnmounted(() => {
               <span class="text-xs text-text-secondary whitespace-nowrap">
                 {{ formatSize(item.originalSize) }} → {{ formatSize(item.compressedSize) }}
               </span>
-              <span class="text-xs font-mono text-success whitespace-nowrap">
-                -{{ item.originalSize > 0 ? Math.round((1 - item.compressedSize / item.originalSize) * 100) : 0 }}%
+              <span
+                class="text-xs font-mono whitespace-nowrap"
+                :class="item.change.grew ? 'text-danger' : 'text-success'"
+              >
+                {{ item.change.text }}
               </span>
             </div>
           </div>
