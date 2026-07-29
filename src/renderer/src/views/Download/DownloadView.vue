@@ -1,3 +1,4 @@
+<!-- 视频下载页面：m3u8 解析、网页提取、清晰度选择与下载队列管理 -->
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import {
@@ -18,7 +19,7 @@ import ProgressPanel from '@/components/ProgressPanel.vue';
 import DownloadQueue from '@/views/Download/DownloadQueue.vue';
 import { useProgressStore } from '@/stores/progress';
 import { todayDateStr, sanitizeFileName } from '@/utils/format';
-import type { QualityVariant, RawCookie } from '@/types/file';
+import type { QualityVariant, RawCookie, QueueStatus } from '@/types/file';
 
 const progressStore = useProgressStore();
 
@@ -202,7 +203,7 @@ async function fetchCommonPaths(): Promise<void> {
 async function selectQuickDir(type: 'desktop' | 'downloads'): Promise<void> {
   loadingPath.value = type;
   try {
-    if (!commonPaths.value.desktop) {
+    if (!commonPaths.value[type]) {
       await fetchCommonPaths();
     }
     const dir = commonPaths.value[type];
@@ -242,8 +243,15 @@ const autoFileName = computed((): string => {
   }
 });
 
+// 清晰度探测防抖定时器
+let variantFetchTimer: ReturnType<typeof setTimeout> | null = null;
+
 // Auto-detect quality + auto-fill filename when m3u8 URL changes
 watch(m3u8Url, (url) => {
+  // 手动输入的新地址与提取结果无关时，清除旧页面标题，避免污染自动文件名
+  if (url && !fetchedUrls.value.includes(url)) {
+    fetchedTitle.value = '';
+  }
   // Only auto-fill when the user hasn't manually edited the filename
   if (!fileNameEdited.value) {
     fileName.value = autoFileName.value;
@@ -251,7 +259,8 @@ watch(m3u8Url, (url) => {
   // Sync cookies for the new URL domain (if we have raw cookies from page fetch)
   syncCookiesForUrl(url);
   if (url && isValidUrl(url) && url.includes('.m3u8')) {
-    fetchQualityVariants();
+    if (variantFetchTimer) { clearTimeout(variantFetchTimer); }
+    variantFetchTimer = setTimeout(() => { fetchQualityVariants(); }, 400);
   } else {
     showQualitySelector.value = false;
     variants.value = [];
@@ -465,12 +474,10 @@ async function handleQueueRemove(id: string): Promise<void> {
 async function handleQueueCancel(id: string): Promise<void> {
   const ok = await window.electronAPI.cancelQueueItem(id);
   if (!ok) {
-    // Item already changed to terminal state between click and IPC; resync state
+    // 点击与 IPC 之间项已转为终态，重新同步状态
     try {
       const status = await window.electronAPI.getQueueStatus();
-      progressStore.updateQueueItems(status.items);
-      progressStore.queueActiveIds = status.activeIds;
-      progressStore.queueIsProcessing = status.isProcessing;
+      applyQueueStatus(status);
     } catch {
       /* ignore */
     }
@@ -489,6 +496,14 @@ async function handleClearTerminal(): Promise<void> {
   await window.electronAPI.clearQueueTerminal();
 }
 
+/** 将后端队列状态同步到 progressStore */
+function applyQueueStatus(status: QueueStatus): void {
+  progressStore.updateQueueItems(status.items);
+  progressStore.queueActiveIds = status.activeIds;
+  progressStore.queueIsProcessing = status.isProcessing;
+  progressStore.queueConcurrency = status.concurrency;
+}
+
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -504,10 +519,7 @@ onMounted(async () => {
   // Register listeners BEFORE the initial status fetch so no backend update
   // arriving during the await gap is lost.
   window.electronAPI.onQueueUpdate((status) => {
-    progressStore.updateQueueItems(status.items);
-    progressStore.queueActiveIds = status.activeIds;
-    progressStore.queueIsProcessing = status.isProcessing;
-    progressStore.queueConcurrency = status.concurrency;
+    applyQueueStatus(status);
   });
 
   // Listen to download progress for the active queue item
@@ -519,13 +531,10 @@ onMounted(async () => {
     });
   });
 
-  // Fetch initial queue status (items may exist from before navigation)
+  // 拉取初始队列状态（导航前可能已有任务）
   try {
     const status = await window.electronAPI.getQueueStatus();
-    progressStore.updateQueueItems(status.items);
-    progressStore.queueActiveIds = status.activeIds;
-    progressStore.queueIsProcessing = status.isProcessing;
-    progressStore.queueConcurrency = status.concurrency;
+    applyQueueStatus(status);
   } catch {
     /* backend may not be ready yet */
   }
@@ -534,6 +543,9 @@ onMounted(async () => {
 onUnmounted(() => {
   if (justEnqueuedTimer) {
     clearTimeout(justEnqueuedTimer);
+  }
+  if (variantFetchTimer) {
+    clearTimeout(variantFetchTimer);
   }
   window.electronAPI?.removeQueueListeners();
 });
