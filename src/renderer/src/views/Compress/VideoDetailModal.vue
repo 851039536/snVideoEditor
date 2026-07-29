@@ -97,7 +97,7 @@ onUnmounted(() => {
           <div v-else-if="entry.meta" class="detail-grid">
             <div class="detail-item">
               <span class="detail-label">文件路径</span>
-              <span class="detail-value text-xs font-mono truncate" :title="entry.path">
+              <span class="detail-value text-xs font-mono break-all" :title="entry.path">
                 {{ entry.path }}
               </span>
             </div>
