@@ -111,7 +111,7 @@ export function useTrimTimeline(opts: UseTrimTimelineOptions): {
     return secondsToHMS(trimDuration.value)
   })
 
-  // ---- Timeline interaction helpers ----
+  // ---- 时间轴交互辅助 ----
 
   function getTimelineTime(clientX: number): number {
     const el = timelineRef.value
@@ -123,6 +123,8 @@ export function useTrimTimeline(opts: UseTrimTimelineOptions): {
 
   function startHandleDrag(handle: 'start' | 'end', e: PointerEvent): void {
     dragging.value = handle
+    const el = e.currentTarget as HTMLElement
+    el.setPointerCapture(e.pointerId)
     e.preventDefault()
     e.stopPropagation()
   }

@@ -15,9 +15,9 @@ import type { FileEntry } from '@/types/file'
 import type { QualityPreset, WidthOption } from './types'
 
 const progressStore = useProgressStore()
-const { files, addFiles, removeFile, selectOutputDir } = useFileList()
+const { files, addFiles, removeFile, selectOutputDir } = useFileList('.gif')
 
-// Quality presets
+// 质量预设
 const QUALITY_PRESETS: QualityPreset[] = [
   { value: 'high', label: '高质量', description: '最佳画质，文件较大' },
   { value: 'medium', label: '中等质量', description: '画质与大小平衡' },
@@ -25,7 +25,7 @@ const QUALITY_PRESETS: QualityPreset[] = [
 ]
 const selectedQuality = ref<'high' | 'medium' | 'low'>('medium')
 
-// Parameters
+// 参数配置
 const fps = ref(10)
 const selectedWidth = ref('480')
 const WIDTH_OPTIONS: WidthOption[] = [
@@ -36,17 +36,27 @@ const WIDTH_OPTIONS: WidthOption[] = [
   { label: '800px', value: '800' }
 ]
 
-// Segment trimming — always visible, HH:MM:SS like SplitMerge
+// 片段截取 — 时间轴与精确输入（HH:MM:SS）
+const DEFAULT_TRIM_DURATION = 5       // 默认截取时长（秒）
+const FALLBACK_WIDTH = 640            // 元数据缺失时的回退宽度
+const SIZE_ESTIMATE_FACTOR = 0.3      // GIF 体积估算压缩系数
+const QUALITY_SIZE_FACTORS: Record<string, number> = { high: 0.6, medium: 0.4, low: 0.2 }
+const LOOP_OPTIONS = [
+  { label: '无限', val: 0 },
+  { label: '1次', val: 1 },
+  { label: '3次', val: 3 },
+  { label: '5次', val: 5 }
+] as const
 const enableTrim = ref(false)
 const trimStartSec = ref(0)
-const trimEndSec = ref(5)
+const trimEndSec = ref(DEFAULT_TRIM_DURATION)
 const maxDuration = ref(0)
 const MIN_TRIM_GAP = 0.1
 
-// ---- Video Player ----
+// ---- 视频播放器 ----
 const { videoPlayer, isPlaying, currentTime, togglePlay, onVideoPlay, onVideoStop, onTimeUpdate, onVideoError, onVideoLoaded, seekVideoPlayer } = useVideoPlayer({
   onTimeUpdate: (t, vp) => {
-    // Auto-stop at end trim point when trim is enabled
+    // 启用截取时，播放到结束点自动暂停
     if (enableTrim.value && t >= trimEndSec.value) {
       vp.pause()
       vp.currentTime = trimEndSec.value
@@ -59,9 +69,9 @@ const { videoPlayer, isPlaying, currentTime, togglePlay, onVideoPlay, onVideoSto
   }
 })
 
-// ---- Trim Timeline ----
+// ---- 截取时间轴 ----
 const {
-  timelineRef, dragging,
+  timelineRef, dragging, startHandleDrag,
   startHour, startMin, startSec, endHour, endMin, endSec,
   startPercent, endPercent, playheadPercent: playheadPercentFn,
   getTimelineTime,
@@ -81,23 +91,23 @@ const playheadInTrim = computed((): number => {
   return clamp(((playheadPercent.value - startPercent.value) / range) * 100, 0, 100)
 })
 
-// Loop
+// 循环次数
 const loopCount = ref(0)
 
-// Auto-set end time when first file metadata loads
+// 首个文件元数据加载后自动设置截取终点
 watch(() => files.value[0]?.meta, (meta) => {
   if (!meta || meta.duration <= 0) {
     maxDuration.value = 0
     return
   }
   maxDuration.value = meta.duration
-  // Only auto-set end if not yet set by user (keep visible selection range)
+  // 仅在用户未手动设置时自动调整终点
   if (trimDuration.value <= 0 || trimEndSec.value > meta.duration) {
-    trimEndSec.value = Math.min(5, meta.duration)
+    trimEndSec.value = Math.min(DEFAULT_TRIM_DURATION, meta.duration)
   }
 })
 
-// Reset video position when trim toggle changes
+// 切换截取开关时重置播放位置
 watch(enableTrim, (enabled) => {
   seekVideoPlayer(enabled ? trimStartSec.value : 0)
 })
@@ -108,16 +118,8 @@ const videoSrc = computed((): string => {
   return toFileUrl(files.value[0].path)
 })
 
-// ---- Timeline drag (aligned with SplitMerge) ----
+// ---- 时间轴拖拽（与 SplitMerge 对齐） ----
 const scrubbing = ref(false)
-
-function startHandleDrag(handle: 'start' | 'end', e: PointerEvent): void {
-  dragging.value = handle
-  const el = e.currentTarget as HTMLElement
-  el.setPointerCapture(e.pointerId)
-  e.preventDefault()
-  e.stopPropagation()
-}
 
 function startScrub(e: PointerEvent): void {
   if (maxDuration.value <= 0) { return }
@@ -172,15 +174,14 @@ const canStart = computed((): boolean => {
 function estimateOutputSize(entry: FileEntry): string {
   if (!entry.meta || entry.meta.duration === 0) { return '未知' }
   const duration = enableTrim.value ? trimDuration.value : entry.meta.duration
-  const w = computedWidth.value > 0 ? computedWidth.value : (entry.meta.width || 640)
-  const h = entry.meta.height
+  const w = computedWidth.value > 0 ? computedWidth.value : (entry.meta.width || FALLBACK_WIDTH)
+  const h = (entry.meta.height && entry.meta.width > 0)
     ? Math.round(w * (entry.meta.height / entry.meta.width))
     : Math.round(w * 9 / 16)
   const pixels = w * h
   const frames = duration * fps.value
-  const qualityFactors: Record<string, number> = { high: 0.6, medium: 0.4, low: 0.2 }
-  const factor = qualityFactors[selectedQuality.value]
-  const estBytes = frames * pixels * factor * 0.3
+  const factor = QUALITY_SIZE_FACTORS[selectedQuality.value]
+  const estBytes = frames * pixels * factor * SIZE_ESTIMATE_FACTOR
   const estMB = estBytes / (1024 * 1024)
   if (estMB < 0.1) { return '< 0.1 MB' }
   return `~${estMB.toFixed(1)} MB`
@@ -268,7 +269,7 @@ onUnmounted(() => {
 
 <template>
   <div class="page-container">
-    <!-- Header -->
+    <!-- 头部 -->
     <header class="mb-6">
       <div class="flex items-center gap-3 mb-2">
         <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-500/20 to-yellow-500/20 flex items-center justify-center">
@@ -280,11 +281,11 @@ onUnmounted(() => {
     </header>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <!-- Left: File List -->
+      <!-- 左侧：文件列表 -->
       <div class="space-y-3">
         <FileDropZone @files-selected="addFiles" />
 
-        <!-- Video Player -->
+        <!-- 视频播放器 -->
         <div v-if="files.length > 0" class="video-player-container glass-card">
           <video
             v-if="videoSrc"
@@ -303,7 +304,7 @@ onUnmounted(() => {
             <Image :size="28" class="text-text-muted opacity-30" />
           </div>
 
-          <!-- Player Controls -->
+          <!-- 播放器控制栏 -->
           <div class="flex items-center justify-between px-3 py-2 bg-bg-secondary/80">
             <div class="flex items-center gap-2">
               <button
@@ -324,7 +325,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Segment Trimming — Timeline + Time Inputs -->
+        <!-- 片段截取 — 时间轴 + 精确输入 -->
         <div v-if="files.length > 0" class="glass-card">
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
@@ -346,7 +347,7 @@ onUnmounted(() => {
             拖拽下方摇杆选取范围，点击「启用截取」按钮启用截取
           </p>
 
-          <!-- Timeline Bar with Drag Handles -->
+          <!-- 时间轴与拖拽手柄 -->
           <div class="mb-3">
             <div
               ref="timelineRef"
@@ -370,7 +371,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- HH:MM:SS fine-tuning -->
+          <!-- HH:MM:SS 精确调整 -->
           <div class="flex items-center justify-center gap-2 flex-wrap">
             <div class="flex items-center gap-1">
               <span class="text-xs text-text-muted w-8">起始</span>
@@ -395,7 +396,7 @@ onUnmounted(() => {
           </p>
         </div>
 
-        <!-- File Table -->
+        <!-- 文件列表 -->
         <div v-if="files.length > 0" class="glass-card overflow-hidden">
           <table class="w-full text-sm">
             <thead>
@@ -440,9 +441,9 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Right: Parameters -->
+      <!-- 右侧：参数配置 -->
       <div class="space-y-3">
-        <!-- Quality Presets -->
+        <!-- 质量预设 -->
         <div class="glass-card">
           <h3 class="section-title">质量预设</h3>
           <div class="grid grid-cols-3 gap-2">
@@ -461,7 +462,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- FPS Slider -->
+        <!-- 帧率滑块 -->
         <div class="glass-card">
           <h3 class="section-title">帧率: {{ fps }} FPS</h3>
           <input
@@ -482,7 +483,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Width Selector -->
+        <!-- 宽度选择 -->
         <div class="glass-card">
           <h3 class="section-title">输出分辨率</h3>
           <select v-model="selectedWidth" class="select-input w-full">
@@ -496,12 +497,12 @@ onUnmounted(() => {
           </select>
         </div>
 
-        <!-- Loop Setting -->
+        <!-- 循环设置 -->
         <div class="glass-card">
           <h3 class="section-title">循环设置</h3>
           <div class="flex gap-2">
             <button
-              v-for="opt in [{ label: '无限', val: 0 }, { label: '1次', val: 1 }, { label: '3次', val: 3 }, { label: '5次', val: 5 }]"
+              v-for="opt in LOOP_OPTIONS"
               :key="opt.val"
               @click="loopCount = opt.val"
               class="flex-1 py-2 rounded-lg text-sm transition-all border"
@@ -514,7 +515,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Output Settings -->
+        <!-- 输出设置 -->
         <div class="glass-card">
           <h3 class="section-title">输出设置</h3>
           <button
@@ -529,12 +530,12 @@ onUnmounted(() => {
           </p>
         </div>
 
-        <!-- Error -->
+        <!-- 错误提示 -->
         <div v-if="errorMsg" class="alert-danger">
           <p>{{ errorMsg }}</p>
         </div>
 
-        <!-- Start Button -->
+        <!-- 开始按钮 -->
         <button
           @click="startConvert"
           :disabled="!canStart"
