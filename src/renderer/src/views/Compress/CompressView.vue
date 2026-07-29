@@ -35,11 +35,11 @@ const {
   params,
   hasNvidiaEncoders,
   hasQsvEncoders,
-  isGpuEncoder,
   crfMax,
   crfActive,
   showPreset,
   showNvencPreset,
+  showTwoPass,
   loadAvailableEncoders,
   estimateOutputSize
 } = useCompressPreset();
@@ -229,7 +229,7 @@ onUnmounted(() => {
           :crf-active="crfActive"
           :show-preset="showPreset"
           :show-nvenc-preset="showNvencPreset"
-          :is-gpu-encoder="isGpuEncoder"
+          :show-two-pass="showTwoPass"
           :has-nvidia-encoders="hasNvidiaEncoders"
           :has-qsv-encoders="hasQsvEncoders"
         />

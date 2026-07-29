@@ -18,11 +18,11 @@ export function useCompressPreset(): {
   params: CompressPreset
   hasNvidiaEncoders: ComputedRef<boolean>
   hasQsvEncoders: ComputedRef<boolean>
-  isGpuEncoder: ComputedRef<boolean>
   crfMax: ComputedRef<number>
   crfActive: ComputedRef<boolean>
   showPreset: ComputedRef<boolean>
   showNvencPreset: ComputedRef<boolean>
+  showTwoPass: ComputedRef<boolean>
   loadAvailableEncoders: () => Promise<void>
   estimateOutputSize: (entry: FileEntry) => string
 } {
@@ -56,6 +56,8 @@ export function useCompressPreset(): {
   const crfActive = computed((): boolean => !params.bitrate)
   const showPreset = computed((): boolean => !isGpuEncoder.value && !isVp9.value)
   const showNvencPreset = computed((): boolean => isGpuEncoder.value && params.codec.includes('nvenc'))
+  // 2-Pass 可用条件的唯一来源：固定码率 + CPU 编码
+  const showTwoPass = computed((): boolean => !isGpuEncoder.value && !!params.bitrate)
 
   const availableEncoders = ref<string[]>([])
   const hasNvidiaEncoders = computed((): boolean => availableEncoders.value.some((e) => e.includes('nvenc')))
@@ -77,7 +79,7 @@ export function useCompressPreset(): {
 
   // Persist preset on any param change + disable twoPass when inapplicable
   watch(params, () => {
-    if (!params.bitrate || isGpuEncoder.value) {
+    if (!showTwoPass.value) {
       params.twoPass = false
     }
     savePresetDebounced()
@@ -148,11 +150,11 @@ export function useCompressPreset(): {
     params,
     hasNvidiaEncoders,
     hasQsvEncoders,
-    isGpuEncoder,
     crfMax,
     crfActive,
     showPreset,
     showNvencPreset,
+    showTwoPass,
     loadAvailableEncoders,
     estimateOutputSize
   }

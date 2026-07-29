@@ -1,3 +1,4 @@
+<!-- 点击式帮助信息气泡（label 插槽 + 问号按钮 + content 浮层） -->
 <script setup lang="ts">
 import { HelpCircle } from 'lucide-vue-next'
 import { useInfoTooltip } from '@/composables/useInfoTooltip'
@@ -5,13 +6,15 @@ import { useInfoTooltip } from '@/composables/useInfoTooltip'
 defineProps<{
   title?: string
   widthClass?: string
+  /** 行内模式：去掉底部间距，适配横向 flex 布局 */
+  inline?: boolean
 }>()
 
 const tooltip = useInfoTooltip()
 </script>
 
 <template>
-  <div class="relative flex items-center gap-1 mb-2">
+  <div class="relative flex items-center gap-1" :class="{ 'mb-2': !inline }">
     <slot name="label" />
     <button
       type="button"

@@ -1,21 +1,19 @@
 <!-- 压缩参数配置面板：分辨率/码率/CRF/编码器/预设选择 -->
 <script setup lang="ts">
-import { useInfoTooltip } from '@/composables/useInfoTooltip';
 import InfoTooltip from '@/components/InfoTooltip.vue';
 import type { CompressPreset } from '@/stores/settings';
 
+// params 为父组件共享的 reactive 对象，本组件直接双向修改属有意设计
 defineProps<{
   params: CompressPreset;
   crfMax: number;
   crfActive: boolean;
   showPreset: boolean;
   showNvencPreset: boolean;
-  isGpuEncoder: boolean;
+  showTwoPass: boolean;
   hasNvidiaEncoders: boolean;
   hasQsvEncoders: boolean;
 }>();
-
-const twoPassTip = useInfoTooltip();
 </script>
 
 <template>
@@ -78,6 +76,7 @@ const twoPassTip = useInfoTooltip();
         type="range"
         min="0"
         :max="crfMax"
+        :disabled="!crfActive"
         class="w-full mt-2 slider-base slider"
       />
       <div class="flex justify-between text-xs text-text-muted mt-1">
@@ -143,7 +142,7 @@ const twoPassTip = useInfoTooltip();
         <template #content>
           <p class="mb-2"><strong class="text-text-primary">音频码率</strong> 决定音频的清晰度：</p>
           <ul class="list-disc list-inside space-y-1">
-            <li><span class="text-accent-blue font-medium">32~64 Kbps</span>：语音/ podcast 足够，极小体积</li>
+            <li><span class="text-accent-blue font-medium">32~64 Kbps</span>：语音/播客足够，极小体积</li>
             <li><span class="text-accent-purple font-medium">96~128 Kbps</span>：常规视频够用，音质与体积平衡</li>
             <li><span class="text-accent-yellow font-medium">192 Kbps</span>：接近无损，适合音乐/高音质需求</li>
           </ul>
@@ -238,56 +237,26 @@ const twoPassTip = useInfoTooltip();
     </div>
 
     <!-- 2-Pass (CPU + bitrate only) -->
-    <div v-if="!isGpuEncoder && !!params.bitrate" class="flex items-center gap-3">
-      <div class="relative flex items-center gap-1">
-        <label class="text-sm text-text-secondary">2-Pass 编码</label>
-        <button
-          type="button"
-          class="p-0.5 rounded hover:bg-bg-tertiary transition-colors"
-          @click.stop="twoPassTip.toggle()"
-          title="什么是 2-Pass？"
-        >
-          <span class="text-text-muted hover:text-text-secondary transition-colors">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-              <path d="M12 17h.01" />
-            </svg>
-          </span>
-        </button>
-        <!-- Tooltip -->
-        <transition name="tooltip-fade">
-          <div
-            v-if="twoPassTip.isOpen.value"
-            :ref="twoPassTip.elRef"
-            class="absolute left-0 bottom-full mb-2 w-72 p-3 rounded-lg bg-bg-secondary border border-bg-tertiary shadow-lg z-50 text-xs leading-relaxed text-text-secondary"
-          >
-            <p class="mb-2"><strong class="text-text-primary">2-Pass 编码</strong> 是一种两次编码技术：</p>
-            <ul class="list-disc list-inside space-y-1">
-              <li>
-                <span class="text-accent-blue font-medium">第 1 遍</span
-                >：分析视频内容，记录每帧的复杂度信息（不输出文件）
-              </li>
-              <li>
-                <span class="text-accent-purple font-medium">第 2 遍</span
-                >：根据分析结果，更精准地分配码率，正式编码输出文件
-              </li>
-            </ul>
-            <p class="mt-2 text-text-muted">✅ 同等码率下画质更好 &nbsp;|&nbsp; ⚠️ 耗时约 2 倍</p>
-            <p class="mt-1 text-text-muted">仅在使用码率限制（非 CRF 模式）+ CPU 编码时可用。</p>
-          </div>
-        </transition>
-      </div>
+    <div v-if="showTwoPass" class="flex items-center gap-3">
+      <InfoTooltip inline title="什么是 2-Pass？" widthClass="w-72">
+        <template #label>
+          <label class="text-sm text-text-secondary">2-Pass 编码</label>
+        </template>
+        <template #content>
+          <p class="mb-2"><strong class="text-text-primary">2-Pass 编码</strong> 是一种两次编码技术：</p>
+          <ul class="list-disc list-inside space-y-1">
+            <li>
+              <span class="text-accent-blue font-medium">第 1 遍</span
+              >：分析视频内容，记录每帧的复杂度信息（不输出文件）
+            </li>
+            <li>
+              <span class="text-accent-purple font-medium">第 2 遍</span
+              >：根据分析结果，更精准地分配码率，正式编码输出文件
+            </li>
+          </ul>
+          <p class="mt-2 text-text-muted">仅在使用码率限制（非 CRF 模式）+ CPU 编码时可用。</p>
+        </template>
+      </InfoTooltip>
       <button
         type="button"
         class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
