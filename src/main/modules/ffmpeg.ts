@@ -11,7 +11,7 @@
  * remain in this file.
  */
 
-import { spawn, type ChildProcess } from 'child_process'
+import { spawn } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
 
@@ -46,7 +46,6 @@ import {
   setFfmpegProc as _setFfmpegProc,
   isCancelled,
   resetCancelled,
-  currentProc,
   type VideoMeta
 } from './ffmpeg-shared'
 
@@ -262,14 +261,14 @@ export async function mergeVideos(opts: MergeOptions): Promise<boolean> {
 
 export function getVideoMeta(filePath: string): Promise<VideoMeta> {
   return new Promise((resolve, reject) => {
+    // 只读探测不注册取消句柄，避免覆盖运行中操作的进程引用
     const ffprobeProcess = spawn(getFfprobePath(), [
-      '-v', 'quiet',
+      '-v', 'error',
       '-print_format', 'json',
       '-show_format',
       '-show_streams',
       filePath
     ])
-    _setFfmpegProc(ffprobeProcess)
 
     let stdout = ''
     let stderr = ''
@@ -283,9 +282,8 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
     })
 
     ffprobeProcess.on('close', (code: number | null) => {
-      _setFfmpegProc(null)
       if (code !== 0) {
-        reject(new Error(`ffprobe 执行失败: ${stderr}`))
+        reject(new Error(`ffprobe 执行失败 (${filePath}): ${stderr.trim().slice(0, 500)}`))
         return
       }
 
@@ -313,7 +311,6 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
     })
 
     ffprobeProcess.on('error', (err: Error) => {
-      _setFfmpegProc(null)
       reject(new Error(`启动 ffprobe 失败 (${getFfprobePath()}): ${err.message}`))
     })
   })
@@ -323,18 +320,17 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
 
 export function getAvailableEncoders(): Promise<string[]> {
   return new Promise((resolve) => {
+    // 只读探测不注册取消句柄，避免覆盖运行中操作的进程引用
     const proc = spawn(getFfmpegPath(), ['-encoders'])
-    _setFfmpegProc(proc)
     let stdout = ''
     proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
     proc.on('close', () => {
-      _setFfmpegProc(null)
       const encoders = stdout
         .split('\n')
         .filter((l) => /^\s+V.....\s+\S/.test(l))
         .map((l) => l.trim().split(/\s+/)[1])
       resolve(encoders)
     })
-    proc.on('error', () => { _setFfmpegProc(null); resolve([]) })
+    proc.on('error', () => { resolve([]) })
   })
 }
