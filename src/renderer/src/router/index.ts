@@ -13,6 +13,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/SplitMerge/SplitMergeView.vue')
   },
   {
+    path: '/audio-split',
+    name: 'AudioSplit',
+    component: () => import('@/views/SplitMerge/AudioSplitMergeView.vue')
+  },
+  {
     path: '/compress',
     name: 'Compress',
     component: () => import('@/views/Compress/CompressView.vue')

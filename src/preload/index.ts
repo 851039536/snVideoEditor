@@ -19,6 +19,15 @@ export interface VideoMeta {
   size: number;
 }
 
+export interface AudioMeta {
+  duration: number;
+  sampleRate: number;
+  channels: number;
+  codec: string;
+  bitrate: number;
+  size: number;
+}
+
 export interface FileInfo {
   size: number;
   ext: string;
@@ -83,6 +92,8 @@ const electronAPI = {
 
   formatDuration: (seconds: number): Promise<string> => ipcRenderer.invoke('file:formatDuration', seconds),
 
+  selectAudioFiles: (): Promise<string[]> => ipcRenderer.invoke('file:selectAudioFiles'),
+
   // Split/Merge
   splitVideo: (opts: { input: string; output: string; startTime: string; duration: string }): Promise<boolean> =>
     ipcRenderer.invoke('video:split', opts),
@@ -92,6 +103,9 @@ const electronAPI = {
 
   // Video meta & compress
   getVideoMeta: (filePath: string): Promise<VideoMeta> => ipcRenderer.invoke('video:getMeta', filePath),
+
+  // Audio meta
+  getAudioMeta: (filePath: string): Promise<AudioMeta> => ipcRenderer.invoke('audio:getMeta', filePath),
 
   compressVideo: (opts: {
     input: string;

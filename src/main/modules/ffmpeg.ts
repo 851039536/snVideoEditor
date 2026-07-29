@@ -316,6 +316,73 @@ export function getVideoMeta(filePath: string): Promise<VideoMeta> {
   })
 }
 
+// ─── getAudioMeta ───────────────────────────────────────────────────────────────────────
+
+export interface AudioMeta {
+  duration: number
+  sampleRate: number
+  channels: number
+  codec: string
+  bitrate: number
+  size: number
+}
+
+export function getAudioMeta(filePath: string): Promise<AudioMeta> {
+  return new Promise((resolve, reject) => {
+    const ffprobeProcess = spawn(getFfprobePath(), [
+      '-v', 'error',
+      '-print_format', 'json',
+      '-show_format',
+      '-show_streams',
+      filePath
+    ])
+
+    let stdout = ''
+    let stderr = ''
+
+    ffprobeProcess.stdout.on('data', (data: Buffer) => {
+      stdout += data.toString()
+    })
+
+    ffprobeProcess.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString()
+    })
+
+    ffprobeProcess.on('close', (code: number | null) => {
+      if (code !== 0) {
+        reject(new Error(`ffprobe 执行失败 (${filePath}): ${stderr.trim().slice(0, 500)}`))
+        return
+      }
+
+      try {
+        const data = JSON.parse(stdout)
+        const audioStream = data.streams?.find(
+          (s: { codec_type: string }) => s.codec_type === 'audio'
+        )
+
+        const format = data.format || {}
+
+        const meta: AudioMeta = {
+          duration: parseFloat(format.duration || '0'),
+          sampleRate: parseInt(audioStream?.sample_rate || '0', 10),
+          channels: audioStream?.channels || 0,
+          codec: audioStream?.codec_name || 'unknown',
+          bitrate: parseInt(format.bit_rate || '0', 10),
+          size: parseInt(format.size || '0', 10)
+        }
+
+        resolve(meta)
+      } catch (e) {
+        reject(new Error(`解析音频元数据失败: ${e}`))
+      }
+    })
+
+    ffprobeProcess.on('error', (err: Error) => {
+      reject(new Error(`启动 ffprobe 失败 (${getFfprobePath()}): ${err.message}`))
+    })
+  })
+}
+
 // ─── getAvailableEncoders ─────────────────────────────────────────────────────
 
 export function getAvailableEncoders(): Promise<string[]> {

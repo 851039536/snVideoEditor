@@ -9,6 +9,7 @@ import {
   compressVideo,
   batchCompress,
   getVideoMeta,
+  getAudioMeta,
   convertToGif,
   batchConvertToGif,
   captureScreenshot,
@@ -36,7 +37,8 @@ import {
   selectPlayerFiles,
   scanPlayerFiles,
   selectTextFiles,
-  scanTextFiles
+  scanTextFiles,
+  selectAudioFiles
 } from './modules/file';
 import { getTtsVoices, previewVoice, batchSynthesize, cancelTts } from './modules/tts';
 import type { ProgressInfo } from '../preload/index';
@@ -176,6 +178,10 @@ function registerFileHandlers(): void {
   ipcMain.handle('file:formatDuration', async (_event, seconds: number) => {
     return formatDuration(seconds);
   });
+
+  ipcMain.handle('file:selectAudioFiles', async () => {
+    return selectAudioFiles();
+  });
 }
 
 // Split/Merge handlers
@@ -190,6 +196,10 @@ function registerSplitMergeHandlers(): void {
   wrapOperation<{ inputs: string[]; output: string }>('video:merge', 'merge', 'merge', (opts, onProgress) =>
     mergeVideos({ ...opts, onProgress })
   );
+
+  ipcMain.handle('audio:getMeta', async (_event, filePath: string) => {
+    return getAudioMeta(filePath);
+  });
 }
 
 // Compression handlers

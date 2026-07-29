@@ -1,5 +1,5 @@
 import {
-  Home, Scissors, FileVideo, Shield, Image, Globe, Video, AudioLines
+  Home, Scissors, FileVideo, Shield, Image, Globe, Video, AudioLines, Music
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -28,6 +28,14 @@ export const FEATURE_CONFIG: FeatureMeta[] = [
     color: 'var(--color-accent-blue)',
     desc: '精确切割与无缝拼接',
     gradient: 'from-blue-500/20 to-cyan-500/20'
+  },
+  {
+    name: '音频分割合并',
+    path: '/audio-split',
+    icon: Music,
+    color: 'var(--color-accent-light)',
+    desc: '音频精确裁剪与拼接',
+    gradient: 'from-green-500/20 to-emerald-500/20'
   },
   {
     name: '视频压缩',

@@ -17,6 +17,15 @@ export interface VideoMeta {
   size: number;
 }
 
+export interface AudioMeta {
+  duration: number;
+  sampleRate: number;
+  channels: number;
+  codec: string;
+  bitrate: number;
+  size: number;
+}
+
 export interface FileInfo {
   size: number;
   ext: string;
@@ -81,6 +90,8 @@ export interface ElectronAPI {
   formatFileSize: (bytes: number) => Promise<string>;
   formatDuration: (seconds: number) => Promise<string>;
 
+  selectAudioFiles: () => Promise<string[]>;
+
   // Split/Merge
   splitVideo: (opts: { input: string; output: string; startTime: string; duration: string }) => Promise<boolean>;
 
@@ -88,6 +99,9 @@ export interface ElectronAPI {
 
   // Video meta & compress
   getVideoMeta: (filePath: string) => Promise<VideoMeta>;
+
+  // Audio meta
+  getAudioMeta: (filePath: string) => Promise<AudioMeta>;
 
   compressVideo: (opts: {
     input: string;

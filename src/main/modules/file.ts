@@ -40,6 +40,17 @@ const TEXT_FILTERS: FileFilter[] = [
   }
 ]
 
+const AUDIO_FILTERS: FileFilter[] = [
+  {
+    name: '音频文件',
+    extensions: ['mp3', 'aac', 'flac', 'wav', 'ogg', 'm4a', 'wma', 'opus']
+  },
+  {
+    name: '所有文件',
+    extensions: ['*']
+  }
+]
+
 /**
  * Open native dialog to select video files
  */
@@ -88,6 +99,24 @@ export async function selectPlayerFiles(): Promise<string[]> {
   const result = await dialog.showOpenDialog(window, {
     title: '选择视频文件',
     filters: PLAYER_FILTERS,
+    properties: ['openFile', 'multiSelections']
+  })
+
+  return result.canceled ? [] : result.filePaths
+}
+
+/**
+ * Open native dialog to select audio files
+ */
+export async function selectAudioFiles(): Promise<string[]> {
+  const window = BrowserWindow.getFocusedWindow()
+  if (!window) {
+    return []
+  }
+
+  const result = await dialog.showOpenDialog(window, {
+    title: '选择音频文件',
+    filters: AUDIO_FILTERS,
     properties: ['openFile', 'multiSelections']
   })
 
