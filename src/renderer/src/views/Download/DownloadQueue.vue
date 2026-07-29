@@ -1,3 +1,4 @@
+<!-- 下载队列面板：队列项状态展示与暂停/恢复/取消/重试/移除操作 -->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useProgressStore } from '@/stores/progress'
@@ -39,12 +40,19 @@ const statusCounts = computed(() => {
   return counts
 })
 
-// Whether any terminal items (completed/failed/cancelled) exist for batch clearing
+// 是否存在终态项（完成/失败/取消），用于显示批量清空按钮
 const hasTerminalItems = computed((): boolean => {
   return store.queueItems.some(
     (i) => i.status === 'completed' || i.status === 'failed' || i.status === 'cancelled'
   )
 })
+
+// 队列全部到达终态（完成/失败/取消）时显示“全部处理完”图标
+const allSettled = computed((): boolean =>
+  store.queueItems.every(
+    (i) => i.status === 'completed' || i.status === 'failed' || i.status === 'cancelled'
+  )
+)
 </script>
 
 <template>
@@ -84,7 +92,7 @@ const hasTerminalItems = computed((): boolean => {
         >
           <Eraser :size="12" /> 清空已完成
         </button>
-        <ListChecks v-if="statusCounts.pending === 0 && store.queueItems.length > 0" :size="14" class="text-success" />
+        <ListChecks v-if="allSettled" :size="14" class="text-success" />
       </div>
     </div>
 
@@ -154,8 +162,7 @@ const hasTerminalItems = computed((): boolean => {
 
             <!-- Progress text -->
             <div class="flex items-center gap-3 text-[10px] text-text-muted">
-              <span v-if="STATUS_CONFIG[item.status].isActive">{{ item.progress.percent }}%</span>
-              <span v-if="item.status === 'paused'">已暂停 ({{ item.progress.percent }}%)</span>
+              <span v-if="STATUS_CONFIG[item.status].isActive || item.status === 'paused'">{{ item.progress.percent }}%</span>
               <span v-if="STATUS_CONFIG[item.status].isActive && item.progress.speed">{{ item.progress.speed }}</span>
               <span v-if="item.status === 'failed' && item.error" class="text-danger truncate" :title="item.error">
                 {{ item.error.slice(0, 60) }}{{ item.error.length > 60 ? '...' : '' }}
