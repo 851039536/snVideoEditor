@@ -22,17 +22,16 @@ interface BatchResult {
 /** Compress 页面的文件列表（传给 useFileList 作为外部持久列表） */
 export const compressFiles = ref<FileEntry[]>([])
 
-// Batch file status tracking
+// 批量文件状态跟踪
 const fileStatuses = ref<Record<string, BatchFileStatus>>({})
 
-// Compression result comparison
+// 压缩结果对比
 const compressResult = ref<CompressResultItem[]>([])
 
 const errorMsg = ref('')
 let runId = 0
 
-// Snapshot of the file list for the active run — read by the progress listener
-// to map the current file index to a file status.
+// 当前运行批次的文件快照——进度监听器通过索引映射文件状态
 const runSnapshot = ref<FileEntry[]>([])
 
 export function useCompressBatch(opts: {
@@ -57,15 +56,6 @@ export function useCompressBatch(opts: {
     return compressFiles.value.length > 0 && allOutputsResolved.value && !progressStore.isProcessing
   })
 
-  function pruneFileStatuses(): void {
-    const currentPaths = new Set(compressFiles.value.map((f) => f.path))
-    for (const key of Object.keys(fileStatuses.value)) {
-      if (!currentPaths.has(key)) {
-        delete fileStatuses.value[key]
-      }
-    }
-  }
-
   function handleRemoveFile(index: number): void {
     const entry = compressFiles.value[index]
     if (entry) {
@@ -76,10 +66,12 @@ export function useCompressBatch(opts: {
 
   function handleProgress(info: ProgressInfo): void {
     progressStore.update(info)
-    // Update file status using currentFile index against the run snapshot
+    // 根据 currentFile 索引在运行快照中定位当前文件，仅在状态变化时写入
     if (info.currentFile > 0 && info.currentFile <= runSnapshot.value.length) {
       const entry = runSnapshot.value[info.currentFile - 1]
-      fileStatuses.value[entry.path] = 'processing'
+      if (fileStatuses.value[entry.path] !== 'processing') {
+        fileStatuses.value[entry.path] = 'processing'
+      }
     }
   }
 
@@ -95,14 +87,14 @@ export function useCompressBatch(opts: {
       return null
     }
 
-    // Set all files to pending and prune stale entries
-    pruneFileStatuses()
+    // 整体重建状态表：清除过期条目 + 初始化全部为 pending（单次响应式更新）
+    const statuses: Record<string, BatchFileStatus> = {}
     for (const entry of compressFiles.value) {
-      fileStatuses.value[entry.path] = 'pending'
+      statuses[entry.path] = 'pending'
     }
+    fileStatuses.value = statuses
 
-    // Snapshot the file list so progress indices and result matching stay
-    // consistent even if the list changes (add/remove) during compression.
+    // 快照当前文件列表，确保进度索引和结果匹配不受运行中增删影响
     const snapshot = compressFiles.value.slice()
     runSnapshot.value = snapshot
     return snapshot
@@ -152,11 +144,13 @@ export function useCompressBatch(opts: {
     if (currentRunId !== runId) {
       return false
     }
+    // 构建 outputPath → FileEntry 映射，将查找从 O(n) 降为 O(1)
+    const outputPathMap = new Map(snapshot.map((f) => [f.outputPath, f]))
     for (const r of results) {
       if (!r) {
         continue
       }
-      const original = snapshot.find((f) => f.outputPath === r.outputPath)
+      const original = outputPathMap.get(r.outputPath)
       if (original) {
         let originalSize = original.meta?.size ?? 0
         if (!original.meta) {
@@ -164,7 +158,7 @@ export function useCompressBatch(opts: {
             const info = await window.electronAPI.getFileInfo(original.path)
             originalSize = info.size
           } catch {
-            /* keep 0 */
+            /* 保持 0 */
           }
         }
         compressResult.value.push({
@@ -181,12 +175,14 @@ export function useCompressBatch(opts: {
   /** 标记失败文件并拼装失败/回退提示信息 */
   function applyFailures(result: BatchResult, snapshot: FileEntry[]): void {
     if (result.failed.length > 0) {
+      // 构建 path → FileEntry 映射，将查找从 O(n) 降为 O(1)
+      const pathMap = new Map(snapshot.map((f) => [f.path, f]))
       for (const item of result.failed) {
         fileStatuses.value[item.input] = 'failed'
       }
       const failedDetails = result.failed
         .map((item) => {
-          const f = snapshot.find((x) => x.path === item.input)
+          const f = pathMap.get(item.input)
           const name = f ? getFileName(f.path) : item.input
           return `${name}: ${item.error.slice(0, 500)}`
         })
@@ -198,7 +194,7 @@ export function useCompressBatch(opts: {
       }
     }
 
-    // NVENC driver-incompatible fallback warning
+    // NVENC 驱动不兼容自动回退警告
     if (result.fallbacks && result.fallbacks.length > 0) {
       const fallbackNames = result.fallbacks.map((fb) => getFileName(fb.input)).join('、')
       errorMsg.value =
@@ -225,9 +221,8 @@ export function useCompressBatch(opts: {
         return
       }
 
-      // Finalize the global progress store regardless of mount state, so the
-      // ProgressPanel reflects completion even if the user navigated away and
-      // came back (or is on another page).
+      // 无论组件是否仍挂载，都终结全局进度状态，
+      // 确保 ProgressPanel 在用户切走再切回时也能正确显示完成态。
       const allFailed = result.failed.length > 0 && result.successFiles.length === 0
       if (allFailed) {
         progressStore.reset()
@@ -243,7 +238,7 @@ export function useCompressBatch(opts: {
       }
       applyFailures(result, snapshot)
     } catch (e) {
-      // Failure: release the global progress state, then record the error.
+      // 失败：释放全局进度状态，记录错误信息
       progressStore.reset()
       errorMsg.value = e instanceof Error ? e.message : String(e)
       for (const entry of compressFiles.value) {
