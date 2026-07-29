@@ -93,9 +93,9 @@ onUnmounted(() => {
             <p class="text-text-secondary text-sm">正在获取视频信息...</p>
           </div>
 
-          <!-- Metadata grid -->
+          <!-- 元信息网格 -->
           <div v-else-if="entry.meta" class="detail-grid">
-            <div class="detail-item">
+            <div class="detail-item detail-item--full">
               <span class="detail-label">文件路径</span>
               <span class="detail-value text-xs font-mono break-all" :title="entry.path">
                 {{ entry.path }}

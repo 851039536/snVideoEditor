@@ -52,16 +52,21 @@
 
 .detail-grid {
   display: grid;
-  gap: 6px;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .detail-item {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 6px 12px;
+  gap: 2px;
+  padding: 10px 14px;
   background: var(--color-bg-secondary, hsl(var(--secondary)));
   border-radius: var(--radius-sm, 4px);
+}
+
+.detail-item--full {
+  grid-column: 1 / -1;
 }
 
 .detail-label {
