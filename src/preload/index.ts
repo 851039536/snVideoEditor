@@ -356,6 +356,26 @@ const electronAPI = {
 
   clearDownloadHistory: (): Promise<void> => ipcRenderer.invoke('download:clearHistory'),
 
+  // 网页路径持久化（userData/web-page-paths.json）
+  getWebPagePaths: (): Promise<{
+    entries: { id: string; url: string; createdAt: number; status: 'pending' | 'downloaded' }[];
+    error?: string;
+  }> => ipcRenderer.invoke('webpaths:getAll'),
+
+  saveWebPagePaths: (
+    entries: { id: string; url: string; createdAt: number; status: 'pending' | 'downloaded' }[]
+  ): Promise<void> => ipcRenderer.invoke('webpaths:saveAll', entries),
+
+  getWebPagePathsFile: (): Promise<string> => ipcRenderer.invoke('webpaths:getFilePath'),
+
+  // 返回备份文件路径，用户取消时返回 null
+  backupWebPagePaths: (): Promise<string | null> => ipcRenderer.invoke('webpaths:backup'),
+
+  // 返回还原后的条目数组，用户取消时返回 null
+  restoreWebPagePaths: (): Promise<
+    { id: string; url: string; createdAt: number; status: 'pending' | 'downloaded' }[] | null
+  > => ipcRenderer.invoke('webpaths:restore'),
+
   // Dialog
   confirmDialog: (message: string, title?: string): Promise<boolean> =>
     ipcRenderer.invoke('dialog:confirm', message, title)

@@ -275,6 +275,20 @@ export interface ElectronAPI {
   getDownloadHistory: () => Promise<HistoryEntry[]>;
   clearDownloadHistory: () => Promise<void>;
 
+  // 网页路径持久化（userData/web-page-paths.json）
+  getWebPagePaths: () => Promise<{
+    entries: { id: string; url: string; createdAt: number; status: 'pending' | 'downloaded' }[];
+    error?: string;
+  }>;
+  saveWebPagePaths: (
+    entries: { id: string; url: string; createdAt: number; status: 'pending' | 'downloaded' }[]
+  ) => Promise<void>;
+  getWebPagePathsFile: () => Promise<string>;
+  backupWebPagePaths: () => Promise<string | null>;
+  restoreWebPagePaths: () => Promise<
+    { id: string; url: string; createdAt: number; status: 'pending' | 'downloaded' }[] | null
+  >;
+
   // Dialog
   confirmDialog: (message: string, title?: string) => Promise<boolean>;
 }

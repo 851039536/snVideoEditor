@@ -1,12 +1,14 @@
-<!-- 网页路径管理面板：路径增改删、解析与媒体链接勾选入队 -->
+<!-- 网页路径管理面板：路径增改删、解析、链接勾选入队与备份还原 -->
 <script setup lang="ts">
-import { ref } from 'vue';
-import { Plus, Search, Pencil, Trash2, Check, X, Download, Link } from 'lucide-vue-next';
-import { useSettingsStore } from '@/stores/settings';
+import { ref, onMounted } from 'vue';
+import {
+  Plus, Search, Pencil, Trash2, Check, X, Download, Link, Save, FolderInput, FolderOpen
+} from 'lucide-vue-next';
+import { useWebPathsStore } from '@/stores/webPaths';
 import { truncateUrl } from '@/utils/format';
 import { isValidUrl } from '@/utils/url';
 import { useWebPageParse } from '@/views/Download/useWebPageParse';
-import type { WebPageEntry } from '@/views/Download/types';
+import type { WebPageEntry, WebPageStatus } from '@/views/Download/types';
 import type { RawCookie } from '@/types/file';
 
 const props = defineProps<{
@@ -18,7 +20,7 @@ const emit = defineEmits<{
   'use-link': [payload: { url: string; pageUrl: string; pageTitle: string; cookies: RawCookie[] }];
 }>();
 
-const settingsStore = useSettingsStore();
+const webPathsStore = useWebPathsStore();
 const {
   parseStates,
   parsingId,
@@ -30,22 +32,83 @@ const {
   clearState
 } = useWebPageParse();
 
+// 每次挂载重新加载 JSON 文件，可捡起用户手动编辑的改动
+onMounted(async () => {
+  webPathsStore.init();
+  // 获取 JSON 文件完整路径用于界面展示
+  try {
+    pathsFilePath.value = await window.electronAPI.getWebPagePathsFile();
+  } catch {
+    /* ignore */
+  }
+});
+
+// ─── 下载状态 badge 配置 ─────────────────────────────────────────────────────
+
+const STATUS_CONFIG: Record<WebPageStatus, { label: string; cls: string }> = {
+  pending: { label: '待下载', cls: 'text-yellow-400 bg-yellow-400/10' },
+  downloaded: { label: '已下载', cls: 'text-success bg-success/10' }
+};
+
+// ─── 备份 / 还原 / 打开文件 ──────────────────────────────────────────────────
+
+/** 备份还原操作结果提示 */
+const actionHint = ref('');
+
+/** 持久化 JSON 文件完整路径（界面展示用） */
+const pathsFilePath = ref('');
+
+async function backupPaths(): Promise<void> {
+  actionHint.value = '';
+  try {
+    const path = await webPathsStore.backup();
+    if (path) {
+      actionHint.value = `已备份到: ${path}`;
+    }
+  } catch (e) {
+    actionHint.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function restorePaths(): Promise<void> {
+  actionHint.value = '';
+  const confirmed = await window.electronAPI.confirmDialog('还原将覆盖当前网页路径列表，是否继续？', '还原确认');
+  if (!confirmed) {
+    return;
+  }
+  try {
+    const ok = await webPathsStore.restore();
+    if (ok) {
+      actionHint.value = '还原完成';
+    }
+  } catch (e) {
+    actionHint.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+/** 打开 JSON 文件所在文件夹，方便直接查看编辑 */
+async function openPathsFolder(): Promise<void> {
+  const filePath = pathsFilePath.value || (await window.electronAPI.getWebPagePathsFile());
+  const dir = filePath.replace(/[/\\][^/\\]+$/, '');
+  await window.electronAPI.openFolder(dir);
+}
+
 // ─── 新增路径 ────────────────────────────────────────────────────────────────
 
 const newUrl = ref('');
 const addHint = ref('');
 
 /** 添加新的网页路径（去重 + 合法性校验） */
-function addPath(): void {
+async function addPath(): Promise<void> {
   const url = newUrl.value.trim();
   if (!isValidUrl(url)) {
     return;
   }
-  if (settingsStore.webPagePaths.some((e) => e.url === url)) {
+  if (webPathsStore.entries.some((e) => e.url === url)) {
     addHint.value = '该网页路径已存在';
     return;
   }
-  settingsStore.addWebPagePath(url);
+  await webPathsStore.add(url);
   newUrl.value = '';
   addHint.value = '';
 }
@@ -60,16 +123,16 @@ function startEdit(entry: WebPageEntry): void {
   editingUrl.value = entry.url;
 }
 
-function saveEdit(): void {
+async function saveEdit(): Promise<void> {
   const url = editingUrl.value.trim();
   if (!isValidUrl(url)) {
     return;
   }
-  // URL 变化后旧解析结果已失效，一并清理
+  // URL 变化后旧解析结果已失效，一并清理（状态重置由 store.update 负责）
   if (url !== getEntryUrl(editingId.value)) {
     clearState(editingId.value);
   }
-  settingsStore.updateWebPagePath(editingId.value, url);
+  await webPathsStore.update(editingId.value, url);
   cancelEdit();
 }
 
@@ -79,13 +142,13 @@ function cancelEdit(): void {
 }
 
 function getEntryUrl(id: string): string {
-  return settingsStore.webPagePaths.find((e) => e.id === id)?.url || '';
+  return webPathsStore.entries.find((e) => e.id === id)?.url || '';
 }
 
 // ─── 删除 ────────────────────────────────────────────────────────────────────
 
-function removePath(entry: WebPageEntry): void {
-  settingsStore.removeWebPagePath(entry.id);
+async function removePath(entry: WebPageEntry): Promise<void> {
+  await webPathsStore.remove(entry.id);
   clearState(entry.id);
   if (editingId.value === entry.id) {
     cancelEdit();
@@ -145,14 +208,52 @@ async function enqueueEntry(entry: WebPageEntry): Promise<void> {
     parts.push(`${result.fail} 个入队失败`);
   }
   enqueueHints.value[entry.id] = parts.join('，');
+  // 有任务成功入队即自动标记为已下载
+  if (result.ok > 0) {
+    await webPathsStore.setStatus(entry.id, 'downloaded');
+  }
 }
 </script>
 
 <template>
   <div class="glass-card p-4">
-    <!-- 标题行 -->
-    <label class="text-sm font-semibold text-text-primary mb-2 block">网页路径</label>
+    <!-- 标题行 + 备份/还原/打开文件按钮组 -->
+    <div class="flex items-center mb-2">
+      <label class="text-sm font-semibold text-text-primary">网页路径</label>
+      <div class="flex gap-1.5 ml-auto">
+        <button @click="backupPaths" class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1" title="备份网页路径列表到指定位置">
+          <Save :size="12" />
+          备份
+        </button>
+        <button @click="restorePaths" class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1" title="从备份文件还原（覆盖当前列表）">
+          <FolderInput :size="12" />
+          还原
+        </button>
+        <button @click="openPathsFolder" class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1" title="打开 web-page-paths.json 所在文件夹">
+          <FolderOpen :size="12" />
+          打开文件
+        </button>
+      </div>
+    </div>
     <p class="text-xs text-text-muted mb-2">保存常用视频网页地址，点击"解析"提取 m3u8 链接后可勾选下载。</p>
+
+    <!-- 持久化 JSON 文件路径展示（点击打开所在文件夹） -->
+    <p v-if="pathsFilePath" class="text-xs text-text-muted mb-2 break-all">
+      存储位置:
+      <code
+        @click="openPathsFolder"
+        class="font-mono text-accent-blue cursor-pointer hover:underline"
+        title="点击打开所在文件夹"
+      >{{ pathsFilePath }}</code>
+    </p>
+
+    <!-- 备份/还原操作结果提示 -->
+    <p v-if="actionHint" class="text-xs text-accent-blue mb-2 break-all">{{ actionHint }}</p>
+
+    <!-- 加载/保存错误提示（如 JSON 手编损坏） -->
+    <div v-if="webPathsStore.loadError" class="alert-danger mb-2 whitespace-pre-line">
+      <p>{{ webPathsStore.loadError }}</p>
+    </div>
 
     <!-- 新增路径输入行 -->
     <div class="flex gap-2">
@@ -175,9 +276,9 @@ async function enqueueEntry(entry: WebPageEntry): Promise<void> {
     <p v-if="addHint" class="text-xs text-warning mt-1.5">{{ addHint }}</p>
 
     <!-- 路径列表 -->
-    <div v-if="settingsStore.webPagePaths.length > 0" class="mt-3 space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
+    <div v-if="webPathsStore.entries.length > 0" class="mt-3 space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
       <div
-        v-for="entry in settingsStore.webPagePaths"
+        v-for="entry in webPathsStore.entries"
         :key="entry.id"
         class="p-2 rounded-lg bg-bg-tertiary/50 border border-border/40"
       >
@@ -204,8 +305,16 @@ async function enqueueEntry(entry: WebPageEntry): Promise<void> {
           </button>
         </div>
 
-        <!-- 非编辑态：URL 文本 + 解析/编辑/删除 -->
+        <!-- 非编辑态：状态 badge + URL 文本 + 解析/编辑/删除 -->
         <div v-else class="flex gap-2 items-center">
+          <button
+            @click="webPathsStore.toggleStatus(entry.id)"
+            class="text-xs px-1.5 py-0.5 rounded flex-shrink-0 transition-colors"
+            :class="STATUS_CONFIG[entry.status].cls"
+            title="点击切换状态"
+          >
+            {{ STATUS_CONFIG[entry.status].label }}
+          </button>
           <code class="text-xs text-text-primary flex-1 break-all font-mono" :title="entry.url">
             {{ truncateUrl(entry.url, 60) }}
           </code>

@@ -21,6 +21,8 @@ import { downloadM3u8, fetchM3u8Variants } from './modules/download';
 import { fetchPageM3u8ViaBrowser } from './modules/page-fetcher';
 import { DownloadQueueManager } from './modules/download-queue';
 import { DownloadHistoryManager } from './modules/download-history';
+import { WebPathsManager } from './modules/web-paths';
+import type { WebPageEntry } from './modules/web-paths';
 import { acquireLock, releaseLock, getActiveOperationType } from './modules/lock';
 import { encryptFile, decryptFile, batchProcessFiles, cancelCryptoOperation } from './modules/crypto';
 import { decryptForPlayback } from './modules/player';
@@ -436,6 +438,51 @@ function registerDownloadHandlers(): void {
 
   ipcMain.handle('download:clearHistory', async () => {
     historyManager.clear();
+  });
+
+  // 网页路径持久化（userData/web-page-paths.json，纯文件读写不走操作锁）
+  const webPathsManager = WebPathsManager.getInstance();
+
+  ipcMain.handle('webpaths:getAll', async () => {
+    return webPathsManager.loadAll();
+  });
+
+  ipcMain.handle('webpaths:saveAll', async (_event, entries: WebPageEntry[]) => {
+    webPathsManager.saveAll(entries);
+  });
+
+  ipcMain.handle('webpaths:getFilePath', async () => {
+    return webPathsManager.getFilePath();
+  });
+
+  // 备份：弹出保存对话框，取消返回 null，否则返回备份文件路径
+  ipcMain.handle('webpaths:backup', async () => {
+    const win = BrowserWindow.getFocusedWindow();
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const result = await dialog.showSaveDialog(win || BrowserWindow.getAllWindows()[0], {
+      title: '备份网页路径',
+      defaultPath: `web-page-paths-backup-${dateStr}.json`,
+      filters: [{ name: 'JSON 文件', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePath) {
+      return null;
+    }
+    webPathsManager.backup(result.filePath);
+    return result.filePath;
+  });
+
+  // 还原：弹出打开对话框，取消返回 null，否则校验后覆盖主文件并返回新条目
+  ipcMain.handle('webpaths:restore', async () => {
+    const win = BrowserWindow.getFocusedWindow();
+    const result = await dialog.showOpenDialog(win || BrowserWindow.getAllWindows()[0], {
+      title: '还原网页路径',
+      filters: [{ name: 'JSON 文件', extensions: ['json'] }],
+      properties: ['openFile']
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return webPathsManager.restoreFrom(result.filePaths[0]);
   });
 
   // Native confirm dialog (reusable for duplicate download prompts)
