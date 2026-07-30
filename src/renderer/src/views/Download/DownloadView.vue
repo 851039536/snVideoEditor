@@ -17,8 +17,11 @@ import {
 } from 'lucide-vue-next';
 import ProgressPanel from '@/components/ProgressPanel.vue';
 import DownloadQueue from '@/views/Download/DownloadQueue.vue';
+import WebPagePanel from '@/views/Download/WebPagePanel.vue';
 import { useProgressStore } from '@/stores/progress';
 import { todayDateStr, sanitizeFileName } from '@/utils/format';
+import { buildCookieHeader } from '@/utils/cookies';
+import { isValidUrl } from '@/utils/url';
 import type { QualityVariant, RawCookie, QueueStatus } from '@/types/file';
 
 const progressStore = useProgressStore();
@@ -39,48 +42,9 @@ const showFetchedUrls = ref(false);
 /** Raw cookies extracted from browser session, keyed by (domain, name). */
 const rawCookies = ref<RawCookie[]>([]);
 
-/** Check if a cookie domain matches a URL hostname. */
-function cookieDomainMatches(cookieDomain: string, hostname: string): boolean {
-  // Normalize: remove leading dot (e.g. ".surrit.com" → "surrit.com")
-  const d = cookieDomain.startsWith('.') ? cookieDomain.slice(1) : cookieDomain;
-  if (hostname === d) {
-    return true;
-  }
-  if (hostname.endsWith('.' + d)) {
-    return true;
-  }
-  return false;
-}
-
-/** Build a Cookie header string from rawCookies filtered for the given URL. */
-function buildCookiesForUrl(url: string): string {
-  if (!url || rawCookies.value.length === 0) {
-    return '';
-  }
-  let hostname: string;
-  try {
-    hostname = new URL(url).hostname;
-  } catch {
-    return '';
-  }
-  // Deduplicate by name within the same matched domain scope
-  const seen = new Set<string>();
-  const parts: string[] = [];
-  for (const c of rawCookies.value) {
-    if (cookieDomainMatches(c.domain, hostname)) {
-      const key = `${c.domain}|${c.name}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        parts.push(`${c.name}=${c.value}`);
-      }
-    }
-  }
-  return parts.join('; ');
-}
-
 /** Update the Cookie request header based on a target URL. */
 function syncCookiesForUrl(url: string): void {
-  const cookieStr = buildCookiesForUrl(url);
+  const cookieStr = buildCookieHeader(url, rawCookies.value);
   if (cookieStr) {
     headers['Cookie'] = cookieStr;
   } else {
@@ -302,15 +266,6 @@ function setConcurrency(n: number): void {
   window.electronAPI.setDownloadConcurrency(n);
 }
 
-function isValidUrl(url: string): boolean {
-  try {
-    new URL(url);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 const isInputUrlValid = computed(() => isValidUrl(m3u8Url.value));
 
 function looksLikeWebPage(url: string): boolean {
@@ -394,6 +349,28 @@ async function selectFetchedUrl(url: string): Promise<void> {
   showFetchedUrls.value = false;
   hintMsg.value = '';
   // Cookie sync is handled by the watch on m3u8Url triggered above
+}
+
+/** 网页路径面板选用链接：回填主输入框并接管其页面上下文（Cookie/Referer/标题） */
+function handleUseLink(payload: {
+  url: string;
+  pageUrl: string;
+  pageTitle: string;
+  cookies: RawCookie[];
+}): void {
+  rawCookies.value = payload.cookies;
+  fetchedTitle.value = payload.pageTitle;
+  fetchedUrls.value = [payload.url]; // 使 m3u8Url watch 不清空 fetchedTitle
+  // Referer/Origin 取自该链接的来源页面（与 fetchM3u8FromPage 一致）
+  try {
+    const parsed = new URL(payload.pageUrl);
+    headers['Referer'] = `${parsed.protocol}//${parsed.hostname}/`;
+    headers['Origin'] = `${parsed.protocol}//${parsed.hostname}`;
+  } catch {
+    /* ignore */
+  }
+  fileNameEdited.value = false;
+  m3u8Url.value = payload.url; // 触发既有 watch：Cookie 同步 + 清晰度探测 + 自动文件名
 }
 
 // ─── Download Queue ──────────────────────────────────────────────────────────
@@ -653,6 +630,9 @@ onUnmounted(() => {
             </p>
           </div>
         </div>
+
+        <!-- 网页路径管理面板 -->
+        <WebPagePanel :output-dir="outputDir" @use-link="handleUseLink" />
       </div>
 
       <!-- Right: Output & Controls -->

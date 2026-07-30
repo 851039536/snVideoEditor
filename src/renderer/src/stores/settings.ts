@@ -3,12 +3,14 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import type { PersistedPlayerData } from '@/views/Player/types'
 import { DEFAULT_PLAYER_DATA } from '@/views/Player/types'
+import type { WebPageEntry } from '@/views/Download/types'
 
 const THEME_KEY = 'snve-theme'
 const COMPRESS_PRESET_KEY = 'snve-compress-preset'
 const PLAYER_DATA_KEY = 'snve-player-data'
 const OUTPUT_DIR_KEY = 'snve-output-dir'
 const SIDEBAR_COLLAPSED_KEY = 'snve-sidebar-collapsed'
+const WEB_PAGE_PATHS_KEY = 'snve-web-page-paths'
 
 export interface CompressPreset {
   crfValue: number
@@ -76,6 +78,17 @@ function loadSidebarCollapsed(): boolean {
   return false
 }
 
+function loadWebPagePaths(): WebPageEntry[] {
+  try {
+    const saved = localStorage.getItem(WEB_PAGE_PATHS_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed)) { return parsed }
+    }
+  } catch { /* ignore */ }
+  return []
+}
+
 function applyTheme(theme: 'dark' | 'light'): void {
   document.documentElement.classList.toggle('light', theme === 'light')
 }
@@ -86,6 +99,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const compressPreset = ref<CompressPreset>(loadCompressPreset())
   const playerData = ref<PersistedPlayerData>(loadPlayerData())
   const sidebarCollapsed = ref<boolean>(loadSidebarCollapsed())
+  const webPagePaths = ref<WebPageEntry[]>(loadWebPagePaths())
 
   function setOutputDirectory(dir: string): void {
     outputDirectory.value = dir
@@ -105,6 +119,28 @@ export const useSettingsStore = defineStore('settings', () => {
 
   function toggleSidebar(): void {
     sidebarCollapsed.value = !sidebarCollapsed.value
+  }
+
+  /** 新增网页路径条目 */
+  function addWebPagePath(url: string): void {
+    webPagePaths.value.push({
+      id: `wp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      url,
+      createdAt: Date.now()
+    })
+  }
+
+  /** 修改指定网页路径条目的 URL */
+  function updateWebPagePath(id: string, url: string): void {
+    const entry = webPagePaths.value.find((e) => e.id === id)
+    if (entry) {
+      entry.url = url
+    }
+  }
+
+  /** 删除指定网页路径条目 */
+  function removeWebPagePath(id: string): void {
+    webPagePaths.value = webPagePaths.value.filter((e) => e.id !== id)
   }
 
   // 持久化输出目录
@@ -133,16 +169,25 @@ export const useSettingsStore = defineStore('settings', () => {
     try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(val)) } catch { /* ignore */ }
   })
 
+  // 持久化网页路径列表
+  watch(webPagePaths, (val) => {
+    try { localStorage.setItem(WEB_PAGE_PATHS_KEY, JSON.stringify(val)) } catch { /* ignore */ }
+  }, { deep: true })
+
   return {
     outputDirectory,
     theme,
     compressPreset,
     playerData,
     sidebarCollapsed,
+    webPagePaths,
     setOutputDirectory,
     toggleTheme,
     setCompressPreset,
     setPlayerData,
-    toggleSidebar
+    toggleSidebar,
+    addWebPagePath,
+    updateWebPagePath,
+    removeWebPagePath
   }
 })
