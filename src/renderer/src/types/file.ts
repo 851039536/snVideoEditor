@@ -1,3 +1,4 @@
+// 渲染进程共享类型：文件条目、分割片段、下载队列与下载页类型（部分自 preload 重新导出）
 import type { VideoMeta } from '../../../preload/index';
 
 export type { VideoMeta };
@@ -19,37 +20,18 @@ export interface ClipItem {
   selected: boolean;
 }
 
-// ─── Download queue shared types ───────────────────────────────────────────────
-// Single source of truth for the download queue shape. Must stay aligned with
-// the backend definition in src/main/modules/download-queue.ts.
+// ─── 下载队列共享类型 ─────────────────────────────────────────────
+// 从 preload 重新导出（与 VideoMeta 同模式）；后端 download-queue.ts 的
+// QueueItem 为含主进程私有字段的超集，二者字段需保持对齐。
+export type {
+  QueueStatusType,
+  QueueItemDTO as QueueItem,
+  QueueStatusDTO as QueueStatus
+} from '../../../preload/index';
 
-/** Lifecycle status of a download queue item. */
-export type QueueStatusType = 'pending' | 'downloading' | 'merging' | 'completed' | 'failed' | 'cancelled' | 'paused';
+// ─── 下载页共享类型 ────────────────────────────────────────────────
 
-export interface QueueItem {
-  id: string;
-  url: string;
-  output: string;
-  headers?: Record<string, string>;
-  /** Persistent cache directory for TS segments (enables resume after restart). */
-  cacheDir?: string;
-  status: QueueStatusType;
-  progress: { percent: number; speed: string; eta: string };
-  error?: string;
-  addedAt: number;
-  fileName: string;
-}
-
-export interface QueueStatus {
-  items: QueueItem[];
-  isProcessing: boolean;
-  activeIds: string[];
-  concurrency: number;
-}
-
-// ─── Download view shared types ────────────────────────────────────────────────
-
-/** A selectable m3u8 quality variant parsed from a master playlist. */
+/** 从 master playlist 解析出的可选 m3u8 清晰度变体 */
 export interface QualityVariant {
   url: string;
   resolution: string;
@@ -58,7 +40,7 @@ export interface QualityVariant {
   bandwidth?: number;
 }
 
-/** Raw cookie extracted from a browser session, keyed by (domain, name). */
+/** 从浏览器会话提取的原始 Cookie，按 (domain, name) 区分 */
 export interface RawCookie {
   domain: string;
   name: string;

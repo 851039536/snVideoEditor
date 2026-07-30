@@ -34,9 +34,8 @@ export interface FileInfo {
   name: string;
 }
 
-// Download queue DTOs. Field shape MUST stay aligned with
-// src/renderer/src/types/file.ts (QueueItem/QueueStatus) and the backend
-// src/main/modules/download-queue.ts.
+// 下载队列 DTO：渲染侧唯一类型来源（types/file.ts 从此处重新导出）。
+// 字段需与后端 src/main/modules/download-queue.ts 的 QueueItem/QueueStatus 保持对齐。
 export type QueueStatusType = 'pending' | 'downloading' | 'merging' | 'completed' | 'failed' | 'cancelled' | 'paused';
 
 export interface QueueItemDTO {
