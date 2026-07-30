@@ -1,3 +1,4 @@
+// 应用设置 store：主题、压缩预设、播放器数据、输出目录、侧栏状态的 localStorage 持久化
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import type { PersistedPlayerData } from '@/views/Player/types'
@@ -86,9 +87,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const playerData = ref<PersistedPlayerData>(loadPlayerData())
   const sidebarCollapsed = ref<boolean>(loadSidebarCollapsed())
 
-  // Apply theme on init
-  applyTheme(theme.value)
-
   function setOutputDirectory(dir: string): void {
     outputDirectory.value = dir
   }
@@ -109,28 +107,28 @@ export const useSettingsStore = defineStore('settings', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
-  // Persist output directory
+  // 持久化输出目录
   watch(outputDirectory, (val) => {
     try { localStorage.setItem(OUTPUT_DIR_KEY, val) } catch { /* ignore */ }
   })
 
-  // Persist theme and apply to DOM
+  // 持久化主题并应用到 DOM
   watch(theme, (val) => {
     try { localStorage.setItem(THEME_KEY, val) } catch { /* ignore */ }
     applyTheme(val)
   }, { immediate: true })
 
-  // Persist compress preset
+  // 持久化压缩预设
   watch(compressPreset, (val) => {
     try { localStorage.setItem(COMPRESS_PRESET_KEY, JSON.stringify(val)) } catch { /* ignore */ }
   }, { deep: true })
 
-  // Persist player data
+  // 持久化播放器数据
   watch(playerData, (val) => {
     try { localStorage.setItem(PLAYER_DATA_KEY, JSON.stringify(val)) } catch { /* ignore */ }
   }, { deep: true })
 
-  // Persist sidebar collapsed state
+  // 持久化侧栏折叠状态
   watch(sidebarCollapsed, (val) => {
     try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(val)) } catch { /* ignore */ }
   })
