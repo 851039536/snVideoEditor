@@ -1,9 +1,10 @@
 <!-- 视频截图弹窗：当前画面 / 指定时间 / 批量截图三种模式 -->
 <script setup lang="ts">
+import { computed } from 'vue';
 import { Camera, Image, Loader } from 'lucide-vue-next';
 import { secondsToHMS } from '@/utils/time';
 
-defineProps<{
+const props = defineProps<{
   show: boolean;
   capturing: boolean;
   captureProgress: { current: number; total: number };
@@ -23,6 +24,24 @@ defineEmits<{
 const screenshotMode = defineModel<'current' | 'custom' | 'batch'>('screenshotMode', { required: true });
 const screenshotTimeInput = defineModel<string>('screenshotTimeInput', { required: true });
 const batchInterval = defineModel<number>('batchInterval', { required: true });
+
+/** 预估批量截图帧数（防护非法 interval 和 duration） */
+const estimatedFrames = computed((): number => {
+  if (!props.duration || props.duration <= 0) {
+    return 0;
+  }
+  const interval = batchInterval.value;
+  if (!interval || interval < 1) {
+    return 0;
+  }
+  return Math.floor(props.duration / interval);
+});
+
+/** 批量进度百分比 */
+const progressPercent = computed((): number => {
+  const { current, total } = props.captureProgress;
+  return total > 0 ? (current / total) * 100 : 0;
+});
 </script>
 
 <template>
@@ -77,7 +96,7 @@ const batchInterval = defineModel<number>('batchInterval', { required: true });
         </div>
 
         <!-- Custom Time -->
-        <div v-if="screenshotMode === 'custom'" class="space-y-3">
+        <div v-else-if="screenshotMode === 'custom'" class="space-y-3">
           <div>
             <label class="text-xs text-text-secondary mb-1 block">截图时间点</label>
             <input
@@ -101,12 +120,12 @@ const batchInterval = defineModel<number>('batchInterval', { required: true });
         </div>
 
         <!-- Batch -->
-        <div v-if="screenshotMode === 'batch'" class="space-y-3">
+        <div v-else class="space-y-3">
           <div v-if="!capturing">
             <label class="text-xs text-text-secondary mb-1 block">截图间隔（秒）</label>
             <input v-model.number="batchInterval" type="number" min="1" step="1" class="input-base w-full" />
             <p class="text-xs text-text-muted mt-1">
-              预计 {{ Math.floor(duration / (batchInterval || 1)) }} 帧， 每 {{ batchInterval }} 秒一帧
+              预计 {{ estimatedFrames }} 帧，每 {{ batchInterval >= 1 ? batchInterval : 1 }} 秒一帧
             </p>
           </div>
 
@@ -121,16 +140,14 @@ const batchInterval = defineModel<number>('batchInterval', { required: true });
             <div class="w-full h-1.5 rounded-full bg-bg-tertiary overflow-hidden">
               <div
                 class="h-full rounded-full bg-gradient-to-r from-accent-purple to-pink-500 transition-all duration-300"
-                :style="{
-                  width: (captureProgress.total > 0 ? (captureProgress.current / captureProgress.total) * 100 : 0) + '%'
-                }"
+                :style="{ width: progressPercent + '%' }"
               />
             </div>
           </div>
 
           <button
             @click="$emit('batchCapture')"
-            :disabled="capturing || !batchInterval || batchInterval < 1"
+            :disabled="capturing || !batchInterval || batchInterval < 1 || duration <= 0"
             class="w-full px-4 py-2.5 rounded-lg bg-accent-purple text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             <Loader v-if="capturing" :size="14" class="animate-spin" />

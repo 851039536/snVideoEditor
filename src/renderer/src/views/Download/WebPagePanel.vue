@@ -43,14 +43,28 @@ onMounted(async () => {
   }
 });
 
-// ─── 数量实时统计 ─────────────────────────────────────────────────────────────
+// ─── 数量实时统计 & 分组 ──────────────────────────────────────────────────────
 
-/** 路径总数 */
-const totalCount = computed((): number => webPathsStore.entries.length);
-/** 待下载数量 */
-const pendingCount = computed((): number => webPathsStore.entries.filter((e) => e.status === 'pending').length);
-/** 已下载数量 */
-const downloadedCount = computed((): number => webPathsStore.entries.filter((e) => e.status === 'downloaded').length);
+/** 待下载条目 */
+const pendingEntries = computed((): WebPageEntry[] => webPathsStore.entries.filter((e) => e.status === 'pending'));
+/** 已下载条目 */
+const downloadedEntries = computed((): WebPageEntry[] => webPathsStore.entries.filter((e) => e.status === 'downloaded'));
+
+// ─── 解析结果关闭 ─────────────────────────────────────────────────────────────
+
+/** 已手动关闭解析面板的条目 id 集合 */
+const closedParseIds = ref<Set<string>>(new Set());
+
+/** 关闭某条目的解析结果面板 */
+function closeParse(entryId: string): void {
+  closedParseIds.value.add(entryId);
+}
+
+/** 解析入口：重新解析时清除关闭标记，确保结果面板可见 */
+async function handleParse(entry: WebPageEntry): Promise<void> {
+  closedParseIds.value.delete(entry.id);
+  await parseEntry(entry);
+}
 
 // ─── 下载状态 badge 配置 ─────────────────────────────────────────────────────
 
@@ -255,10 +269,8 @@ async function enqueueEntry(entry: WebPageEntry): Promise<void> {
     <!-- 标题行 + 备份/还原/打开文件按钮组 -->
     <div class="flex items-center mb-2">
       <label class="text-sm font-semibold text-text-primary">网页路径</label>
-      <span v-if="totalCount > 0" class="text-xs text-text-muted ml-2">
-        共 {{ totalCount }} 条
-        <span class="text-yellow-400">待下载 {{ pendingCount }}</span>
-        <span class="text-success ml-1">已下载 {{ downloadedCount }}</span>
+      <span v-if="webPathsStore.entries.length > 0" class="text-xs text-text-muted ml-2">
+        共 {{ webPathsStore.entries.length }} 条
       </span>
       <div class="flex gap-1.5 ml-auto">
         <button @click="backupPaths" class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1" title="备份网页路径列表到指定位置">
@@ -315,158 +327,344 @@ async function enqueueEntry(entry: WebPageEntry): Promise<void> {
     </div>
     <p v-if="addHint" class="text-xs text-warning mt-1.5">{{ addHint }}</p>
 
-    <!-- 路径列表 -->
-    <div v-if="webPathsStore.entries.length > 0" class="mt-3 space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
-      <div
-        v-for="entry in webPathsStore.entries"
-        :key="entry.id"
-        class="p-2 rounded-lg bg-bg-tertiary/50 border border-border/40"
-      >
-        <!-- 编辑态：输入框 + 保存/取消 -->
-        <div v-if="editingId === entry.id" class="flex gap-2 items-center">
-          <input
-            v-model="editingUrl"
-            type="url"
-            class="input-base flex-1 !py-1.5 text-xs"
-            @keyup.enter="saveEdit"
-            @keyup.esc="cancelEdit"
-          />
-          <button
-            @click="saveEdit"
-            :disabled="!isValidUrl(editingUrl.trim())"
-            class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
-          >
-            <Check :size="12" />
-            保存
-          </button>
-          <button @click="cancelEdit" class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0">
-            <X :size="12" />
-            取消
-          </button>
+    <!-- 路径列表：按状态分组展示 -->
+    <div v-if="webPathsStore.entries.length > 0" class="mt-3 space-y-3 max-h-[32rem] overflow-y-auto custom-scrollbar">
+      <!-- 待下载分组 -->
+      <div v-if="pendingEntries.length > 0">
+        <div class="flex items-center gap-1.5 mb-1.5">
+          <span class="w-2 h-2 rounded-full bg-yellow-400"></span>
+          <span class="text-xs font-semibold text-yellow-400">待下载 ({{ pendingEntries.length }})</span>
         </div>
-
-        <!-- 非编辑态：状态 badge + URL 文本 + 解析/编辑/删除 -->
-        <div v-else class="flex gap-2 items-center">
-          <button
-            @click="webPathsStore.toggleStatus(entry.id)"
-            class="text-xs px-1.5 py-0.5 rounded flex-shrink-0 transition-colors"
-            :class="STATUS_CONFIG[entry.status].cls"
-            title="点击切换状态"
+        <div class="space-y-2">
+          <div
+            v-for="entry in pendingEntries"
+            :key="entry.id"
+            class="p-2 rounded-lg bg-bg-tertiary/50 border border-border/40"
           >
-            {{ STATUS_CONFIG[entry.status].label }}
-          </button>
-          <code class="text-xs text-text-primary flex-1 break-all font-mono" :title="entry.url">
-            {{ truncateUrl(entry.url, 60) }}
-          </code>
-          <button
-            @click="parseEntry(entry)"
-            :disabled="parsingId !== ''"
-            class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1 flex-shrink-0"
-          >
-            <Search v-if="parsingId !== entry.id" :size="12" />
-            <span v-if="parsingId === entry.id">解析中...</span>
-            <span v-else>解析</span>
-          </button>
-          <button
-            @click="copyUrl(entry)"
-            class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
-            :title="copiedId === entry.id ? '已复制' : '复制链接'"
-          >
-            <Check v-if="copiedId === entry.id" :size="12" class="text-success" />
-            <Copy v-else :size="12" />
-          </button>
-          <button
-            @click="startEdit(entry)"
-            :disabled="parsingId === entry.id"
-            class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
-            title="编辑"
-          >
-            <Pencil :size="12" />
-          </button>
-          <button
-            @click="removePath(entry)"
-            :disabled="parsingId === entry.id"
-            class="btn-secondary !px-2 !py-1 text-xs text-danger flex-shrink-0"
-            title="删除"
-          >
-            <Trash2 :size="12" />
-          </button>
-        </div>
-
-        <!-- 解析失败提示 -->
-        <p
-          v-if="parseStates[entry.id]?.status === 'error'"
-          class="text-danger text-xs mt-2 whitespace-pre-line"
-        >
-          {{ parseStates[entry.id].error }}
-        </p>
-
-        <!-- 解析成功但无链接提示 -->
-        <p
-          v-if="parseStates[entry.id]?.status === 'done' && parseStates[entry.id].links.length === 0"
-          class="text-xs text-text-muted mt-2"
-        >
-          未提取到 m3u8 链接。可在浏览器中打开页面，按 F12 → Network → 筛选 m3u8 查找真实播放地址。
-        </p>
-
-        <!-- 解析结果：链接勾选列表 -->
-        <div
-          v-if="parseStates[entry.id]?.status === 'done' && parseStates[entry.id].links.length > 0"
-          class="mt-2 p-3 rounded-lg bg-accent-blue/10 border border-accent-blue/30"
-        >
-          <!-- 结果头部：数量 + 来源 + 全选 -->
-          <div class="flex items-center gap-1.5 mb-2">
-            <Link :size="14" class="text-accent-blue" />
-            <span class="text-sm font-semibold text-accent-blue">
-              已提取 {{ parseStates[entry.id].links.length }} 个链接
-            </span>
-            <span class="text-xs text-text-muted ml-1 truncate">（来自: {{ parseStates[entry.id].pageTitle }}）</span>
-            <label class="text-xs text-text-secondary ml-auto flex items-center gap-1 cursor-pointer flex-shrink-0">
+            <!-- 编辑态：输入框 + 保存/取消 -->
+            <div v-if="editingId === entry.id" class="flex gap-2 items-center">
               <input
-                type="checkbox"
-                :checked="isAllSelected(entry.id)"
-                @change="toggleAll(entry.id, ($event.target as HTMLInputElement).checked)"
+                v-model="editingUrl"
+                type="url"
+                class="input-base flex-1 !py-1.5 text-xs"
+                @keyup.enter="saveEdit"
+                @keyup.esc="cancelEdit"
               />
-              全选
-            </label>
-          </div>
-
-          <!-- 链接列表 -->
-          <div class="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
-            <div
-              v-for="(link, idx) in parseStates[entry.id].links"
-              :key="idx"
-              class="flex items-center gap-2 p-2 rounded hover:bg-accent-blue/20 transition-colors group"
-            >
-              <input
-                type="checkbox"
-                :checked="link.selected"
-                @change="toggleLink(entry.id, idx)"
-                class="flex-shrink-0 cursor-pointer"
-              />
-              <code class="text-xs text-text-primary flex-1 break-all font-mono">{{ link.url }}</code>
               <button
-                @click="useLink(entry.id, link.url)"
-                class="btn-secondary !px-2 !py-0.5 text-xs opacity-0 group-hover:opacity-100 flex-shrink-0"
+                @click="saveEdit"
+                :disabled="!isValidUrl(editingUrl.trim())"
+                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
               >
-                使用
+                <Check :size="12" />
+                保存
+              </button>
+              <button @click="cancelEdit" class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0">
+                <X :size="12" />
+                取消
               </button>
             </div>
-          </div>
 
-          <!-- 批量入队操作 -->
-          <div class="mt-2 flex items-center gap-2">
-            <button
-              @click="enqueueEntry(entry)"
-              :disabled="selectedCount(entry.id) === 0 || !props.outputDir || enqueueingId !== ''"
-              class="btn-secondary !px-3 !py-1.5 text-xs flex items-center gap-1.5"
+            <!-- 非编辑态：状态 badge + URL 文本 + 操作按钮 -->
+            <div v-else class="flex gap-2 items-center">
+              <button
+                @click="webPathsStore.toggleStatus(entry.id)"
+                class="text-xs px-1.5 py-0.5 rounded flex-shrink-0 transition-colors"
+                :class="STATUS_CONFIG[entry.status].cls"
+                title="点击切换状态"
+              >
+                {{ STATUS_CONFIG[entry.status].label }}
+              </button>
+              <code class="text-xs text-text-primary flex-1 break-all font-mono" :title="entry.url">
+                {{ truncateUrl(entry.url, 60) }}
+              </code>
+              <button
+                @click="handleParse(entry)"
+                :disabled="parsingId !== ''"
+                class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1 flex-shrink-0"
+              >
+                <Search v-if="parsingId !== entry.id" :size="12" />
+                <span v-if="parsingId === entry.id">解析中...</span>
+                <span v-else>解析</span>
+              </button>
+              <button
+                @click="copyUrl(entry)"
+                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
+                :title="copiedId === entry.id ? '已复制' : '复制链接'"
+              >
+                <Check v-if="copiedId === entry.id" :size="12" class="text-success" />
+                <Copy v-else :size="12" />
+              </button>
+              <button
+                @click="startEdit(entry)"
+                :disabled="parsingId === entry.id"
+                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
+                title="编辑"
+              >
+                <Pencil :size="12" />
+              </button>
+              <button
+                @click="removePath(entry)"
+                :disabled="parsingId === entry.id"
+                class="btn-secondary !px-2 !py-1 text-xs text-danger flex-shrink-0"
+                title="删除"
+              >
+                <Trash2 :size="12" />
+              </button>
+            </div>
+
+            <!-- 解析失败提示 -->
+            <p
+              v-if="parseStates[entry.id]?.status === 'error'"
+              class="text-danger text-xs mt-2 whitespace-pre-line"
             >
-              <Download :size="12" />
-              <span v-if="enqueueingId === entry.id">入队中...</span>
-              <span v-else>加入下载队列 (已选 {{ selectedCount(entry.id) }})</span>
-            </button>
-            <span v-if="!props.outputDir" class="text-xs text-warning">请先在右侧选择输出目录</span>
-            <span v-else-if="enqueueHints[entry.id]" class="text-xs text-success">{{ enqueueHints[entry.id] }}</span>
+              {{ parseStates[entry.id].error }}
+            </p>
+
+            <!-- 解析成功但无链接提示 -->
+            <p
+              v-if="parseStates[entry.id]?.status === 'done' && parseStates[entry.id].links.length === 0"
+              class="text-xs text-text-muted mt-2"
+            >
+              未提取到 m3u8 链接。可在浏览器中打开页面，按 F12 → Network → 筛选 m3u8 查找真实播放地址。
+            </p>
+
+            <!-- 解析结果：链接勾选列表（可关闭） -->
+            <div
+              v-if="parseStates[entry.id]?.status === 'done' && parseStates[entry.id].links.length > 0 && !closedParseIds.has(entry.id)"
+              class="mt-2 p-3 rounded-lg bg-accent-blue/10 border border-accent-blue/30"
+            >
+              <!-- 结果头部：数量 + 来源 + 全选 + 关闭 -->
+              <div class="flex items-center gap-1.5 mb-2">
+                <Link :size="14" class="text-accent-blue" />
+                <span class="text-sm font-semibold text-accent-blue">
+                  已提取 {{ parseStates[entry.id].links.length }} 个链接
+                </span>
+                <span class="text-xs text-text-muted ml-1 truncate">（来自: {{ parseStates[entry.id].pageTitle }}）</span>
+                <label class="text-xs text-text-secondary ml-auto flex items-center gap-1 cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    :checked="isAllSelected(entry.id)"
+                    @change="toggleAll(entry.id, ($event.target as HTMLInputElement).checked)"
+                  />
+                  全选
+                </label>
+                <button
+                  @click="closeParse(entry.id)"
+                  class="btn-secondary !px-1.5 !py-0.5 text-xs flex-shrink-0"
+                  title="关闭解析结果"
+                >
+                  <X :size="12" />
+                </button>
+              </div>
+
+              <!-- 链接列表 -->
+              <div class="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
+                <div
+                  v-for="(link, idx) in parseStates[entry.id].links"
+                  :key="idx"
+                  class="flex items-center gap-2 p-2 rounded hover:bg-accent-blue/20 transition-colors group"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="link.selected"
+                    @change="toggleLink(entry.id, idx)"
+                    class="flex-shrink-0 cursor-pointer"
+                  />
+                  <code class="text-xs text-text-primary flex-1 break-all font-mono">{{ link.url }}</code>
+                  <button
+                    @click="useLink(entry.id, link.url)"
+                    class="btn-secondary !px-2 !py-0.5 text-xs opacity-0 group-hover:opacity-100 flex-shrink-0"
+                  >
+                    使用
+                  </button>
+                </div>
+              </div>
+
+              <!-- 批量入队操作 -->
+              <div class="mt-2 flex items-center gap-2">
+                <button
+                  @click="enqueueEntry(entry)"
+                  :disabled="selectedCount(entry.id) === 0 || !props.outputDir || enqueueingId !== ''"
+                  class="btn-secondary !px-3 !py-1.5 text-xs flex items-center gap-1.5"
+                >
+                  <Download :size="12" />
+                  <span v-if="enqueueingId === entry.id">入队中...</span>
+                  <span v-else>加入下载队列 (已选 {{ selectedCount(entry.id) }})</span>
+                </button>
+                <span v-if="!props.outputDir" class="text-xs text-warning">请先在右侧选择输出目录</span>
+                <span v-else-if="enqueueHints[entry.id]" class="text-xs text-success">{{ enqueueHints[entry.id] }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 已下载分组 -->
+      <div v-if="downloadedEntries.length > 0">
+        <div class="flex items-center gap-1.5 mb-1.5">
+          <span class="w-2 h-2 rounded-full bg-success"></span>
+          <span class="text-xs font-semibold text-success">已下载 ({{ downloadedEntries.length }})</span>
+        </div>
+        <div class="space-y-2">
+          <div
+            v-for="entry in downloadedEntries"
+            :key="entry.id"
+            class="p-2 rounded-lg bg-bg-tertiary/50 border border-border/40 opacity-75"
+          >
+            <!-- 编辑态 -->
+            <div v-if="editingId === entry.id" class="flex gap-2 items-center">
+              <input
+                v-model="editingUrl"
+                type="url"
+                class="input-base flex-1 !py-1.5 text-xs"
+                @keyup.enter="saveEdit"
+                @keyup.esc="cancelEdit"
+              />
+              <button
+                @click="saveEdit"
+                :disabled="!isValidUrl(editingUrl.trim())"
+                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
+              >
+                <Check :size="12" />
+                保存
+              </button>
+              <button @click="cancelEdit" class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0">
+                <X :size="12" />
+                取消
+              </button>
+            </div>
+
+            <!-- 非编辑态 -->
+            <div v-else class="flex gap-2 items-center">
+              <button
+                @click="webPathsStore.toggleStatus(entry.id)"
+                class="text-xs px-1.5 py-0.5 rounded flex-shrink-0 transition-colors"
+                :class="STATUS_CONFIG[entry.status].cls"
+                title="点击切换状态"
+              >
+                {{ STATUS_CONFIG[entry.status].label }}
+              </button>
+              <code class="text-xs text-text-primary flex-1 break-all font-mono" :title="entry.url">
+                {{ truncateUrl(entry.url, 60) }}
+              </code>
+              <button
+                @click="handleParse(entry)"
+                :disabled="parsingId !== ''"
+                class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1 flex-shrink-0"
+              >
+                <Search v-if="parsingId !== entry.id" :size="12" />
+                <span v-if="parsingId === entry.id">解析中...</span>
+                <span v-else>解析</span>
+              </button>
+              <button
+                @click="copyUrl(entry)"
+                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
+                :title="copiedId === entry.id ? '已复制' : '复制链接'"
+              >
+                <Check v-if="copiedId === entry.id" :size="12" class="text-success" />
+                <Copy v-else :size="12" />
+              </button>
+              <button
+                @click="startEdit(entry)"
+                :disabled="parsingId === entry.id"
+                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
+                title="编辑"
+              >
+                <Pencil :size="12" />
+              </button>
+              <button
+                @click="removePath(entry)"
+                :disabled="parsingId === entry.id"
+                class="btn-secondary !px-2 !py-1 text-xs text-danger flex-shrink-0"
+                title="删除"
+              >
+                <Trash2 :size="12" />
+              </button>
+            </div>
+
+            <!-- 解析失败提示 -->
+            <p
+              v-if="parseStates[entry.id]?.status === 'error'"
+              class="text-danger text-xs mt-2 whitespace-pre-line"
+            >
+              {{ parseStates[entry.id].error }}
+            </p>
+
+            <!-- 解析成功但无链接提示 -->
+            <p
+              v-if="parseStates[entry.id]?.status === 'done' && parseStates[entry.id].links.length === 0"
+              class="text-xs text-text-muted mt-2"
+            >
+              未提取到 m3u8 链接。可在浏览器中打开页面，按 F12 → Network → 筛选 m3u8 查找真实播放地址。
+            </p>
+
+            <!-- 解析结果：链接勾选列表（可关闭） -->
+            <div
+              v-if="parseStates[entry.id]?.status === 'done' && parseStates[entry.id].links.length > 0 && !closedParseIds.has(entry.id)"
+              class="mt-2 p-3 rounded-lg bg-accent-blue/10 border border-accent-blue/30"
+            >
+              <!-- 结果头部：数量 + 来源 + 全选 + 关闭 -->
+              <div class="flex items-center gap-1.5 mb-2">
+                <Link :size="14" class="text-accent-blue" />
+                <span class="text-sm font-semibold text-accent-blue">
+                  已提取 {{ parseStates[entry.id].links.length }} 个链接
+                </span>
+                <span class="text-xs text-text-muted ml-1 truncate">（来自: {{ parseStates[entry.id].pageTitle }}）</span>
+                <label class="text-xs text-text-secondary ml-auto flex items-center gap-1 cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    :checked="isAllSelected(entry.id)"
+                    @change="toggleAll(entry.id, ($event.target as HTMLInputElement).checked)"
+                  />
+                  全选
+                </label>
+                <button
+                  @click="closeParse(entry.id)"
+                  class="btn-secondary !px-1.5 !py-0.5 text-xs flex-shrink-0"
+                  title="关闭解析结果"
+                >
+                  <X :size="12" />
+                </button>
+              </div>
+
+              <!-- 链接列表 -->
+              <div class="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
+                <div
+                  v-for="(link, idx) in parseStates[entry.id].links"
+                  :key="idx"
+                  class="flex items-center gap-2 p-2 rounded hover:bg-accent-blue/20 transition-colors group"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="link.selected"
+                    @change="toggleLink(entry.id, idx)"
+                    class="flex-shrink-0 cursor-pointer"
+                  />
+                  <code class="text-xs text-text-primary flex-1 break-all font-mono">{{ link.url }}</code>
+                  <button
+                    @click="useLink(entry.id, link.url)"
+                    class="btn-secondary !px-2 !py-0.5 text-xs opacity-0 group-hover:opacity-100 flex-shrink-0"
+                  >
+                    使用
+                  </button>
+                </div>
+              </div>
+
+              <!-- 批量入队操作 -->
+              <div class="mt-2 flex items-center gap-2">
+                <button
+                  @click="enqueueEntry(entry)"
+                  :disabled="selectedCount(entry.id) === 0 || !props.outputDir || enqueueingId !== ''"
+                  class="btn-secondary !px-3 !py-1.5 text-xs flex items-center gap-1.5"
+                >
+                  <Download :size="12" />
+                  <span v-if="enqueueingId === entry.id">入队中...</span>
+                  <span v-else>加入下载队列 (已选 {{ selectedCount(entry.id) }})</span>
+                </button>
+                <span v-if="!props.outputDir" class="text-xs text-warning">请先在右侧选择输出目录</span>
+                <span v-else-if="enqueueHints[entry.id]" class="text-xs text-success">{{ enqueueHints[entry.id] }}</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

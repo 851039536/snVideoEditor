@@ -52,6 +52,8 @@ const currentIndex = ref(-1);
 const videoPlayer = ref<HTMLVideoElement | null>(null);
 const isPlaying = ref(false);
 const playerKey = ref(0);
+/** 响应式当前播放时间（供截图弹窗显示，由 timeupdate 驱动） */
+const reactiveCurrentTime = ref(0);
 
 // Plyr instance (shallowRef so it can be passed into composables)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -767,8 +769,9 @@ function initAndPlay(): void {
     scheduleSave();
   });
 
-  // A-B loop enforcement
+  // A-B loop enforcement + 响应式时间追踪
   player.value.on('timeupdate', (): void => {
+    reactiveCurrentTime.value = player.value?.currentTime || 0;
     if (loopStart.value !== null && loopEnd.value !== null && player.value) {
       if (player.value.currentTime >= loopEnd.value) {
         player.value.currentTime = loopStart.value;
@@ -1178,7 +1181,7 @@ onUnmounted(async (): Promise<void> => {
       :capture-progress="captureProgress"
       :current-file-name="currentFileName"
       :duration="currentFile?.meta?.duration || 0"
-      :current-time="player?.currentTime || 0"
+      :current-time="reactiveCurrentTime"
       v-model:screenshot-mode="screenshotMode"
       v-model:screenshot-time-input="screenshotTimeInput"
       v-model:batch-interval="batchInterval"
