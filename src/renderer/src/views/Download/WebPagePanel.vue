@@ -194,6 +194,22 @@ async function copyUrl(entry: WebPageEntry): Promise<void> {
   }
 }
 
+// ─── 状态切换（已下载→待下载需确认） ─────────────────────────────────────────
+
+/** 切换条目状态；已下载切回待下载时弹出确认 */
+async function handleToggleStatus(entry: WebPageEntry): Promise<void> {
+  if (entry.status === 'downloaded') {
+    const confirmed = await window.electronAPI.confirmDialog(
+      '将该条目标记为「待下载」？',
+      '状态切换确认'
+    );
+    if (!confirmed) {
+      return;
+    }
+  }
+  webPathsStore.toggleStatus(entry.id);
+}
+
 // ─── 删除 ────────────────────────────────────────────────────────────────────
 
 async function removePath(entry: WebPageEntry): Promise<void> {
@@ -367,7 +383,7 @@ async function enqueueEntry(entry: WebPageEntry): Promise<void> {
             <!-- 非编辑态：状态 badge + URL 文本 + 操作按钮 -->
             <div v-else class="flex gap-2 items-center">
               <button
-                @click="webPathsStore.toggleStatus(entry.id)"
+                @click="handleToggleStatus(entry)"
                 class="text-xs px-1.5 py-0.5 rounded flex-shrink-0 transition-colors"
                 :class="STATUS_CONFIG[entry.status].cls"
                 title="点击切换状态"
@@ -537,7 +553,7 @@ async function enqueueEntry(entry: WebPageEntry): Promise<void> {
             <!-- 非编辑态 -->
             <div v-else class="flex gap-2 items-center">
               <button
-                @click="webPathsStore.toggleStatus(entry.id)"
+                @click="handleToggleStatus(entry)"
                 class="text-xs px-1.5 py-0.5 rounded flex-shrink-0 transition-colors"
                 :class="STATUS_CONFIG[entry.status].cls"
                 title="点击切换状态"
