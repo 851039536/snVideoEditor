@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 export interface ProgressInfo {
-  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail' | 'tts';
+  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail' | 'tts' | 'color';
   percent: number;
   currentFile: number;
   totalFiles: number;
@@ -163,6 +163,27 @@ const electronAPI = {
       loop: number;
     }[];
   }): Promise<{ success: number; failed: string[] }> => ipcRenderer.invoke('video:batchConvertToGif', opts),
+
+  // 色彩调整
+  adjustColor: (opts: {
+    input: string;
+    output: string;
+    brightness: number;
+    contrast: number;
+    saturation: number;
+    temperature: number;
+  }): Promise<boolean> => ipcRenderer.invoke('video:adjustColor', opts),
+
+  batchAdjustColor: (opts: {
+    files: {
+      input: string;
+      output: string;
+      brightness: number;
+      contrast: number;
+      saturation: number;
+      temperature: number;
+    }[];
+  }): Promise<{ success: number; failed: string[] }> => ipcRenderer.invoke('video:batchAdjustColor', opts),
 
   // Crypto
   encryptFile: (opts: { input: string; output: string; password: string }): Promise<boolean> =>

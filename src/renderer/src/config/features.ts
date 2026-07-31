@@ -1,5 +1,5 @@
 import {
-  Home, Scissors, FileVideo, Shield, Image, Globe, Video, AudioLines, Music
+  Home, Scissors, FileVideo, Shield, Image, Globe, Video, AudioLines, Music, Palette
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -84,5 +84,13 @@ export const FEATURE_CONFIG: FeatureMeta[] = [
     color: 'var(--color-accent-purple)',
     desc: '文本批量转换为 MP3 语音',
     gradient: 'from-indigo-500/20 to-violet-500/20'
+  },
+  {
+    name: '色彩调整',
+    path: '/color',
+    icon: Palette,
+    color: 'var(--color-warning)',
+    desc: '亮度/对比度/饱和度/色温调节',
+    gradient: 'from-amber-500/20 to-rose-500/20'
   }
 ]

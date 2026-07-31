@@ -1,5 +1,5 @@
 export interface ProgressInfo {
-  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail' | 'tts';
+  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail' | 'tts' | 'color';
   percent: number;
   currentFile: number;
   totalFiles: number;
@@ -161,6 +161,27 @@ export interface ElectronAPI {
     }[];
   }) => Promise<{ success: number; failed: string[] }>;
 
+  // 色彩调整
+  adjustColor: (opts: {
+    input: string;
+    output: string;
+    brightness: number;
+    contrast: number;
+    saturation: number;
+    temperature: number;
+  }) => Promise<boolean>;
+  
+  batchAdjustColor: (opts: {
+    files: {
+      input: string;
+      output: string;
+      brightness: number;
+      contrast: number;
+      saturation: number;
+      temperature: number;
+    }[];
+  }) => Promise<{ success: number; failed: string[] }>;
+  
   // Crypto
   encryptFile: (opts: { input: string; output: string; password: string }) => Promise<boolean>;
 

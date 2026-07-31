@@ -15,7 +15,9 @@ import {
   captureScreenshot,
   generateThumbnailSprite,
   cancelFfmpegOperation,
-  getAvailableEncoders
+  getAvailableEncoders,
+  adjustColor,
+  batchAdjustColor
 } from './modules/ffmpeg';
 import { downloadM3u8, fetchM3u8Variants } from './modules/download';
 import { fetchPageM3u8ViaBrowser } from './modules/page-fetcher';
@@ -264,6 +266,29 @@ function registerGifHandlers(): void {
       loop: number;
     }[];
   }>('video:batchConvertToGif', 'gif', 'gif', (opts, onProgress) => batchConvertToGif({ ...opts, onProgress }));
+}
+
+// 色彩调整 handlers
+function registerColorHandlers(): void {
+  wrapOperation<{
+    input: string;
+    output: string;
+    brightness: number;
+    contrast: number;
+    saturation: number;
+    temperature: number;
+  }>('video:adjustColor', 'color', 'color', (opts, onProgress) => adjustColor({ ...opts, onProgress }));
+
+  wrapOperation<{
+    files: {
+      input: string;
+      output: string;
+      brightness: number;
+      contrast: number;
+      saturation: number;
+      temperature: number;
+    }[];
+  }>('video:batchAdjustColor', 'color', 'color', (opts, onProgress) => batchAdjustColor({ ...opts, onProgress }));
 }
 
 // Encryption/Decryption handlers
@@ -633,6 +658,7 @@ app.whenReady().then(() => {
   registerSplitMergeHandlers();
   registerCompressHandlers();
   registerGifHandlers();
+  registerColorHandlers();
   registerCryptoHandlers();
   registerDownloadHandlers();
   registerTtsHandlers();

@@ -46,6 +46,11 @@ const routes: RouteRecordRaw[] = [
     path: '/tts',
     name: 'Tts',
     component: () => import('@/views/Tts/TtsView.vue')
+  },
+  {
+    path: '/color',
+    name: 'ColorAdjust',
+    component: () => import('@/views/ColorAdjust/ColorAdjustView.vue')
   }
 ]
 
