@@ -18,7 +18,9 @@ import {
   getAvailableEncoders,
   adjustColor,
   batchAdjustColor,
-  changeSpeed
+  changeSpeed,
+  convertFormat,
+  batchConvertFormat
 } from './modules/ffmpeg';
 import { downloadM3u8, fetchM3u8Variants } from './modules/download';
 import { fetchPageM3u8ViaBrowser } from './modules/page-fetcher';
@@ -297,6 +299,27 @@ function registerColorHandlers(): void {
       temperature: number;
     }[];
   }>('video:batchAdjustColor', 'color', 'color', (opts, onProgress) => batchAdjustColor({ ...opts, onProgress }));
+}
+
+// 格式转换 handlers
+function registerConvertHandlers(): void {
+  wrapOperation<{
+    input: string;
+    output: string;
+    targetFormat: string;
+    copy: boolean;
+  }>('video:convertFormat', 'convert', 'convert', (opts, onProgress) =>
+    convertFormat({ ...opts, onProgress }), 300000);
+
+  wrapOperation<{
+    files: {
+      input: string;
+      output: string;
+      targetFormat: string;
+      copy: boolean;
+    }[];
+  }>('video:batchConvertFormat', 'convert', 'convert', (opts, onProgress) =>
+    batchConvertFormat({ ...opts, onProgress }), 600000);
 }
 
 // Encryption/Decryption handlers
@@ -667,6 +690,7 @@ app.whenReady().then(() => {
   registerCompressHandlers();
   registerGifHandlers();
   registerColorHandlers();
+  registerConvertHandlers();
   registerCryptoHandlers();
   registerDownloadHandlers();
   registerTtsHandlers();

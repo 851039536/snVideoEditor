@@ -51,6 +51,11 @@ const routes: RouteRecordRaw[] = [
     path: '/color',
     name: 'ColorAdjust',
     component: () => import('@/views/ColorAdjust/ColorAdjustView.vue')
+  },
+  {
+    path: '/convert',
+    name: 'FormatConvert',
+    component: () => import('@/views/FormatConvert/FormatConvertView.vue')
   }
 ]
 

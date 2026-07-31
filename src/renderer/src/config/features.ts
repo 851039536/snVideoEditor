@@ -1,5 +1,5 @@
 import {
-  Home, Scissors, FileVideo, Shield, Image, Globe, Video, AudioLines, Music, Palette
+  Home, Scissors, FileVideo, Shield, Image, Globe, Video, AudioLines, Music, Palette, Repeat
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -92,5 +92,13 @@ export const FEATURE_CONFIG: FeatureMeta[] = [
     color: 'var(--color-warning)',
     desc: '亮度/对比度/饱和度/色温调节',
     gradient: 'from-amber-500/20 to-rose-500/20'
+  },
+  {
+    name: '格式转换',
+    path: '/convert',
+    icon: Repeat,
+    color: 'var(--color-accent-blue)',
+    desc: '视频/音频格式互转',
+    gradient: 'from-teal-500/20 to-cyan-500/20'
   }
 ]

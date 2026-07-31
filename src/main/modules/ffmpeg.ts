@@ -43,6 +43,9 @@ export type { SpeedChangeOptions } from './ffmpeg-speed'
 export { adjustColor, batchAdjustColor } from './ffmpeg-color'
 export type { ColorAdjustOptions, BatchColorAdjustOptions } from './ffmpeg-color'
 
+export { convertFormat, batchConvertFormat } from './ffmpeg-convert'
+export type { ConvertOptions, BatchConvertOptions } from './ffmpeg-convert'
+
 // ─── Local imports for core functions ─────────────────────────────────────────
 import {
   getFfmpegPath,

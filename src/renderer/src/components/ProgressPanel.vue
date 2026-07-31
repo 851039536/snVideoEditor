@@ -16,7 +16,8 @@ const typeLabel = computed((): string => {
     download: '下载',
     tts: '语音合成',
     speed: '变速',
-    color: '色彩调整'
+    color: '色彩调整',
+    convert: '格式转换'
   }
   return labels[store.operationType] || '处理'
 })
