@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import {
-  Plus, Search, Pencil, Trash2, Check, X, Download, Link, Save, FolderInput, FolderOpen
+  Plus, Search, Pencil, Trash2, Check, X, Download, Link, Save, FolderInput, FolderOpen, Copy
 } from 'lucide-vue-next';
 import { useWebPathsStore } from '@/stores/webPaths';
 import { truncateUrl } from '@/utils/format';
@@ -128,6 +128,11 @@ async function saveEdit(): Promise<void> {
   if (!isValidUrl(url)) {
     return;
   }
+  // 去重校验：排除自身后检查是否与其他条目重复
+  if (webPathsStore.entries.some((e) => e.id !== editingId.value && e.url === url)) {
+    addHint.value = '该网页路径已存在';
+    return;
+  }
   // URL 变化后旧解析结果已失效，一并清理（状态重置由 store.update 负责）
   if (url !== getEntryUrl(editingId.value)) {
     clearState(editingId.value);
@@ -143,6 +148,27 @@ function cancelEdit(): void {
 
 function getEntryUrl(id: string): string {
   return webPathsStore.entries.find((e) => e.id === id)?.url || '';
+}
+
+// ─── 复制链接 ────────────────────────────────────────────────────────────────
+
+/** 记录刚复制成功的条目 id，用于短暂显示反馈 */
+const copiedId = ref('');
+let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function copyUrl(entry: WebPageEntry): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(entry.url);
+    copiedId.value = entry.id;
+    if (copiedTimer) {
+      clearTimeout(copiedTimer);
+    }
+    copiedTimer = setTimeout((): void => {
+      copiedId.value = '';
+    }, 1500);
+  } catch {
+    /* 剪贴板不可用时静默失败 */
+  }
 }
 
 // ─── 删除 ────────────────────────────────────────────────────────────────────
@@ -326,6 +352,14 @@ async function enqueueEntry(entry: WebPageEntry): Promise<void> {
             <Search v-if="parsingId !== entry.id" :size="12" />
             <span v-if="parsingId === entry.id">解析中...</span>
             <span v-else>解析</span>
+          </button>
+          <button
+            @click="copyUrl(entry)"
+            class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
+            :title="copiedId === entry.id ? '已复制' : '复制链接'"
+          >
+            <Check v-if="copiedId === entry.id" :size="12" class="text-success" />
+            <Copy v-else :size="12" />
           </button>
           <button
             @click="startEdit(entry)"
