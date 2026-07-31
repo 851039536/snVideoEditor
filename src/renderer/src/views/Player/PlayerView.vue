@@ -215,21 +215,15 @@ const hasPrev = computed((): boolean => {
 });
 
 const canNext = computed((): boolean => {
-  if (files.value.length <= 1) {
-    return hasNext.value;
-  }
   if (playMode.value === 'repeat-all' || playMode.value === 'shuffle') {
-    return true;
+    return files.value.length > 1;
   }
   return hasNext.value;
 });
 
 const canPrev = computed((): boolean => {
-  if (files.value.length <= 1) {
-    return hasPrev.value;
-  }
-  if (playMode.value === 'repeat-all') {
-    return true;
+  if (playMode.value === 'repeat-all' || playMode.value === 'shuffle') {
+    return files.value.length > 1;
   }
   return hasPrev.value;
 });
@@ -350,8 +344,8 @@ onMounted(async (): Promise<void> => {
   }
 
   if (pd.filePaths.length > 0) {
-    await addFilesAndLoadMeta(pd.filePaths);
-    // Restore last index (clamp to valid range) — no autoplay
+    addFilesAndLoadMeta(pd.filePaths);
+    // 恢复上次播放索引（钳制到有效范围）——不自动播放
     if (pd.lastIndex >= 0 && pd.lastIndex < files.value.length) {
       currentIndex.value = pd.lastIndex;
     }
@@ -361,13 +355,12 @@ onMounted(async (): Promise<void> => {
   window.addEventListener('beforeunload', flushSave);
 });
 
-// Auto-save playlist, index, autoDecrypt, playMode on changes
+// 播放列表增删、索引、自动解密、播放模式变化时自动保存
 watch(
-  [() => files.value.map((e) => e.path), currentIndex, autoDecrypt, playMode],
+  [() => files.value.length, currentIndex, autoDecrypt, playMode],
   () => {
     scheduleSave();
-  },
-  { deep: true }
+  }
 );
 
 // Reactively toggle Plyr auto-hide when user changes the switch
@@ -379,22 +372,23 @@ watch(autoHideControls, (val): void => {
 });
 
 // ---- File Management ----
-async function addFiles(paths: string[]): Promise<void> {
+function addFiles(paths: string[]): void {
+  const existing = new Set(files.value.map((f) => f.path));
+  const toAdd: PlayerEntry[] = [];
   for (const p of paths) {
-    if (files.value.some((f) => f.path === p)) {
+    if (existing.has(p)) {
       continue;
     }
-    files.value.push({
-      path: p,
-      isEncrypted: p.toLowerCase().endsWith('.enc'),
-      meta: null,
-      tempPath: null
-    });
+    existing.add(p);
+    toAdd.push({ path: p, isEncrypted: p.toLowerCase().endsWith('.enc'), meta: null, tempPath: null });
+  }
+  if (toAdd.length > 0) {
+    files.value.push(...toAdd);
   }
 }
 
-async function addFilesAndLoadMeta(paths: string[]): Promise<void> {
-  await addFiles(paths);
+function addFilesAndLoadMeta(paths: string[]): void {
+  addFiles(paths);
   void loadAllMeta();
 }
 
@@ -445,6 +439,7 @@ function handleReorder(payload: { from: number; to: number }): void {
   } else if (payload.from > currentIndex.value && payload.to <= currentIndex.value) {
     currentIndex.value++;
   }
+  scheduleSave();
 }
 
 async function openTempDir(): Promise<void> {
@@ -453,15 +448,19 @@ async function openTempDir(): Promise<void> {
   }
 }
 
-async function clearList(): Promise<void> {
+/** 重置播放状态并清理临时文件（clearList / rescanLastFolder 共用） */
+async function resetPlayback(): Promise<void> {
   destroyPlayer();
-  // 先释放 video 元素持有的文件句柄，再删除临时文件，否则 Windows 下删除会因占用失败
   releaseVideoSource();
   await cancelThumbnailGeneration();
   currentIndex.value = -1;
   await nextTick();
   await cleanupAllTemps();
   files.value = [];
+}
+
+async function clearList(): Promise<void> {
+  await resetPlayback();
   errorMsg.value = '';
 }
 
@@ -478,10 +477,10 @@ async function selectDir(): Promise<void> {
     errorMsg.value = ERR_NO_VIDEO;
     return;
   }
-  await addFilesAndLoadMeta(scanned);
+  addFilesAndLoadMeta(scanned);
 }
 
-/** Re-scan the last remembered folder */
+/** 重新扫描上次记住的文件夹 */
 async function rescanLastFolder(): Promise<void> {
   if (!lastFolder.value) {
     return;
@@ -492,14 +491,8 @@ async function rescanLastFolder(): Promise<void> {
     errorMsg.value = ERR_NO_VIDEO;
     return;
   }
-  destroyPlayer();
-  releaseVideoSource();
-  await cancelThumbnailGeneration();
-  currentIndex.value = -1;
-  await nextTick();
-  await cleanupAllTemps();
-  files.value = [];
-  await addFilesAndLoadMeta(scanned);
+  await resetPlayback();
+  addFilesAndLoadMeta(scanned);
 }
 
 // ---- Meta loading (concurrency-limited to avoid ffprobe process storms) ----
@@ -553,7 +546,12 @@ async function playFile(index: number): Promise<void> {
     }
   } else {
     if (!file.meta) {
-      await loadMeta(file);
+      try {
+        await loadMeta(file);
+      } catch (_e) {
+        errorMsg.value = `文件元数据加载失败: ${getFileName(file.path)}`;
+        return;
+      }
     }
     await nextTick();
     initAndPlay();
@@ -577,6 +575,13 @@ function playNext(): void {
 }
 
 function playPrev(): void {
+  if (playMode.value === 'shuffle') {
+    const idx = pickShuffleIndex();
+    if (idx >= 0) {
+      playFile(idx);
+    }
+    return;
+  }
   if (hasPrev.value) {
     playFile(currentIndex.value - 1);
   } else if (playMode.value === 'repeat-all' && files.value.length > 0) {
@@ -600,22 +605,11 @@ function handleEnded(): void {
   if (playMode.value === 'repeat-one') {
     if (player.value) {
       player.value.currentTime = 0;
-      void player.value.play();
+      void player.value.play().catch((): void => {});
     }
     return;
   }
-  if (playMode.value === 'shuffle') {
-    const idx = pickShuffleIndex();
-    if (idx >= 0) {
-      playFile(idx);
-    }
-    return;
-  }
-  if (hasNext.value) {
-    playFile(currentIndex.value + 1);
-  } else if (playMode.value === 'repeat-all' && files.value.length > 0) {
-    playFile(0);
-  }
+  playNext();
 }
 
 // ---- Frame step / Picture-in-Picture ----
@@ -757,14 +751,12 @@ function initAndPlay(): void {
     }
   });
 
-  // Keep controls visible when auto-hide is disabled (single registration point)
-  if (!autoHideControls.value) {
-    player.value.on('controlshidden', (): void => {
-      if (!autoHideControls.value && player.value) {
-        player.value.toggleControls(true);
-      }
-    });
-  }
+  // 始终注册 controlshidden 监听：用户可能在运行中切换 autoHideControls
+  player.value.on('controlshidden', (): void => {
+    if (!autoHideControls.value && player.value) {
+      player.value.toggleControls(true);
+    }
+  });
 
   player.value.on('play', (): void => {
     isPlaying.value = true;
@@ -808,11 +800,9 @@ function initAndPlay(): void {
     }
   });
 
-  try {
-    player.value.play();
-  } catch (_e) {
-    /* ignore autoplay restrictions */
-  }
+  void player.value.play().catch((): void => {
+    /* 忽略自动播放限制 */
+  });
 }
 
 // ---- Encryption Decrypt for Playback ----
