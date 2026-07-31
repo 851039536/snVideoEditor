@@ -8,6 +8,7 @@ import FileDropZone from '@/components/FileDropZone.vue'
 import VideoPreview from '@/components/VideoPreview.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import ClipList from './ClipList.vue'
+import SpeedPanel from './SpeedPanel.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useVideoPlayer } from '@/composables/useVideoPlayer'
 import { useTrimTimeline } from '@/composables/useTrimTimeline'
@@ -19,7 +20,7 @@ import type { VideoMeta, ClipItem } from '@/types/file'
 const store = useProgressStore()
 
 // ---- Mode ----
-const mode = ref<'split' | 'merge'>('split')
+const mode = ref<'split' | 'merge' | 'speed'>('split')
 
 // ---- Files ----
 const files = ref<string[]>([])
@@ -285,7 +286,7 @@ function moveFile(index: number, direction: -1 | 1): void {
 }
 
 watch(mode, (newMode) => {
-  if (newMode === 'split') {
+  if (newMode === 'split' || newMode === 'speed') {
     if (files.value.length > 1) {
       files.value = [files.value[0]]
     }
@@ -667,10 +668,17 @@ onUnmounted(() => {
       >
         合并
       </button>
+      <button
+        @click="mode = 'speed'"
+        class="px-4 py-1.5 rounded-md text-sm font-medium"
+        :class="mode === 'speed' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary'"
+      >
+        变速
+      </button>
     </div>
 
-    <!-- ========== SPLIT MODE ========== -->
-    <div v-if="mode === 'split'" class="space-y-3">
+    <!-- ========== SPLIT / SPEED MODE ========== -->
+    <div v-if="mode !== 'merge'" class="space-y-3">
       <!-- No file => drop zone -->
       <FileDropZone v-if="files.length === 0" @files-selected="addFiles" />
 
@@ -890,8 +898,8 @@ onUnmounted(() => {
         </div>
 
 
-        <!-- Cut-to-list action -->
-        <div class="flex items-center gap-3">
+        <!-- Cut-to-list action (split mode only) -->
+        <div v-if="mode === 'split'" class="flex items-center gap-3">
           <button
             @click="cutToClipList"
             :disabled="clipDurationSec <= 0 || cuttingInProgress"
@@ -913,12 +921,21 @@ onUnmounted(() => {
           </span>
         </div>
 
-        <!-- Clips List -->
+        <!-- Clips List (split mode only) -->
         <ClipList
-          v-if="clips.length > 0"
+          v-if="mode === 'split' && clips.length > 0"
           :clips="clips"
           @toggle="toggleClipSelection"
           @remove="removeClip"
+        />
+
+        <!-- Speed Panel (speed mode only) -->
+        <SpeedPanel
+          v-if="mode === 'speed'"
+          :input-file="files[0]"
+          :trim-start-sec="trimStartSec"
+          :trim-duration="clipDurationSec"
+          @error="errorMsg = $event"
         />
 
         <!-- Error -->
@@ -926,8 +943,8 @@ onUnmounted(() => {
           <p>{{ errorMsg }}</p>
         </div>
 
-        <!-- Progress -->
-        <ProgressPanel />
+        <!-- Progress (split mode only; speed mode has its own in SpeedPanel) -->
+        <ProgressPanel v-if="mode === 'split'" />
       </template>
     </div>
 

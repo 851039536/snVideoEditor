@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 export interface ProgressInfo {
-  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail' | 'tts' | 'color';
+  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail' | 'tts' | 'color' | 'speed';
   percent: number;
   currentFile: number;
   totalFiles: number;
@@ -99,6 +99,9 @@ const electronAPI = {
 
   mergeVideos: (opts: { inputs: string[]; output: string }): Promise<boolean> =>
     ipcRenderer.invoke('video:merge', opts),
+
+  changeSpeed: (opts: { input: string; output: string; startTime: number; duration: number; speed: number }): Promise<boolean> =>
+    ipcRenderer.invoke('video:speed', opts),
 
   // Video meta & compress
   getVideoMeta: (filePath: string): Promise<VideoMeta> => ipcRenderer.invoke('video:getMeta', filePath),

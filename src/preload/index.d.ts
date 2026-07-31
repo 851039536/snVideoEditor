@@ -1,5 +1,5 @@
 export interface ProgressInfo {
-  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail' | 'tts' | 'color';
+  type: 'split' | 'merge' | 'compress' | 'encrypt' | 'decrypt' | 'gif' | 'download' | 'screenshot' | 'thumbnail' | 'tts' | 'color' | 'speed';
   percent: number;
   currentFile: number;
   totalFiles: number;
@@ -96,6 +96,8 @@ export interface ElectronAPI {
   splitVideo: (opts: { input: string; output: string; startTime: string; duration: string }) => Promise<boolean>;
 
   mergeVideos: (opts: { inputs: string[]; output: string }) => Promise<boolean>;
+
+  changeSpeed: (opts: { input: string; output: string; startTime: number; duration: number; speed: number }) => Promise<boolean>;
 
   // Video meta & compress
   getVideoMeta: (filePath: string) => Promise<VideoMeta>;

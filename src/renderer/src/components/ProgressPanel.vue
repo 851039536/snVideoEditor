@@ -15,6 +15,7 @@ const typeLabel = computed((): string => {
     gif: 'GIF转换',
     download: '下载',
     tts: '语音合成',
+    speed: '变速',
     color: '色彩调整'
   }
   return labels[store.operationType] || '处理'

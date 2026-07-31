@@ -17,7 +17,8 @@ import {
   cancelFfmpegOperation,
   getAvailableEncoders,
   adjustColor,
-  batchAdjustColor
+  batchAdjustColor,
+  changeSpeed
 } from './modules/ffmpeg';
 import { downloadM3u8, fetchM3u8Variants } from './modules/download';
 import { fetchPageM3u8ViaBrowser } from './modules/page-fetcher';
@@ -204,6 +205,13 @@ function registerSplitMergeHandlers(): void {
   ipcMain.handle('audio:getMeta', async (_event, filePath: string) => {
     return getAudioMeta(filePath);
   });
+
+  wrapOperation<{
+    input: string; output: string;
+    startTime: number; duration: number; speed: number
+  }>('video:speed', 'speed', 'speed', (opts, onProgress) =>
+    changeSpeed({ ...opts, onProgress })
+  );
 }
 
 // Compression handlers
