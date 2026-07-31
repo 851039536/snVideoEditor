@@ -1,6 +1,6 @@
 <!-- 网页路径管理面板：路径增改删、解析、链接勾选入队与备份还原 -->
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import {
   Plus, Search, Pencil, Trash2, Check, X, Download, Link, Save, FolderInput, FolderOpen, Copy
 } from 'lucide-vue-next';
@@ -42,6 +42,15 @@ onMounted(async () => {
     /* ignore */
   }
 });
+
+// ─── 数量实时统计 ─────────────────────────────────────────────────────────────
+
+/** 路径总数 */
+const totalCount = computed((): number => webPathsStore.entries.length);
+/** 待下载数量 */
+const pendingCount = computed((): number => webPathsStore.entries.filter((e) => e.status === 'pending').length);
+/** 已下载数量 */
+const downloadedCount = computed((): number => webPathsStore.entries.filter((e) => e.status === 'downloaded').length);
 
 // ─── 下载状态 badge 配置 ─────────────────────────────────────────────────────
 
@@ -246,6 +255,11 @@ async function enqueueEntry(entry: WebPageEntry): Promise<void> {
     <!-- 标题行 + 备份/还原/打开文件按钮组 -->
     <div class="flex items-center mb-2">
       <label class="text-sm font-semibold text-text-primary">网页路径</label>
+      <span v-if="totalCount > 0" class="text-xs text-text-muted ml-2">
+        共 {{ totalCount }} 条
+        <span class="text-yellow-400">待下载 {{ pendingCount }}</span>
+        <span class="text-success ml-1">已下载 {{ downloadedCount }}</span>
+      </span>
       <div class="flex gap-1.5 ml-auto">
         <button @click="backupPaths" class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1" title="备份网页路径列表到指定位置">
           <Save :size="12" />

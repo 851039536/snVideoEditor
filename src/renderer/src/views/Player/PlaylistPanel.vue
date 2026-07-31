@@ -1,6 +1,6 @@
 <!-- 播放列表面板：文件增删、搜索、拖拽排序 -->
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { Lock, FileVideo, X, GripVertical, FolderSync, FolderOpen, Search } from 'lucide-vue-next';
 import { formatSize, getFileName } from '@/utils/format';
 import type { PlayerEntry } from './types';
@@ -27,6 +27,11 @@ const emit = defineEmits<{
 const dragSrcIdx = ref(-1);
 const dragOverIdx = ref(-1);
 
+function resetDragState(): void {
+  dragSrcIdx.value = -1;
+  dragOverIdx.value = -1;
+}
+
 // ---- Search / filter ----
 const searchQuery = ref('');
 
@@ -49,6 +54,7 @@ function onDragStart(index: number, event: DragEvent): void {
 }
 
 function onDragOver(index: number, event: DragEvent): void {
+  // 必须阻止默认行为，否则 drop 事件不会触发
   event.preventDefault();
   if (dragSrcIdx.value !== index) {
     dragOverIdx.value = index;
@@ -58,31 +64,45 @@ function onDragOver(index: number, event: DragEvent): void {
   }
 }
 
-function onDragLeave(): void {
-  dragOverIdx.value = -1;
+function onDragLeave(event: DragEvent): void {
+  const el = event.currentTarget as HTMLElement | null;
+  const related = event.relatedTarget as Node | null;
+  // 仅在鼠标真正离开当前项（而非进入子元素）时清除高亮
+  if (!el || !related || !el.contains(related)) {
+    dragOverIdx.value = -1;
+  }
 }
 
 function onDrop(index: number): void {
   const from = dragSrcIdx.value;
-  dragSrcIdx.value = -1;
-  dragOverIdx.value = -1;
+  resetDragState();
   if (from >= 0 && from !== index && from < props.files.length && index < props.files.length) {
     emit('reorder', { from, to: index });
   }
 }
 
 function onDragEnd(): void {
-  dragSrcIdx.value = -1;
-  dragOverIdx.value = -1;
+  resetDragState();
 }
 
-function getFolderName(path: string): string {
+/** 缓存文件夹名，仅在 lastFolder 变化时重算 */
+const lastFolderName = computed((): string => {
+  const path = props.lastFolder;
   if (!path) {
     return '';
   }
   const parts = path.replace(/[/\\]+$/, '').split(/[/\\]/);
   return parts[parts.length - 1] || path;
-}
+});
+
+// 父组件整体替换 files 引用（clearList / rescanLastFolder）时重置搜索词
+// 注意：监听引用而非 length —— addFiles 通过 push 不改变引用，不会误触发
+watch(
+  () => props.files,
+  () => {
+    searchQuery.value = '';
+  }
+);
 
 // 模板中无法直接访问 window，需在 script 中包装
 async function selectPlayerFiles(): Promise<string[]> {
@@ -116,7 +136,7 @@ async function selectPlayerFiles(): Promise<string[]> {
       :title="'重新加载: ' + lastFolder"
     >
       <FolderSync :size="14" />
-      重新加载 {{ getFolderName(lastFolder) }}
+      重新加载 {{ lastFolderName }}
     </button>
 
     <!-- File List -->
@@ -159,11 +179,11 @@ async function selectPlayerFiles(): Promise<string[]> {
             idx === dragOverIdx ? 'drag-over' : '',
             idx === dragSrcIdx ? 'is-dragging' : ''
           ]"
-          :draggable="!searchQuery"
+          :draggable="!searchQuery.trim()"
           @click="emit('selectFile', idx)"
           @dragstart="onDragStart(idx, $event)"
-          @dragover.prevent="onDragOver(idx, $event)"
-          @dragleave="onDragLeave()"
+          @dragover="onDragOver(idx, $event)"
+          @dragleave="onDragLeave($event)"
           @drop="onDrop(idx)"
           @dragend="onDragEnd"
         >
