@@ -1,6 +1,6 @@
 // 网页路径解析与勾选入队逻辑
 import { reactive, ref } from 'vue';
-import type { Ref } from 'vue';
+import type { InjectionKey, Ref } from 'vue';
 import { sanitizeFileName, todayDateStr } from '@/utils/format';
 import { buildCookieHeader } from '@/utils/cookies';
 import type { WebPageEntry, WebPageParseState } from '@/views/Download/types';
@@ -27,6 +27,9 @@ export interface UseWebPageParseReturn {
   enqueueSelected: (entry: WebPageEntry, outputDir: string) => Promise<EnqueueResult>;
   clearState: (entryId: string) => void;
 }
+
+/** 供父子组件共享同一解析状态实例的注入键（useWebPageParse 每次调用新建状态，非单例） */
+export const webPageParseKey: InjectionKey<UseWebPageParseReturn> = Symbol('webPageParse');
 
 /** 创建空白解析状态 */
 function createEmptyState(): WebPageParseState {

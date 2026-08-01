@@ -1,17 +1,15 @@
 <!-- 网页路径管理面板：路径增改删、解析、链接勾选入队与备份还原 -->
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
-import {
-  Plus, Search, Pencil, Trash2, Check, X, Download, Link, Save, FolderInput, FolderOpen, Copy
-} from 'lucide-vue-next';
+import { computed, onMounted, provide, ref } from 'vue';
+import { FolderInput, FolderOpen, Plus, Save } from 'lucide-vue-next';
 import { useWebPathsStore } from '@/stores/webPaths';
-import { truncateUrl } from '@/utils/format';
 import { isValidUrl } from '@/utils/url';
-import { useWebPageParse } from '@/views/Download/useWebPageParse';
-import type { WebPageEntry, WebPageStatus } from '@/views/Download/types';
+import { useWebPageParse, webPageParseKey } from '@/views/Download/useWebPageParse';
+import WebPageEntryItem from '@/views/Download/WebPageEntryItem.vue';
+import type { WebPageEntry } from '@/views/Download/types';
 import type { RawCookie } from '@/types/file';
 
-const props = defineProps<{
+defineProps<{
   /** 下载输出目录（为空时禁用批量入队） */
   outputDir: string;
 }>();
@@ -21,27 +19,11 @@ const emit = defineEmits<{
 }>();
 
 const webPathsStore = useWebPathsStore();
-const {
-  parseStates,
-  parsingId,
-  enqueueingId,
-  parseEntry,
-  toggleLink,
-  toggleAll,
-  enqueueSelected,
-  clearState
-} = useWebPageParse();
 
-// 每次挂载重新加载 JSON 文件，可捡起用户手动编辑的改动
-onMounted(async () => {
-  webPathsStore.init();
-  // 获取 JSON 文件完整路径用于界面展示
-  try {
-    pathsFilePath.value = await window.electronAPI.getWebPagePathsFile();
-  } catch {
-    /* ignore */
-  }
-});
+// 解析状态由父级持有并共享：useWebPageParse 每次调用新建状态（非单例），
+// 子组件通过 inject(webPageParseKey) 复用同一实例，解析结果才能在各卡片间正确读写
+const parse = useWebPageParse();
+provide(webPageParseKey, parse);
 
 // ─── 数量实时统计 & 分组 ──────────────────────────────────────────────────────
 
@@ -49,29 +31,6 @@ onMounted(async () => {
 const pendingEntries = computed((): WebPageEntry[] => webPathsStore.entries.filter((e) => e.status === 'pending'));
 /** 已下载条目 */
 const downloadedEntries = computed((): WebPageEntry[] => webPathsStore.entries.filter((e) => e.status === 'downloaded'));
-
-// ─── 解析结果关闭 ─────────────────────────────────────────────────────────────
-
-/** 已手动关闭解析面板的条目 id 集合 */
-const closedParseIds = ref<Set<string>>(new Set());
-
-/** 关闭某条目的解析结果面板 */
-function closeParse(entryId: string): void {
-  closedParseIds.value.add(entryId);
-}
-
-/** 解析入口：重新解析时清除关闭标记，确保结果面板可见 */
-async function handleParse(entry: WebPageEntry): Promise<void> {
-  closedParseIds.value.delete(entry.id);
-  await parseEntry(entry);
-}
-
-// ─── 下载状态 badge 配置 ─────────────────────────────────────────────────────
-
-const STATUS_CONFIG: Record<WebPageStatus, { label: string; cls: string }> = {
-  pending: { label: '待下载', cls: 'text-yellow-400 bg-yellow-400/10' },
-  downloaded: { label: '已下载', cls: 'text-success bg-success/10' }
-};
 
 // ─── 备份 / 还原 / 打开文件 ──────────────────────────────────────────────────
 
@@ -116,6 +75,17 @@ async function openPathsFolder(): Promise<void> {
   await window.electronAPI.openFolder(dir);
 }
 
+// 每次挂载重新加载 JSON 文件，可捡起用户手动编辑的改动
+onMounted(async () => {
+  webPathsStore.init();
+  // 获取 JSON 文件完整路径用于界面展示
+  try {
+    pathsFilePath.value = await window.electronAPI.getWebPagePathsFile();
+  } catch {
+    /* ignore */
+  }
+});
+
 // ─── 新增路径 ────────────────────────────────────────────────────────────────
 
 const newUrl = ref('');
@@ -136,147 +106,11 @@ async function addPath(): Promise<void> {
   addHint.value = '';
 }
 
-// ─── 行内编辑 ────────────────────────────────────────────────────────────────
+// ─── 事件透传 ────────────────────────────────────────────────────────────────
 
-const editingId = ref('');
-const editingUrl = ref('');
-
-function startEdit(entry: WebPageEntry): void {
-  editingId.value = entry.id;
-  editingUrl.value = entry.url;
-}
-
-async function saveEdit(): Promise<void> {
-  const url = editingUrl.value.trim();
-  if (!isValidUrl(url)) {
-    return;
-  }
-  // 去重校验：排除自身后检查是否与其他条目重复
-  if (webPathsStore.entries.some((e) => e.id !== editingId.value && e.url === url)) {
-    addHint.value = '该网页路径已存在';
-    return;
-  }
-  // URL 变化后旧解析结果已失效，一并清理（状态重置由 store.update 负责）
-  if (url !== getEntryUrl(editingId.value)) {
-    clearState(editingId.value);
-  }
-  await webPathsStore.update(editingId.value, url);
-  cancelEdit();
-}
-
-function cancelEdit(): void {
-  editingId.value = '';
-  editingUrl.value = '';
-}
-
-function getEntryUrl(id: string): string {
-  return webPathsStore.entries.find((e) => e.id === id)?.url || '';
-}
-
-// ─── 复制链接 ────────────────────────────────────────────────────────────────
-
-/** 记录刚复制成功的条目 id，用于短暂显示反馈 */
-const copiedId = ref('');
-let copiedTimer: ReturnType<typeof setTimeout> | null = null;
-
-async function copyUrl(entry: WebPageEntry): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(entry.url);
-    copiedId.value = entry.id;
-    if (copiedTimer) {
-      clearTimeout(copiedTimer);
-    }
-    copiedTimer = setTimeout((): void => {
-      copiedId.value = '';
-    }, 1500);
-  } catch {
-    /* 剪贴板不可用时静默失败 */
-  }
-}
-
-// ─── 状态切换（已下载→待下载需确认） ─────────────────────────────────────────
-
-/** 切换条目状态；已下载切回待下载时弹出确认 */
-async function handleToggleStatus(entry: WebPageEntry): Promise<void> {
-  if (entry.status === 'downloaded') {
-    const confirmed = await window.electronAPI.confirmDialog(
-      '将该条目标记为「待下载」？',
-      '状态切换确认'
-    );
-    if (!confirmed) {
-      return;
-    }
-  }
-  webPathsStore.toggleStatus(entry.id);
-}
-
-// ─── 删除 ────────────────────────────────────────────────────────────────────
-
-async function removePath(entry: WebPageEntry): Promise<void> {
-  await webPathsStore.remove(entry.id);
-  clearState(entry.id);
-  if (editingId.value === entry.id) {
-    cancelEdit();
-  }
-}
-
-// ─── 解析与勾选 ──────────────────────────────────────────────────────────────
-
-/** 该条目已勾选链接数 */
-function selectedCount(entryId: string): number {
-  const state = parseStates[entryId];
-  if (!state) {
-    return 0;
-  }
-  return state.links.filter((l) => l.selected).length;
-}
-
-/** 该条目是否已全选 */
-function isAllSelected(entryId: string): boolean {
-  const state = parseStates[entryId];
-  if (!state || state.links.length === 0) {
-    return false;
-  }
-  return state.links.every((l) => l.selected);
-}
-
-/** 单条链接「使用」：交由父组件回填主输入框并接管页面上下文 */
-function useLink(entryId: string, url: string): void {
-  const state = parseStates[entryId];
-  if (!state) {
-    return;
-  }
-  emit('use-link', {
-    url,
-    pageUrl: state.pageUrl,
-    pageTitle: state.pageTitle,
-    cookies: state.cookies
-  });
-}
-
-// ─── 批量入队 ────────────────────────────────────────────────────────────────
-
-/** 批量入队结果提示（按条目 id 记录） */
-const enqueueHints = ref<Record<string, string>>({});
-
-async function enqueueEntry(entry: WebPageEntry): Promise<void> {
-  enqueueHints.value[entry.id] = '';
-  const result = await enqueueSelected(entry, props.outputDir);
-  const parts: string[] = [];
-  if (result.ok > 0) {
-    parts.push(`已加入 ${result.ok} 个下载任务`);
-  }
-  if (result.skipped > 0) {
-    parts.push(`跳过 ${result.skipped} 个重复项`);
-  }
-  if (result.fail > 0) {
-    parts.push(`${result.fail} 个入队失败`);
-  }
-  enqueueHints.value[entry.id] = parts.join('，');
-  // 有任务成功入队即自动标记为已下载
-  if (result.ok > 0) {
-    await webPathsStore.setStatus(entry.id, 'downloaded');
-  }
+/** 透传子组件「使用链接」事件给 DownloadView */
+function forwardUseLink(payload: { url: string; pageUrl: string; pageTitle: string; cookies: RawCookie[] }): void {
+  emit('use-link', payload);
 }
 </script>
 
@@ -352,166 +186,13 @@ async function enqueueEntry(entry: WebPageEntry): Promise<void> {
           <span class="text-xs font-semibold text-yellow-400">待下载 ({{ pendingEntries.length }})</span>
         </div>
         <div class="space-y-2">
-          <div
+          <WebPageEntryItem
             v-for="entry in pendingEntries"
             :key="entry.id"
-            class="p-2 rounded-lg bg-bg-tertiary/50 border border-border/40"
-          >
-            <!-- 编辑态：输入框 + 保存/取消 -->
-            <div v-if="editingId === entry.id" class="flex gap-2 items-center">
-              <input
-                v-model="editingUrl"
-                type="url"
-                class="input-base flex-1 !py-1.5 text-xs"
-                @keyup.enter="saveEdit"
-                @keyup.esc="cancelEdit"
-              />
-              <button
-                @click="saveEdit"
-                :disabled="!isValidUrl(editingUrl.trim())"
-                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
-              >
-                <Check :size="12" />
-                保存
-              </button>
-              <button @click="cancelEdit" class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0">
-                <X :size="12" />
-                取消
-              </button>
-            </div>
-
-            <!-- 非编辑态：状态 badge + URL 文本 + 操作按钮 -->
-            <div v-else class="flex gap-2 items-center">
-              <button
-                @click="handleToggleStatus(entry)"
-                class="text-xs px-1.5 py-0.5 rounded flex-shrink-0 transition-colors"
-                :class="STATUS_CONFIG[entry.status].cls"
-                title="点击切换状态"
-              >
-                {{ STATUS_CONFIG[entry.status].label }}
-              </button>
-              <code class="text-xs text-text-primary flex-1 break-all font-mono" :title="entry.url">
-                {{ truncateUrl(entry.url, 60) }}
-              </code>
-              <button
-                @click="handleParse(entry)"
-                :disabled="parsingId !== ''"
-                class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1 flex-shrink-0"
-              >
-                <Search v-if="parsingId !== entry.id" :size="12" />
-                <span v-if="parsingId === entry.id">解析中...</span>
-                <span v-else>解析</span>
-              </button>
-              <button
-                @click="copyUrl(entry)"
-                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
-                :title="copiedId === entry.id ? '已复制' : '复制链接'"
-              >
-                <Check v-if="copiedId === entry.id" :size="12" class="text-success" />
-                <Copy v-else :size="12" />
-              </button>
-              <button
-                @click="startEdit(entry)"
-                :disabled="parsingId === entry.id"
-                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
-                title="编辑"
-              >
-                <Pencil :size="12" />
-              </button>
-              <button
-                @click="removePath(entry)"
-                :disabled="parsingId === entry.id"
-                class="btn-secondary !px-2 !py-1 text-xs text-danger flex-shrink-0"
-                title="删除"
-              >
-                <Trash2 :size="12" />
-              </button>
-            </div>
-
-            <!-- 解析失败提示 -->
-            <p
-              v-if="parseStates[entry.id]?.status === 'error'"
-              class="text-danger text-xs mt-2 whitespace-pre-line"
-            >
-              {{ parseStates[entry.id].error }}
-            </p>
-
-            <!-- 解析成功但无链接提示 -->
-            <p
-              v-if="parseStates[entry.id]?.status === 'done' && parseStates[entry.id].links.length === 0"
-              class="text-xs text-text-muted mt-2"
-            >
-              未提取到 m3u8 链接。可在浏览器中打开页面，按 F12 → Network → 筛选 m3u8 查找真实播放地址。
-            </p>
-
-            <!-- 解析结果：链接勾选列表（可关闭） -->
-            <div
-              v-if="parseStates[entry.id]?.status === 'done' && parseStates[entry.id].links.length > 0 && !closedParseIds.has(entry.id)"
-              class="mt-2 p-3 rounded-lg bg-accent-blue/10 border border-accent-blue/30"
-            >
-              <!-- 结果头部：数量 + 来源 + 全选 + 关闭 -->
-              <div class="flex items-center gap-1.5 mb-2">
-                <Link :size="14" class="text-accent-blue" />
-                <span class="text-sm font-semibold text-accent-blue">
-                  已提取 {{ parseStates[entry.id].links.length }} 个链接
-                </span>
-                <span class="text-xs text-text-muted ml-1 truncate">（来自: {{ parseStates[entry.id].pageTitle }}）</span>
-                <label class="text-xs text-text-secondary ml-auto flex items-center gap-1 cursor-pointer flex-shrink-0">
-                  <input
-                    type="checkbox"
-                    :checked="isAllSelected(entry.id)"
-                    @change="toggleAll(entry.id, ($event.target as HTMLInputElement).checked)"
-                  />
-                  全选
-                </label>
-                <button
-                  @click="closeParse(entry.id)"
-                  class="btn-secondary !px-1.5 !py-0.5 text-xs flex-shrink-0"
-                  title="关闭解析结果"
-                >
-                  <X :size="12" />
-                </button>
-              </div>
-
-              <!-- 链接列表 -->
-              <div class="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
-                <div
-                  v-for="(link, idx) in parseStates[entry.id].links"
-                  :key="idx"
-                  class="flex items-center gap-2 p-2 rounded hover:bg-accent-blue/20 transition-colors group"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="link.selected"
-                    @change="toggleLink(entry.id, idx)"
-                    class="flex-shrink-0 cursor-pointer"
-                  />
-                  <code class="text-xs text-text-primary flex-1 break-all font-mono">{{ link.url }}</code>
-                  <button
-                    @click="useLink(entry.id, link.url)"
-                    class="btn-secondary !px-2 !py-0.5 text-xs opacity-0 group-hover:opacity-100 flex-shrink-0"
-                  >
-                    使用
-                  </button>
-                </div>
-              </div>
-
-              <!-- 批量入队操作 -->
-              <div class="mt-2 flex items-center gap-2">
-                <button
-                  @click="enqueueEntry(entry)"
-                  :disabled="selectedCount(entry.id) === 0 || !props.outputDir || enqueueingId !== ''"
-                  class="btn-secondary !px-3 !py-1.5 text-xs flex items-center gap-1.5"
-                >
-                  <Download :size="12" />
-                  <span v-if="enqueueingId === entry.id">入队中...</span>
-                  <span v-else>加入下载队列 (已选 {{ selectedCount(entry.id) }})</span>
-                </button>
-                <span v-if="!props.outputDir" class="text-xs text-warning">请先在右侧选择输出目录</span>
-                <span v-else-if="enqueueHints[entry.id]" class="text-xs text-success">{{ enqueueHints[entry.id] }}</span>
-              </div>
-            </div>
-          </div>
+            :entry="entry"
+            :output-dir="outputDir"
+            @use-link="forwardUseLink"
+          />
         </div>
       </div>
 
@@ -522,166 +203,13 @@ async function enqueueEntry(entry: WebPageEntry): Promise<void> {
           <span class="text-xs font-semibold text-success">已下载 ({{ downloadedEntries.length }})</span>
         </div>
         <div class="space-y-2">
-          <div
+          <WebPageEntryItem
             v-for="entry in downloadedEntries"
             :key="entry.id"
-            class="p-2 rounded-lg bg-bg-tertiary/50 border border-border/40 opacity-75"
-          >
-            <!-- 编辑态 -->
-            <div v-if="editingId === entry.id" class="flex gap-2 items-center">
-              <input
-                v-model="editingUrl"
-                type="url"
-                class="input-base flex-1 !py-1.5 text-xs"
-                @keyup.enter="saveEdit"
-                @keyup.esc="cancelEdit"
-              />
-              <button
-                @click="saveEdit"
-                :disabled="!isValidUrl(editingUrl.trim())"
-                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
-              >
-                <Check :size="12" />
-                保存
-              </button>
-              <button @click="cancelEdit" class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0">
-                <X :size="12" />
-                取消
-              </button>
-            </div>
-
-            <!-- 非编辑态 -->
-            <div v-else class="flex gap-2 items-center">
-              <button
-                @click="handleToggleStatus(entry)"
-                class="text-xs px-1.5 py-0.5 rounded flex-shrink-0 transition-colors"
-                :class="STATUS_CONFIG[entry.status].cls"
-                title="点击切换状态"
-              >
-                {{ STATUS_CONFIG[entry.status].label }}
-              </button>
-              <code class="text-xs text-text-primary flex-1 break-all font-mono" :title="entry.url">
-                {{ truncateUrl(entry.url, 60) }}
-              </code>
-              <button
-                @click="handleParse(entry)"
-                :disabled="parsingId !== ''"
-                class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1 flex-shrink-0"
-              >
-                <Search v-if="parsingId !== entry.id" :size="12" />
-                <span v-if="parsingId === entry.id">解析中...</span>
-                <span v-else>解析</span>
-              </button>
-              <button
-                @click="copyUrl(entry)"
-                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
-                :title="copiedId === entry.id ? '已复制' : '复制链接'"
-              >
-                <Check v-if="copiedId === entry.id" :size="12" class="text-success" />
-                <Copy v-else :size="12" />
-              </button>
-              <button
-                @click="startEdit(entry)"
-                :disabled="parsingId === entry.id"
-                class="btn-secondary !px-2 !py-1 text-xs flex-shrink-0"
-                title="编辑"
-              >
-                <Pencil :size="12" />
-              </button>
-              <button
-                @click="removePath(entry)"
-                :disabled="parsingId === entry.id"
-                class="btn-secondary !px-2 !py-1 text-xs text-danger flex-shrink-0"
-                title="删除"
-              >
-                <Trash2 :size="12" />
-              </button>
-            </div>
-
-            <!-- 解析失败提示 -->
-            <p
-              v-if="parseStates[entry.id]?.status === 'error'"
-              class="text-danger text-xs mt-2 whitespace-pre-line"
-            >
-              {{ parseStates[entry.id].error }}
-            </p>
-
-            <!-- 解析成功但无链接提示 -->
-            <p
-              v-if="parseStates[entry.id]?.status === 'done' && parseStates[entry.id].links.length === 0"
-              class="text-xs text-text-muted mt-2"
-            >
-              未提取到 m3u8 链接。可在浏览器中打开页面，按 F12 → Network → 筛选 m3u8 查找真实播放地址。
-            </p>
-
-            <!-- 解析结果：链接勾选列表（可关闭） -->
-            <div
-              v-if="parseStates[entry.id]?.status === 'done' && parseStates[entry.id].links.length > 0 && !closedParseIds.has(entry.id)"
-              class="mt-2 p-3 rounded-lg bg-accent-blue/10 border border-accent-blue/30"
-            >
-              <!-- 结果头部：数量 + 来源 + 全选 + 关闭 -->
-              <div class="flex items-center gap-1.5 mb-2">
-                <Link :size="14" class="text-accent-blue" />
-                <span class="text-sm font-semibold text-accent-blue">
-                  已提取 {{ parseStates[entry.id].links.length }} 个链接
-                </span>
-                <span class="text-xs text-text-muted ml-1 truncate">（来自: {{ parseStates[entry.id].pageTitle }}）</span>
-                <label class="text-xs text-text-secondary ml-auto flex items-center gap-1 cursor-pointer flex-shrink-0">
-                  <input
-                    type="checkbox"
-                    :checked="isAllSelected(entry.id)"
-                    @change="toggleAll(entry.id, ($event.target as HTMLInputElement).checked)"
-                  />
-                  全选
-                </label>
-                <button
-                  @click="closeParse(entry.id)"
-                  class="btn-secondary !px-1.5 !py-0.5 text-xs flex-shrink-0"
-                  title="关闭解析结果"
-                >
-                  <X :size="12" />
-                </button>
-              </div>
-
-              <!-- 链接列表 -->
-              <div class="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
-                <div
-                  v-for="(link, idx) in parseStates[entry.id].links"
-                  :key="idx"
-                  class="flex items-center gap-2 p-2 rounded hover:bg-accent-blue/20 transition-colors group"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="link.selected"
-                    @change="toggleLink(entry.id, idx)"
-                    class="flex-shrink-0 cursor-pointer"
-                  />
-                  <code class="text-xs text-text-primary flex-1 break-all font-mono">{{ link.url }}</code>
-                  <button
-                    @click="useLink(entry.id, link.url)"
-                    class="btn-secondary !px-2 !py-0.5 text-xs opacity-0 group-hover:opacity-100 flex-shrink-0"
-                  >
-                    使用
-                  </button>
-                </div>
-              </div>
-
-              <!-- 批量入队操作 -->
-              <div class="mt-2 flex items-center gap-2">
-                <button
-                  @click="enqueueEntry(entry)"
-                  :disabled="selectedCount(entry.id) === 0 || !props.outputDir || enqueueingId !== ''"
-                  class="btn-secondary !px-3 !py-1.5 text-xs flex items-center gap-1.5"
-                >
-                  <Download :size="12" />
-                  <span v-if="enqueueingId === entry.id">入队中...</span>
-                  <span v-else>加入下载队列 (已选 {{ selectedCount(entry.id) }})</span>
-                </button>
-                <span v-if="!props.outputDir" class="text-xs text-warning">请先在右侧选择输出目录</span>
-                <span v-else-if="enqueueHints[entry.id]" class="text-xs text-success">{{ enqueueHints[entry.id] }}</span>
-              </div>
-            </div>
-          </div>
+            :entry="entry"
+            :output-dir="outputDir"
+            @use-link="forwardUseLink"
+          />
         </div>
       </div>
     </div>
