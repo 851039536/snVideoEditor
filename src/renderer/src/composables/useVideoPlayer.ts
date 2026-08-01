@@ -1,3 +1,4 @@
+// 视频播放器状态与播放控制
 import { ref } from 'vue'
 import type { Ref } from 'vue'
 
@@ -17,6 +18,11 @@ export interface UseVideoPlayerOptions {
    * Defaults to console.error if not provided.
    */
   onError?: (e: Event) => void
+  /**
+   * Called when play() rejects (e.g. autoplay policy, decode failure).
+   * Defaults to swallowing the error silently.
+   */
+  onPlayError?: (e: unknown) => void
 }
 
 export function useVideoPlayer(options?: UseVideoPlayerOptions): {
@@ -39,7 +45,11 @@ export function useVideoPlayer(options?: UseVideoPlayerOptions): {
     const vp = videoPlayer.value
     if (!vp) { return }
     if (vp.paused) {
-      try { await vp.play() } catch (_e) { /* ignore */ }
+      try {
+        await vp.play()
+      } catch (e) {
+        options?.onPlayError?.(e)
+      }
     } else {
       vp.pause()
     }

@@ -17,10 +17,12 @@ export function getFileName(filePath: string): string {
 }
 
 /**
- * Return today's date as "YYYYMMDD" compact string.
+ * Return today's date as "YYYYMMDD" compact string (local timezone).
  */
 export function todayDateStr(): string {
-  return new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const now = new Date()
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
 }
 
 /**

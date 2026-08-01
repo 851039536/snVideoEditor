@@ -1,3 +1,4 @@
+<!-- 视频分割/合并/变速页面 -->
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import {
@@ -13,7 +14,7 @@ import { useProgressStore } from '@/stores/progress'
 import { useVideoPlayer } from '@/composables/useVideoPlayer'
 import { useTrimTimeline } from '@/composables/useTrimTimeline'
 import { secondsToHMS } from '@/utils/time'
-import { formatSize, getFileName, toFileUrl } from '@/utils/format'
+import { formatSize, getFileName, toFileUrl, todayDateStr } from '@/utils/format'
 import { clamp } from '@/utils/math'
 import type { VideoMeta, ClipItem } from '@/types/file'
 
@@ -21,13 +22,18 @@ const store = useProgressStore()
 
 // ---- Mode ----
 const mode = ref<'split' | 'merge' | 'speed'>('split')
+const modeTabs: Array<{ key: 'split' | 'merge' | 'speed'; label: string }> = [
+  { key: 'split', label: '裁剪' },
+  { key: 'merge', label: '合并' },
+  { key: 'speed', label: '变速' }
+]
 
 // ---- Files ----
 const files = ref<string[]>([])
 
 // ---- Video metadata & player ----
 const videoMeta = ref<VideoMeta | null>(null)
-const { videoPlayer, isPlaying, currentTime, onVideoPlay, onVideoStop, onTimeUpdate, onVideoError, onVideoLoaded, seekVideoPlayer } = useVideoPlayer({
+const { videoPlayer, isPlaying, currentTime, togglePlay, onVideoPlay, onVideoStop, onTimeUpdate, onVideoError, onVideoLoaded, seekVideoPlayer } = useVideoPlayer({
   onTimeUpdate: (t, vp) => {
     // Auto-stop at end trim point
     if (t >= trimEndSec.value) {
@@ -54,16 +60,22 @@ const trimEndSec = ref(30)
 
 // ---- Trim Timeline composable ----
 const {
-  timelineRef, dragging,
+  timelineRef,
   startHour, startMin, startSec, endHour, endMin, endSec,
   startPercent, endPercent, playheadPercent: playheadPercentFn,
-  getTimelineTime,
-  trimDuration, trimDurationStr
+  startHandleDrag,
+  trimDuration, trimDurationStr,
+  pauseOnScrub, startScrub, onHandleWheel, onGlobalPointerMove, onGlobalPointerUp
 } = useTrimTimeline({
   duration,
   trimStart: trimStartSec,
   trimEnd: trimEndSec,
-  seekTo: seekVideoPlayer
+  seekTo: seekVideoPlayer,
+  currentTime,
+  videoPlayer,
+  onScrubPause: () => {
+    isPlaying.value = false
+  }
 })
 const playheadPercent = playheadPercentFn(currentTime)
 
@@ -71,27 +83,6 @@ const playheadInSelectionPercent = computed((): number => {
   const range = endPercent.value - startPercent.value
   if (range <= 0) { return 50 }
   return ((playheadPercent.value - startPercent.value) / range) * 100
-})
-
-// ---- Timeline drag state (advanced) ----
-const scrubbing = ref(false)
-const lastDragClientX = ref(0)
-
-// Fine-tune: absolute seconds per pixel when holding Shift (lower = finer)
-const FINE_SECONDS_PER_PX = 0.1
-
-// Whether to pause video while scrubbing the timeline (persisted)
-const SCRUB_PAUSE_KEY = 'snve-scrub-pause'
-function loadScrubPause(): boolean {
-  try {
-    const saved = localStorage.getItem(SCRUB_PAUSE_KEY)
-    if (saved !== null) { return saved !== 'false' }
-  } catch { /* ignore */ }
-  return true
-}
-const pauseOnScrub = ref<boolean>(loadScrubPause())
-watch(pauseOnScrub, (val) => {
-  try { localStorage.setItem(SCRUB_PAUSE_KEY, String(val)) } catch { /* ignore */ }
 })
 
 // ---- Step forward/backward ----
@@ -119,9 +110,6 @@ const videoSrc = computed((): string => {
   return toFileUrl(files.value[0])
 })
 
-const clipDurationSec = trimDuration
-const clipDurationStr = trimDurationStr
-
 const selectedClipCount = computed((): number => {
   return clips.value.filter((c) => c.selected).length
 })
@@ -132,20 +120,6 @@ const canMerge = computed((): boolean => {
 
 // ---- Helpers ----
 
-async function togglePlay(): Promise<void> {
-  const vp = videoPlayer.value
-  if (!vp) { return }
-  if (vp.paused) {
-    try {
-      await vp.play()
-    } catch (e) {
-      errorMsg.value = `播放失败: ${e instanceof Error ? e.message : String(e)}`
-    }
-  } else {
-    vp.pause()
-  }
-}
-
 /** 显式释放 video 元素资源（文件句柄 + 解码线程），避免 file:/// 延迟释放导致线程残留占用 */
 function releaseVideoResource(): void {
   const vp = videoPlayer.value
@@ -154,6 +128,17 @@ function releaseVideoResource(): void {
     vp.removeAttribute('src')
     vp.load()
   }
+}
+
+/** 重置视频状态（元数据/时长/裁剪区间/播放进度/错误），供替换视频与切换模式复用 */
+function resetVideoState(): void {
+  videoMeta.value = null
+  duration.value = 0
+  trimStartSec.value = 0
+  trimEndSec.value = 30
+  currentTime.value = 0
+  isPlaying.value = false
+  errorMsg.value = ''
 }
 
 function swapArrayElements<T>(arr: T[], index: number, direction: -1 | 1): boolean {
@@ -177,8 +162,7 @@ async function addFiles(newFiles: string[]): Promise<void> {
     await loadVideoMeta(files.value[0])
   }
   if (outputName.value === '') {
-    const name = newFiles[0].split(/[/\\]/).pop() || ''
-    outputName.value = name.replace(/\.[^.]+$/, '') + '_output'
+    outputName.value = getFileName(newFiles[0]).replace(/\.[^.]+$/, '') + '_output'
   }
 }
 
@@ -222,19 +206,11 @@ async function replaceVideo(newPath: string): Promise<void> {
     window.electronAPI.deleteFile(c.outputFile).catch(() => {})
   }
   clips.value = []
-  // Reset state
-  videoMeta.value = null
-  duration.value = 0
-  trimStartSec.value = 0
-  trimEndSec.value = 30
-  currentTime.value = 0
-  isPlaying.value = false
-  errorMsg.value = ''
+  resetVideoState()
   // Replace file
   files.value = [newPath]
   // Reset output name
-  const name = newPath.split(/[/\\]/).pop() || ''
-  outputName.value = name.replace(/\.[^.]+$/, '') + '_output'
+  outputName.value = getFileName(newPath).replace(/\.[^.]+$/, '') + '_output'
   // Load new meta
   await loadVideoMeta(newPath)
 }
@@ -295,15 +271,9 @@ watch(mode, (newMode) => {
     }
   } else if (newMode === 'merge') {
     releaseVideoResource()
-    videoMeta.value = null
-    duration.value = 0
-    trimStartSec.value = 0
-    trimEndSec.value = 30
-    currentTime.value = 0
-    isPlaying.value = false
+    resetVideoState()
     outputName.value = ''
     outputDir.value = ''
-    errorMsg.value = ''
     files.value = []
   }
 })
@@ -337,119 +307,6 @@ function snapEndHere(): void {
   trimEndSec.value = clamp(currentTime.value, trimStartSec.value + 0.1, duration.value)
 }
 
-// ---- Timeline drag ----
-
-function startHandleDrag(handle: 'start' | 'end', e: PointerEvent): void {
-  dragging.value = handle
-  lastDragClientX.value = e.clientX
-  const el = e.currentTarget as HTMLElement
-  el.setPointerCapture(e.pointerId)
-  e.preventDefault()
-  e.stopPropagation()
-}
-
-// Wheel on handle: fine-tune ±0.1s per tick (Shift ±0.02s)
-function onHandleWheel(handle: 'start' | 'end', e: WheelEvent): void {
-  const step = e.shiftKey ? 0.02 : 0.1
-  const delta = e.deltaY > 0 ? step : -step
-
-  if (handle === 'start') {
-    trimStartSec.value = clamp(trimStartSec.value + delta, 0, trimEndSec.value - 0.1)
-    seekVideoPlayer(trimStartSec.value)
-  } else {
-    trimEndSec.value = clamp(trimEndSec.value + delta, trimStartSec.value + 0.1, duration.value)
-    seekVideoPlayer(trimEndSec.value)
-  }
-}
-
-function startScrub(e: PointerEvent): void {
-  if (duration.value <= 0) { return }
-  scrubbing.value = true
-  lastDragClientX.value = e.clientX
-  const el = timelineRef.value
-  if (el) { el.setPointerCapture(e.pointerId) }
-  // Pause video during scrub (unless user opted to keep playing)
-  if (pauseOnScrub.value) {
-    videoPlayer.value?.pause()
-    isPlaying.value = false
-  }
-  // Seek immediately to click position
-  seekVideoPlayer(getTimelineTime(e.clientX))
-}
-
-// Maximum resolution cap: never coarser than 2 seconds per pixel (even for long videos)
-const MAX_SECONDS_PER_PX = 2
-
-// Global pointer move/up for seamless drag tracking (pointer events required for setPointerCapture)
-function onGlobalPointerMove(e: PointerEvent): void {
-  if (scrubbing.value) {
-    if (e.shiftKey) {
-      // Fine mode: absolute 0.1s per pixel, independent of video duration
-      if (duration.value <= 0) { return }
-      const delta = (e.clientX - lastDragClientX.value) * FINE_SECONDS_PER_PX
-      lastDragClientX.value = e.clientX
-      seekVideoPlayer(clamp(currentTime.value + delta, 0, duration.value))
-    } else {
-      // Normal mode: absolute position, playhead follows mouse
-      seekVideoPlayer(getTimelineTime(e.clientX))
-    }
-    return
-  }
-
-  if (!dragging.value) { return }
-
-  const el = timelineRef.value
-  if (!el || duration.value <= 0) { return }
-
-  const rect = el.getBoundingClientRect()
-  const nativeRes = duration.value / rect.width // seconds per pixel in absolute mode
-  let rawT: number // unclamped target time, will be clamped below
-  let updateLastX = false
-
-  if (e.shiftKey) {
-    // Shift + drag: absolute fine resolution, independent of video duration
-    const base = dragging.value === 'start' ? trimStartSec.value : trimEndSec.value
-    rawT = base + (e.clientX - lastDragClientX.value) * FINE_SECONDS_PER_PX
-    updateLastX = true
-  } else if (nativeRes > MAX_SECONDS_PER_PX) {
-    // Long video: delta mode capped at MAX_SECONDS_PER_PX for smooth control
-    const base = dragging.value === 'start' ? trimStartSec.value : trimEndSec.value
-    rawT = base + (e.clientX - lastDragClientX.value) * MAX_SECONDS_PER_PX
-    updateLastX = true
-  } else {
-    // Short video: absolute position mapping is already precise enough
-    rawT = getTimelineTime(e.clientX)
-  }
-
-  if (updateLastX) { lastDragClientX.value = e.clientX }
-
-  // ---- Unified apply: clamp + assign + sync + seek ----
-  if (dragging.value === 'start') {
-    const clamped = clamp(rawT, 0, trimEndSec.value - 0.1)
-    if (trimStartSec.value !== clamped) {
-      trimStartSec.value = clamped
-      seekVideoPlayer(clamped)
-    }
-  } else {
-    const clamped = clamp(rawT, trimStartSec.value + 0.1, duration.value)
-    if (trimEndSec.value !== clamped) {
-      trimEndSec.value = clamped
-      seekVideoPlayer(clamped)
-    }
-  }
-}
-
-function onGlobalPointerUp(e: PointerEvent): void {
-  if (scrubbing.value) {
-    scrubbing.value = false
-    return
-  }
-
-  if (!dragging.value) { return }
-  (e.target as HTMLElement)?.releasePointerCapture?.(e.pointerId)
-  dragging.value = null
-}
-
 // ---- Clip list management ----
 
 async function cutToClipList(): Promise<void> {
@@ -457,7 +314,7 @@ async function cutToClipList(): Promise<void> {
     errorMsg.value = '请先添加视频文件'
     return
   }
-  if (clipDurationSec.value <= 0) {
+  if (trimDuration.value <= 0) {
     errorMsg.value = '请选择有效的片段范围'
     return
   }
@@ -478,7 +335,7 @@ async function cutToClipList(): Promise<void> {
       input: files.value[0],
       output: outputFile,
       startTime: secondsToHMS(trimStartSec.value),
-      duration: clipDurationStr.value
+      duration: trimDurationStr.value
     })
 
     if (success) {
@@ -488,7 +345,7 @@ async function cutToClipList(): Promise<void> {
         sourceFileName: getFileName(files.value[0]),
         startSec: trimStartSec.value,
         endSec: trimEndSec.value,
-        duration: clipDurationSec.value,
+        duration: trimDuration.value,
         outputFile,
         selected: true
       })
@@ -536,9 +393,7 @@ function moveClip(index: number, direction: -1 | 1): void {
 // ---- Output & Process ----
 
 function getMergeOutputName(): string {
-  const now = new Date()
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+  const dateStr = todayDateStr()
 
   // 优先使用裁剪片段对应的原视频名称
   if (clips.value.length > 0) {
@@ -617,12 +472,9 @@ onMounted(() => {
   window.electronAPI.onProgress((info) => {
     store.update(info)
   })
-})
-
-if (typeof window !== 'undefined') {
   document.addEventListener('pointermove', onGlobalPointerMove)
   document.addEventListener('pointerup', onGlobalPointerUp)
-}
+})
 
 onUnmounted(() => {
   document.removeEventListener('pointermove', onGlobalPointerMove)
@@ -655,25 +507,13 @@ onUnmounted(() => {
     <!-- Mode Tabs -->
     <div class="flex gap-1 mb-4 p-1 rounded-lg bg-bg-tertiary w-fit">
       <button
-        @click="mode = 'split'"
+        v-for="tab in modeTabs"
+        :key="tab.key"
+        @click="mode = tab.key"
         class="px-4 py-1.5 rounded-md text-sm font-medium"
-        :class="mode === 'split' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary'"
+        :class="mode === tab.key ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary'"
       >
-        裁剪
-      </button>
-      <button
-        @click="mode = 'merge'"
-        class="px-4 py-1.5 rounded-md text-sm font-medium"
-        :class="mode === 'merge' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary'"
-      >
-        合并
-      </button>
-      <button
-        @click="mode = 'speed'"
-        class="px-4 py-1.5 rounded-md text-sm font-medium"
-        :class="mode === 'speed' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-secondary'"
-      >
-        变速
+        {{ tab.label }}
       </button>
     </div>
 
@@ -847,7 +687,7 @@ onUnmounted(() => {
             </div>
             <span class="text-xs text-text-secondary shrink-0">
               选中片段时长：
-              <span class="text-sm font-mono text-accent-blue font-semibold">{{ clipDurationStr }}</span>
+              <span class="text-sm font-mono text-accent-blue font-semibold">{{ trimDurationStr }}</span>
             </span>
           </div>
 
@@ -902,9 +742,9 @@ onUnmounted(() => {
         <div v-if="mode === 'split'" class="flex items-center gap-3">
           <button
             @click="cutToClipList"
-            :disabled="clipDurationSec <= 0 || cuttingInProgress"
+            :disabled="trimDuration <= 0 || cuttingInProgress"
             class="px-8 py-2.5 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-            :class="clipDurationSec > 0 && !cuttingInProgress
+            :class="trimDuration > 0 && !cuttingInProgress
               ? 'bg-gradient-to-r from-accent-blue to-accent-purple'
               : 'bg-bg-tertiary text-text-muted'"
           >
@@ -934,7 +774,7 @@ onUnmounted(() => {
           v-if="mode === 'speed'"
           :input-file="files[0]"
           :trim-start-sec="trimStartSec"
-          :trim-duration="clipDurationSec"
+          :trim-duration="trimDuration"
           @error="errorMsg = $event"
         />
 
