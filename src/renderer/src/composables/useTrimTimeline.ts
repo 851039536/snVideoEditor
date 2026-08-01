@@ -17,8 +17,8 @@ export interface UseTrimTimelineOptions {
   minGap?: number
   /** 当前播放时间（精细拖动定位基准） */
   currentTime?: Ref<number>
-  /** 拖动时间轴时用于暂停播放的 video 元素 */
-  videoPlayer?: Ref<HTMLVideoElement | null>
+  /** 拖动时间轴时用于暂停播放的媒体元素（video/audio） */
+  videoPlayer?: Ref<HTMLMediaElement | null>
   /** 拖动时间轴暂停播放后的回调（同步 isPlaying 等 UI 状态） */
   onScrubPause?: () => void
 }

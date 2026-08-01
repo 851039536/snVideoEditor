@@ -71,17 +71,20 @@ const { videoPlayer, isPlaying, currentTime, togglePlay, onVideoPlay, onVideoSto
 
 // ---- 截取时间轴 ----
 const {
-  timelineRef, dragging, startHandleDrag,
+  timelineRef,
   startHour, startMin, startSec, endHour, endMin, endSec,
   startPercent, endPercent, playheadPercent: playheadPercentFn,
-  getTimelineTime,
-  trimDuration, trimDurationStr
+  startHandleDrag,
+  trimDuration, trimDurationStr,
+  startScrub, onGlobalPointerMove, onGlobalPointerUp
 } = useTrimTimeline({
   duration: maxDuration,
   trimStart: trimStartSec,
   trimEnd: trimEndSec,
   seekTo: seekVideoPlayer,
-  minGap: MIN_TRIM_GAP
+  minGap: MIN_TRIM_GAP,
+  currentTime,
+  videoPlayer
 })
 const playheadPercent = playheadPercentFn(currentTime)
 
@@ -117,51 +120,6 @@ const videoSrc = computed((): string => {
   if (files.value.length === 0) { return '' }
   return toFileUrl(files.value[0].path)
 })
-
-// ---- 时间轴拖拽（与 SplitMerge 对齐） ----
-const scrubbing = ref(false)
-
-function startScrub(e: PointerEvent): void {
-  if (maxDuration.value <= 0) { return }
-  scrubbing.value = true
-  const el = timelineRef.value
-  if (el) { el.setPointerCapture(e.pointerId) }
-  seekVideoPlayer(getTimelineTime(e.clientX))
-}
-
-function onTrackPointerMove(e: PointerEvent): void {
-  if (scrubbing.value) {
-    seekVideoPlayer(getTimelineTime(e.clientX))
-    return
-  }
-  if (!dragging.value) { return }
-
-  const t = getTimelineTime(e.clientX)
-  if (dragging.value === 'start') {
-    const clamped = clamp(t, 0, trimEndSec.value - MIN_TRIM_GAP)
-    if (trimStartSec.value !== clamped) {
-      trimStartSec.value = clamped
-      seekVideoPlayer(clamped)
-    }
-  } else {
-    const clamped = clamp(t, trimStartSec.value + MIN_TRIM_GAP, maxDuration.value)
-    if (trimEndSec.value !== clamped) {
-      trimEndSec.value = clamped
-      seekVideoPlayer(clamped)
-    }
-  }
-}
-
-function onTrackPointerUp(e: PointerEvent): void {
-  if (scrubbing.value) {
-    scrubbing.value = false
-    ;(e.currentTarget as HTMLElement)?.releasePointerCapture?.(e.pointerId)
-    return
-  }
-  if (!dragging.value) { return }
-  ;(e.currentTarget as HTMLElement)?.releasePointerCapture?.(e.pointerId)
-  dragging.value = null
-}
 
 const computedWidth = computed((): number => {
   return parseInt(selectedWidth.value)
@@ -260,9 +218,13 @@ onMounted(() => {
   window.electronAPI.onProgress((info) => {
     progressStore.update(info)
   })
+  document.addEventListener('pointermove', onGlobalPointerMove)
+  document.addEventListener('pointerup', onGlobalPointerUp)
 })
 
 onUnmounted(() => {
+  document.removeEventListener('pointermove', onGlobalPointerMove)
+  document.removeEventListener('pointerup', onGlobalPointerUp)
   window.electronAPI?.removeProgressListener()
 })
 </script>
@@ -353,8 +315,6 @@ onUnmounted(() => {
               ref="timelineRef"
               class="timeline-track"
               @pointerdown="startScrub"
-              @pointermove="onTrackPointerMove"
-              @pointerup="onTrackPointerUp"
             >
               <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
               <div class="timeline-selected" :style="{ width: (endPercent - startPercent) + '%' }">

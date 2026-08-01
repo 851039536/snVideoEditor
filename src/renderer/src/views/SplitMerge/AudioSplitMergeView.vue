@@ -12,7 +12,7 @@ import { useProgressStore } from '@/stores/progress'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
 import { useTrimTimeline } from '@/composables/useTrimTimeline'
 import { secondsToHMS } from '@/utils/time'
-import { formatSize, getFileName, toFileUrl } from '@/utils/format'
+import { formatSize, getFileName, toFileUrl, todayDateStr } from '@/utils/format'
 import { clamp } from '@/utils/math'
 import type { ClipItem } from '@/types/file'
 import type { AudioMeta } from '../../../../preload/index'
@@ -54,16 +54,19 @@ const trimEndSec = ref(30)
 
 // ---- 时间轴 composable ----
 const {
-  timelineRef, dragging,
+  timelineRef,
   startHour, startMin, startSec, endHour, endMin, endSec,
   startPercent, endPercent, playheadPercent: playheadPercentFn,
-  getTimelineTime, startHandleDrag,
-  trimDuration, trimDurationStr
+  startHandleDrag,
+  trimDuration, trimDurationStr,
+  startScrub, onGlobalPointerMove, onGlobalPointerUp
 } = useTrimTimeline({
   duration,
   trimStart: trimStartSec,
   trimEnd: trimEndSec,
-  seekTo: seekAudioPlayer
+  seekTo: seekAudioPlayer,
+  currentTime,
+  videoPlayer: audioPlayer
 })
 const playheadPercent = playheadPercentFn(currentTime)
 
@@ -87,9 +90,6 @@ const audioSrc = computed((): string => {
   if (files.value.length === 0) { return '' }
   return toFileUrl(files.value[0])
 })
-
-const clipDurationSec = trimDuration
-const clipDurationStr = trimDurationStr
 
 const selectedClipCount = computed((): number => {
   return clips.value.filter((c) => c.selected).length
@@ -195,37 +195,6 @@ function stepBackward(): void {
   seekAudioPlayer(t)
 }
 
-// ---- 时间轴交互 ----
-
-function onTimelineClick(e: PointerEvent): void {
-  if (dragging.value) { return }
-  const t = getTimelineTime(e.clientX)
-  seekAudioPlayer(t)
-}
-
-function onHandlePointerMove(e: PointerEvent): void {
-  if (!dragging.value) { return }
-  const t = getTimelineTime(e.clientX)
-  if (dragging.value === 'start') {
-    trimStartSec.value = clamp(t, 0, trimEndSec.value - 0.1)
-    seekAudioPlayer(trimStartSec.value)
-  } else {
-    trimEndSec.value = clamp(t, trimStartSec.value + 0.1, duration.value)
-    seekAudioPlayer(trimEndSec.value)
-  }
-}
-
-function onGlobalPointerMove(e: PointerEvent): void {
-  if (dragging.value) {
-    onHandlePointerMove(e)
-  }
-}
-
-function onGlobalPointerUp(): void {
-  if (!dragging.value) { return }
-  dragging.value = null
-}
-
 // ---- 片段列表管理 ----
 
 async function cutToClipList(): Promise<void> {
@@ -233,7 +202,7 @@ async function cutToClipList(): Promise<void> {
     errorMsg.value = '请先添加音频文件'
     return
   }
-  if (clipDurationSec.value <= 0) {
+  if (trimDuration.value <= 0) {
     errorMsg.value = '请选择有效的片段范围'
     return
   }
@@ -253,7 +222,7 @@ async function cutToClipList(): Promise<void> {
       input: files.value[0],
       output: outputFile,
       startTime: secondsToHMS(trimStartSec.value),
-      duration: clipDurationStr.value
+      duration: trimDurationStr.value
     })
 
     if (success) {
@@ -263,7 +232,7 @@ async function cutToClipList(): Promise<void> {
         sourceFileName: getFileName(files.value[0]),
         startSec: trimStartSec.value,
         endSec: trimEndSec.value,
-        duration: clipDurationSec.value,
+        duration: trimDuration.value,
         outputFile,
         selected: true
       })
@@ -310,9 +279,7 @@ function moveClip(index: number, direction: -1 | 1): void {
 // ---- 输出与合并 ----
 
 function getMergeOutputName(): string {
-  const now = new Date()
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+  const dateStr = todayDateStr()
   if (clips.value.length > 0) {
     const baseName = clips.value[0].sourceFileName.replace(/\.[^.]+$/, '')
     return `${baseName}_${dateStr}${sourceExt.value}`
@@ -523,7 +490,7 @@ onUnmounted(() => {
           <div
             ref="timelineRef"
             class="timeline-track"
-            @pointerdown="onTimelineClick"
+            @pointerdown="startScrub"
           >
             <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
             <div class="timeline-selected">
@@ -569,9 +536,9 @@ onUnmounted(() => {
         <div class="flex items-center gap-3">
           <button
             @click="cutToClipList"
-            :disabled="cuttingInProgress || clipDurationSec <= 0"
+            :disabled="cuttingInProgress || trimDuration <= 0"
             class="btn-primary"
-            :class="!cuttingInProgress && clipDurationSec > 0
+            :class="!cuttingInProgress && trimDuration > 0
               ? 'bg-gradient-to-r from-green-500 to-emerald-500'
               : 'bg-bg-tertiary text-text-muted'"
           >
