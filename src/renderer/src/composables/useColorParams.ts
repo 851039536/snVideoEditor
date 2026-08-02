@@ -1,5 +1,6 @@
 // 色彩调整参数管理组合式函数
 import { reactive, computed } from 'vue'
+import type { ComputedRef } from 'vue'
 import type { ColorParams, ColorPreset } from '@/views/ColorAdjust/types'
 
 /** 默认参数（无调整） */
@@ -26,8 +27,8 @@ export function useColorParams(): {
   applyPreset: (preset: ColorPreset) => void
   resetParams: () => void
   toFfmpegParams: () => { brightness: number; contrast: number; saturation: number; temperature: number }
-  previewFilterStyle: ReturnType<typeof computed<string>>
-  isDefault: ReturnType<typeof computed<boolean>>
+  previewFilterStyle: ComputedRef<string>
+  isDefault: ComputedRef<boolean>
 } {
   const params = reactive<ColorParams>({ ...DEFAULT_PARAMS })
 

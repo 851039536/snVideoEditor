@@ -20,17 +20,20 @@ let isUnmounted = false
 /** 拉取视频元信息，完成后写入 entry.meta 缓存 */
 function fetchMeta(entry: FileEntry): void {
   detailLoading.value = true
-  window.electronAPI.getVideoMeta(entry.path).then((meta) => {
-    entry.meta = meta
-    // 仅当弹窗仍显示同一文件时才清除 loading，避免旧请求覆盖新弹窗状态
-    if (!isUnmounted && props.entry === entry) {
-      detailLoading.value = false
-    }
-  }).catch(() => {
-    if (!isUnmounted && props.entry === entry) {
-      detailLoading.value = false
-    }
-  })
+  window.electronAPI
+    .getVideoMeta(entry.path)
+    .then((meta) => {
+      entry.meta = meta
+    })
+    .catch(() => {
+      // 静默失败：UI 展示"无法获取视频信息"
+    })
+    .finally(() => {
+      // 仅当弹窗仍显示同一文件时才清除 loading，避免旧请求覆盖新弹窗状态
+      if (!isUnmounted && props.entry === entry) {
+        detailLoading.value = false
+      }
+    })
 }
 
 function close(): void {
@@ -47,6 +50,8 @@ function onKeydown(e: KeyboardEvent): void {
 
 // 监听 entry 变化：非 null 时自动拉取元信息并注册 Esc 监听，null 时移除
 watch(() => props.entry, (entry) => {
+  // 复位 loading：entry 置空（关闭）或有 meta 时不残留加载态；无 meta 时由 fetchMeta 重新置 true
+  detailLoading.value = false
   if (entry) {
     if (!entry.meta) {
       fetchMeta(entry)

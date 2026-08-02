@@ -241,7 +241,8 @@ export function useCompressBatch(opts: {
       // 失败：释放全局进度状态，记录错误信息
       progressStore.reset()
       errorMsg.value = e instanceof Error ? e.message : String(e)
-      for (const entry of compressFiles.value) {
+      // 仅标记本次运行参与的文件，运行中新增的文件不受影响
+      for (const entry of snapshot) {
         if (fileStatuses.value[entry.path] === 'pending') {
           fileStatuses.value[entry.path] = 'failed'
         }

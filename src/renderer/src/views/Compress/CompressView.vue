@@ -324,8 +324,8 @@ onUnmounted(() => {
           <h3 class="text-base font-semibold text-text-primary mb-3">压缩结果对比</h3>
           <div class="space-y-2">
             <div
-              v-for="(item, idx) in compressResultRows"
-              :key="idx"
+              v-for="item in compressResultRows"
+              :key="`${item.fileName}-${item.originalSize}`"
               class="flex items-center justify-between gap-2 py-1.5 border-b border-bg-tertiary/50 last:border-0"
             >
               <span class="text-sm text-text-primary truncate flex-1 min-w-0">{{ item.fileName }}</span>
