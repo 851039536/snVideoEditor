@@ -72,6 +72,8 @@ export interface MergeOptions {
   inputs: string[]
   output: string
   onProgress?: import('./ffmpeg-shared').ProgressCallback
+  /** 强制重编码合并：各段编码/time_base 不一致时使用（如变速段合并） */
+  forceReencode?: boolean
 }
 
 // ─── splitVideo ───────────────────────────────────────────────────────────────
@@ -201,11 +203,15 @@ export async function mergeVideos(opts: MergeOptions): Promise<boolean> {
     const args = [
       '-f', 'concat',
       '-safe', '0',
-      '-i', concatListPath,
-      '-c', 'copy',
-      '-y',
-      opts.output
+      '-i', concatListPath
     ]
+    if (opts.forceReencode) {
+      // 变速段合并：重编码归一化时间戳，解决不同 time_base 导致的错位
+      args.push('-c:v', 'libx264', '-crf', '18', '-preset', 'fast', '-c:a', 'aac')
+    } else {
+      args.push('-c', 'copy')
+    }
+    args.push('-y', opts.output)
 
     const proc = spawn(getFfmpegPath(), args)
     _setFfmpegProc(proc)

@@ -89,8 +89,9 @@ export function changeSpeed(opts: SpeedChangeOptions): Promise<boolean> {
     if (isUnitySpeed) {
       args.push('-c', 'copy', '-avoid_negative_ts', 'make_zero')
     } else {
+      // fps=30 归一化输出帧率，确保批量变速各段 time_base 一致，使 concat -c copy 合并正确
       args.push(
-        '-filter:v', `setpts=PTS/${opts.speed}`,
+        '-filter:v', `setpts=PTS/${opts.speed},fps=30`,
         '-filter:a', buildAtempoChain(opts.speed),
         '-c:v', 'libx264', '-crf', '18', '-preset', 'fast',
         '-async', '1'
@@ -280,6 +281,7 @@ export async function batchSpeedMerge(opts: BatchSpeedOptions): Promise<boolean>
     if (isCancelled || step < tasks.length) {
       return false
     }
+    // 各变速段已通过 fps=30 归一化帧率，未变速段若为 h264 源也保持原始编码，concat -c copy 可直接合并
     return await mergeVideos({
       inputs: tempFiles,
       output: opts.output,
