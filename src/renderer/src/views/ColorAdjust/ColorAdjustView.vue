@@ -8,6 +8,7 @@ import { useProgressStore } from '@/stores/progress'
 import { getFileName, toFileUrl } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
 import { useColorParams } from '@/composables/useColorParams'
+import { useVideoPlayer } from '@/composables/useVideoPlayer'
 import type { ColorPreset } from './types'
 
 const progressStore = useProgressStore()
@@ -16,31 +17,12 @@ const { params, presets, applyPreset, resetParams, toFfmpegParams, previewFilter
 
 const errorMsg = ref('')
 const activePreset = ref('原始')
-
-// 视频预览
-const videoPlayer = ref<HTMLVideoElement | null>(null)
-const isPlaying = ref(false)
+const { videoPlayer, isPlaying, togglePlay, onVideoPlay, onVideoStop } = useVideoPlayer()
 
 const videoSrc = computed((): string => {
   if (files.value.length === 0) { return '' }
   return toFileUrl(files.value[0].path)
 })
-
-function togglePlay(): void {
-  const vp = videoPlayer.value
-  if (!vp) { return }
-  if (vp.paused) {
-    vp.play()
-    isPlaying.value = true
-  } else {
-    vp.pause()
-    isPlaying.value = false
-  }
-}
-
-function onVideoEnded(): void {
-  isPlaying.value = false
-}
 
 function onSelectPreset(preset: ColorPreset): void {
   applyPreset(preset)
@@ -82,35 +64,19 @@ async function startAdjust(): Promise<void> {
 
   progressStore.start('color')
   const ffmpegParams = toFfmpegParams()
+  const batchFiles = files.value.map((f) => ({
+    input: f.path,
+    output: f.outputPath,
+    ...ffmpegParams
+  }))
 
   try {
-    if (files.value.length === 1) {
-      const f = files.value[0]
-      const result = await window.electronAPI.adjustColor({
-        input: f.path,
-        output: f.outputPath,
-        ...ffmpegParams
-      })
-      if (!progressStore.isProcessing) { return }
-      if (result) {
-        progressStore.finish()
-      } else {
-        progressStore.reset()
-      }
+    const result = await window.electronAPI.batchAdjustColor({ files: batchFiles })
+    if (result.failed.length === 0) {
+      progressStore.finish()
     } else {
-      const batchFiles = files.value.map((f) => ({
-        input: f.path,
-        output: f.outputPath,
-        ...ffmpegParams
-      }))
-      const result = await window.electronAPI.batchAdjustColor({ files: batchFiles })
-      if (!progressStore.isProcessing) { return }
-      if (result.failed.length === 0) {
-        progressStore.finish()
-      } else {
-        errorMsg.value = `${result.failed.length} 个文件处理失败`
-        progressStore.reset()
-      }
+      errorMsg.value = `${result.failed.length} 个文件处理失败`
+      progressStore.reset()
     }
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
@@ -159,7 +125,9 @@ onUnmounted(() => {
               :src="videoSrc"
               class="w-full max-h-[360px] object-contain"
               :style="{ filter: previewFilterStyle }"
-              @ended="onVideoEnded"
+              @play="onVideoPlay"
+              @pause="onVideoStop"
+              @ended="onVideoStop"
             />
             <!-- 播放控制 -->
             <button
