@@ -19,6 +19,7 @@ import {
   adjustColor,
   batchAdjustColor,
   changeSpeed,
+  batchSpeedMerge,
   convertFormat,
   batchConvertFormat
 } from './modules/ffmpeg';
@@ -213,6 +214,15 @@ function registerSplitMergeHandlers(): void {
     startTime: number; duration: number; speed: number
   }>('video:speed', 'speed', 'speed', (opts, onProgress) =>
     changeSpeed({ ...opts, onProgress })
+  );
+
+  wrapOperation<{
+    input: string; output: string;
+    segments: { id: string; startSec: number; endSec: number; duration: number; speed: number }[];
+    sourceDuration: number; sourceCodec?: string
+  }>('video:batchSpeedMerge', 'speed', 'speed', (opts, onProgress) =>
+    batchSpeedMerge({ ...opts, onProgress }),
+    600000 // 10min 超时：多段重编码 + 合并耗时较长，对齐 batchConvertFormat/tts 先例
   );
 }
 

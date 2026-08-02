@@ -13,12 +13,14 @@ import SpeedPanel from './SpeedPanel.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useVideoPlayer } from '@/composables/useVideoPlayer'
 import { useTrimTimeline } from '@/composables/useTrimTimeline'
+import { useSpeedBatch, speedSegments } from '@/composables/useSpeedBatch'
 import { secondsToHMS, secondsToTimecode } from '@/utils/time'
 import { formatSize, getFileName, toFileUrl, todayDateStr } from '@/utils/format'
 import { clamp, swapArrayElements } from '@/utils/math'
 import type { VideoMeta, ClipItem } from '@/types/file'
 
 const store = useProgressStore()
+const { clearSegments } = useSpeedBatch()
 
 // ---- 模式 ----
 const mode = ref<'split' | 'merge' | 'speed'>('split')
@@ -83,6 +85,17 @@ const playheadInSelectionPercent = computed((): number => {
   const range = endPercent.value - startPercent.value
   if (range <= 0) { return 50 }
   return ((playheadPercent.value - startPercent.value) / range) * 100
+})
+
+/** 时间轴上的待变速区段浮层（仅 speed 模式显示）：基于 speedSegments 与总时长计算百分比 */
+const speedSegmentOverlays = computed((): { id: string; leftPercent: number; widthPercent: number; speed: number }[] => {
+  if (duration.value <= 0) { return [] }
+  return speedSegments.value.map((seg) => ({
+    id: seg.id,
+    leftPercent: (seg.startSec / duration.value) * 100,
+    widthPercent: Math.max((seg.duration / duration.value) * 100, 1),
+    speed: seg.speed
+  }))
 })
 
 // ---- 步进 ----
@@ -254,6 +267,9 @@ function moveFile(index: number, direction: -1 | 1): void {
 
 watch(mode, (newMode) => {
   errorMsg.value = ''
+  if (newMode !== 'speed') {
+    clearSegments()
+  }
   if (newMode === 'split' || newMode === 'speed') {
     if (files.value.length > 1) {
       files.value = [files.value[0]]
@@ -380,6 +396,16 @@ function toggleClipSelection(index: number): void {
 
 function moveClip(index: number, direction: -1 | 1): void {
   swapArrayElements(clips.value, index, direction)
+}
+
+/** 变速段添加后推进时间轴手柄到段尾，便于连续添加后续片段 */
+function onSpeedSegmentAdded(): void {
+  const segEnd = trimStartSec.value + trimDuration.value
+  if (segEnd < duration.value - 0.1) {
+    trimStartSec.value = segEnd
+    trimEndSec.value = duration.value
+    seekVideoPlayer(segEnd)
+  }
 }
 
 // ---- 输出与处理 ----
@@ -720,6 +746,17 @@ onUnmounted(() => {
               />
             </div>
 
+            <!-- 待变速区段浮层（仅变速模式） -->
+            <div
+              v-if="mode === 'speed'"
+              v-for="seg in speedSegmentOverlays"
+              :key="seg.id"
+              class="speed-segment-overlay"
+              :style="{ left: seg.leftPercent + '%', width: seg.widthPercent + '%' }"
+            >
+              <span class="speed-segment-label">{{ seg.speed }}x</span>
+            </div>
+
             <!-- 右侧变暗区 -->
             <div class="timeline-dimmed-r" :style="{ width: (100 - endPercent) + '%' }" />
           </div>
@@ -771,7 +808,10 @@ onUnmounted(() => {
           :input-file="files[0]"
           :trim-start-sec="trimStartSec"
           :trim-duration="trimDuration"
+          :duration="duration"
+          :source-codec="videoMeta?.codec"
           @error="errorMsg = $event"
+          @added="onSpeedSegmentAdded"
         />
 
         <!-- 错误提示 -->
@@ -779,7 +819,7 @@ onUnmounted(() => {
           <p>{{ errorMsg }}</p>
         </div>
 
-        <!-- 进度面板（仅裁剪模式；变速模式在 SpeedPanel 内自带） -->
+        <!-- 进度面板（仅裁剪模式；变速模式由 SpeedPanel 内自带 ProgressPanel 显示） -->
         <ProgressPanel v-if="mode === 'split'" />
       </template>
     </div>
@@ -923,6 +963,32 @@ onUnmounted(() => {
 
 .trim-handle {
   background: hsl(var(--primary));
+}
+
+/* ---- 待变速区段浮层（琥珀色，与裁剪选中区区分） ---- */
+.speed-segment-overlay {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  background: rgba(245, 158, 11, 0.28);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  border-radius: var(--radius-sm, 4px);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.speed-segment-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+  background: rgba(0, 0, 0, 0.4);
+  padding: 0 4px;
+  border-radius: 2px;
+  white-space: nowrap;
 }
 
 /* ---- Responsive ---- */

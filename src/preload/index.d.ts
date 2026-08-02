@@ -97,7 +97,22 @@ export interface ElectronAPI {
 
   mergeVideos: (opts: { inputs: string[]; output: string }) => Promise<boolean>;
 
-  changeSpeed: (opts: { input: string; output: string; startTime: number; duration: number; speed: number }) => Promise<boolean>;
+  changeSpeed: (opts: {
+    input: string;
+    output: string;
+    startTime: number;
+    duration: number;
+    speed: number;
+    forceReencode?: boolean;
+  }) => Promise<boolean>;
+
+  batchSpeedMerge: (opts: {
+    input: string;
+    output: string;
+    segments: { id: string; startSec: number; endSec: number; duration: number; speed: number }[];
+    sourceDuration: number;
+    sourceCodec?: string;
+  }) => Promise<boolean>;
 
   // Video meta & compress
   getVideoMeta: (filePath: string) => Promise<VideoMeta>;

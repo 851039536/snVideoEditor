@@ -100,8 +100,22 @@ const electronAPI = {
   mergeVideos: (opts: { inputs: string[]; output: string }): Promise<boolean> =>
     ipcRenderer.invoke('video:merge', opts),
 
-  changeSpeed: (opts: { input: string; output: string; startTime: number; duration: number; speed: number }): Promise<boolean> =>
-    ipcRenderer.invoke('video:speed', opts),
+  changeSpeed: (opts: {
+    input: string;
+    output: string;
+    startTime: number;
+    duration: number;
+    speed: number;
+    forceReencode?: boolean;
+  }): Promise<boolean> => ipcRenderer.invoke('video:speed', opts),
+
+  batchSpeedMerge: (opts: {
+    input: string;
+    output: string;
+    segments: { id: string; startSec: number; endSec: number; duration: number; speed: number }[];
+    sourceDuration: number;
+    sourceCodec?: string;
+  }): Promise<boolean> => ipcRenderer.invoke('video:batchSpeedMerge', opts),
 
   // Video meta & compress
   getVideoMeta: (filePath: string): Promise<VideoMeta> => ipcRenderer.invoke('video:getMeta', filePath),

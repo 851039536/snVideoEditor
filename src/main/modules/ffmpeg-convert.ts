@@ -26,9 +26,6 @@ export interface BatchConvertOptions {
   onProgress?: ProgressCallback
 }
 
-/** 视频格式集合 */
-const VIDEO_FORMATS = new Set(['mp4', 'mkv', 'avi', 'mov', 'webm'])
-
 /** 音频格式集合 */
 const AUDIO_FORMATS = new Set(['mp3', 'wav', 'flac', 'aac', 'ogg'])
 

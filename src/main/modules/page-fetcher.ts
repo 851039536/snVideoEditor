@@ -123,7 +123,7 @@ export function fetchPageM3u8ViaBrowser(pageUrl: string): Promise<PageFetchResul
       }, SETTLE_MS)
     })
 
-    win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
       if (resolved) { return }
       // Only reject for main frame failures. Sub-frame and sub-resource
       // failures (e.g. ERR_ABORTED from cancelled navigations, blocked ads)

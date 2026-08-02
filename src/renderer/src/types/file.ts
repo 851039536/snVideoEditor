@@ -20,6 +20,15 @@ export interface ClipItem {
   selected: boolean;
 }
 
+/** 变速片段：用户在时间轴上标记的待变速区间（统一源、全部处理，无需 ClipItem 的源/选中字段） */
+export interface SpeedSegment {
+  id: string;
+  startSec: number;
+  endSec: number;
+  duration: number;
+  speed: number;
+}
+
 // ─── 下载队列共享类型 ─────────────────────────────────────────────
 // 从 preload 重新导出（与 VideoMeta 同模式）；后端 download-queue.ts 的
 // QueueItem 为含主进程私有字段的超集，二者字段需保持对齐。

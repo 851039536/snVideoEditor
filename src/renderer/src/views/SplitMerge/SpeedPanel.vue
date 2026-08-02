@@ -1,22 +1,27 @@
-<!-- 变速操作面板：速度选择、输出设置与执行 -->
+<!-- 变速操作面板：单段快捷变速 + 批量变速双模式 -->
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { Folder, Zap } from 'lucide-vue-next'
+import { Folder, Zap, Plus, Trash2 } from 'lucide-vue-next'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
 import { secondsToHMS } from '@/utils/time'
+import { useSpeedBatch } from '@/composables/useSpeedBatch'
 
 const props = defineProps<{
   inputFile: string
   trimStartSec: number
   trimDuration: number
+  duration: number
+  sourceCodec?: string
 }>()
 
 const emit = defineEmits<{
   error: [msg: string]
+  added: []
 }>()
 
 const store = useProgressStore()
+const { speedSegments, errorMsg, canBatch, addSegment, removeSegment, updateSegmentSpeed, clearSegments, startBatchSpeed, startSingle } = useSpeedBatch()
 
 // ---- 速度状态 ----
 const speedFactor = ref(1.0)
@@ -25,6 +30,18 @@ const outputDir = ref('')
 // 替换源文件后重置输出路径，避免输出指向旧文件目录
 watch(() => props.inputFile, () => {
   outputDir.value = ''
+})
+
+// 源文件切换后清空待变速段，避免旧片段的段区间指向新文件
+watch(() => props.inputFile, () => {
+  clearSegments()
+})
+
+// 批量执行的错误信息转发给父组件统一展示（父组件已有 errorMsg 显示区）
+watch(errorMsg, (msg) => {
+  if (msg) {
+    emit('error', msg)
+  }
 })
 
 const SPEED_PRESETS = [0.25, 0.5, 0.75, 1.25, 1.5, 2.0, 3.0, 4.0]
@@ -37,6 +54,10 @@ const outputDurationStr = computed((): string => {
 
 const canExecute = computed((): boolean => {
   return props.trimDuration > 0 && speedFactor.value > 0 && !store.isProcessing
+})
+
+const canAddSegment = computed((): boolean => {
+  return props.trimDuration > 0 && !store.isProcessing
 })
 
 // ---- 操作 ----
@@ -59,25 +80,29 @@ async function startSpeedChange(): Promise<void> {
   }
 
   emit('error', '')
-  store.start('speed')
+  await startSingle(props.inputFile, outputDir.value, props.trimStartSec, props.trimDuration, speedFactor.value)
+}
 
-  try {
-    const result = await window.electronAPI.changeSpeed({
-      input: props.inputFile,
-      output: outputDir.value,
-      startTime: props.trimStartSec,
-      duration: props.trimDuration,
-      speed: speedFactor.value
-    })
-    if (result) {
-      store.finish()
-    } else {
-      store.reset()
-    }
-  } catch (e) {
-    emit('error', e instanceof Error ? e.message : String(e))
-    store.reset()
+/** 将当前时间轴区间添加为待变速段，并通知父组件推进手柄 */
+function onAddSegment(): void {
+  addSegment(props.trimStartSec, props.trimStartSec + props.trimDuration, speedFactor.value)
+  emit('added')
+}
+
+async function onBatchStart(): Promise<void> {
+  if (speedSegments.value.length === 0) {
+    emit('error', '请先添加待变速片段')
+    return
   }
+  if (!outputDir.value) {
+    await selectOutputPath()
+    if (!outputDir.value) {
+      emit('error', '请选择输出路径')
+      return
+    }
+  }
+  emit('error', '')
+  await startBatchSpeed(props.inputFile, outputDir.value, props.duration, props.sourceCodec || '')
 }
 </script>
 
@@ -88,6 +113,7 @@ async function startSpeedChange(): Promise<void> {
       变速设置
     </h3>
 
+    <!-- ========== 单段快捷区 ========== -->
     <!-- 速度预设按钮组 -->
     <div class="flex flex-wrap gap-1.5">
       <button
@@ -127,17 +153,8 @@ async function startSpeedChange(): Promise<void> {
       <span>变速后：<span class="font-mono text-accent-blue font-semibold">{{ outputDurationStr }}</span></span>
     </div>
 
-    <!-- 输出路径 -->
-    <div class="flex items-center gap-3">
-      <button @click="selectOutputPath" class="btn-secondary text-xs">
-        <Folder :size="14" />
-        选择输出位置
-      </button>
-      <p v-if="outputDir" class="text-xs text-accent-light truncate flex-1">{{ outputDir }}</p>
-    </div>
-
-    <!-- 执行按钮 -->
-    <div class="flex items-center gap-3">
+    <!-- 单段执行 -->
+    <div class="flex items-center gap-2">
       <button
         @click="startSpeedChange"
         :disabled="!canExecute"
@@ -147,9 +164,71 @@ async function startSpeedChange(): Promise<void> {
           : 'bg-bg-tertiary text-text-muted'"
       >
         <Zap :size="16" class="inline mr-1.5 -mt-0.5" />
-        开始变速
+        单段变速
       </button>
-      <span class="text-xs text-text-muted">变速需要重新编码，耗时与片段长度成正比</span>
+      <button
+        @click="onAddSegment"
+        :disabled="!canAddSegment"
+        class="px-4 py-2 rounded-xl text-sm font-medium transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed border border-accent-blue/40 text-accent-blue hover:bg-accent-blue/10"
+        title="将当前时间轴区间加入待变速列表"
+      >
+        <Plus :size="14" class="inline mr-1 -mt-0.5" />
+        加入待变速
+      </button>
+      <span class="text-xs text-text-muted">单段变速输出为片段，非完整视频</span>
+    </div>
+
+    <!-- ========== 批量区 ========== -->
+    <div v-if="speedSegments.length > 0" class="space-y-2">
+      <h4 class="text-xs font-semibold text-text-primary">待变速片段（{{ speedSegments.length }} 段）</h4>
+      <div
+        v-for="seg in speedSegments"
+        :key="seg.id"
+        class="flex items-center gap-2 p-2 rounded-lg bg-bg-tertiary/50"
+      >
+        <span class="text-xs font-mono text-text-secondary flex-1 min-w-0">
+          {{ secondsToHMS(seg.startSec) }} ~ {{ secondsToHMS(seg.endSec) }}
+          <span class="text-text-muted">（{{ seg.duration.toFixed(1) }}s）</span>
+        </span>
+        <select
+          :value="seg.speed"
+          @change="updateSegmentSpeed(seg.id, Number(($event.target as HTMLSelectElement).value))"
+          class="px-1.5 py-0.5 text-xs font-mono bg-bg-primary border border-border rounded text-text-primary outline-none cursor-pointer"
+        >
+          <option v-for="p in [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]" :key="p" :value="p">{{ p }}x</option>
+        </select>
+        <button
+          @click="removeSegment(seg.id)"
+          class="p-1 rounded hover:bg-danger/10 text-text-muted hover:text-danger transition-colors"
+          title="移除片段"
+        >
+          <Trash2 :size="14" />
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2 pt-1">
+        <button
+          @click="onBatchStart"
+          :disabled="!canBatch"
+          class="px-6 py-2 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
+          :class="canBatch
+            ? 'bg-gradient-to-r from-accent-purple to-pink-500'
+            : 'bg-bg-tertiary text-text-muted'"
+        >
+          <Zap :size="16" class="inline mr-1.5 -mt-0.5" />
+          批量变速并合并
+        </button>
+        <span class="text-xs text-text-muted">变速段重编码 + 未变速段拼接，输出完整视频</span>
+      </div>
+    </div>
+
+    <!-- 输出路径 -->
+    <div class="flex items-center gap-3">
+      <button @click="selectOutputPath" class="btn-secondary text-xs">
+        <Folder :size="14" />
+        选择输出位置
+      </button>
+      <p v-if="outputDir" class="text-xs text-accent-light truncate flex-1">{{ outputDir }}</p>
     </div>
 
     <!-- 进度面板 -->

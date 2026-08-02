@@ -37,8 +37,8 @@ export type { GifOptions, BatchGifOptions } from './ffmpeg-gif'
 export { captureScreenshot, generateThumbnailSprite } from './ffmpeg-thumbnails'
 export type { ScreenshotOptions, ThumbnailSpriteOptions, ThumbnailSpriteResult } from './ffmpeg-thumbnails'
 
-export { changeSpeed } from './ffmpeg-speed'
-export type { SpeedChangeOptions } from './ffmpeg-speed'
+export { changeSpeed, batchSpeedMerge } from './ffmpeg-speed'
+export type { SpeedChangeOptions, BatchSpeedOptions, SpeedSegment } from './ffmpeg-speed'
 
 export { adjustColor, batchAdjustColor } from './ffmpeg-color'
 export type { ColorAdjustOptions, BatchColorAdjustOptions } from './ffmpeg-color'
