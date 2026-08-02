@@ -1,11 +1,12 @@
 <!-- 变速操作面板：单段快捷变速 + 批量变速双模式 -->
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { Folder, Zap, Plus, Trash2 } from 'lucide-vue-next'
+import { Folder, Zap, Plus, Trash2, Play, Square } from 'lucide-vue-next'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
 import { secondsToHMS } from '@/utils/time'
 import { useSpeedBatch } from '@/composables/useSpeedBatch'
+import { useSpeedPreview } from '@/composables/useSpeedPreview'
 
 const props = defineProps<{
   inputFile: string
@@ -22,6 +23,7 @@ const emit = defineEmits<{
 
 const store = useProgressStore()
 const { speedSegments, errorMsg, canBatch, addSegment, removeSegment, updateSegmentSpeed, clearSegments, startBatchSpeed, startSingle } = useSpeedBatch()
+const { isPreviewing, previewLabel, startSpeedPreview, stopSpeedPreview } = useSpeedPreview()
 
 // ---- 速度状态 ----
 const speedFactor = ref(1.0)
@@ -60,6 +62,10 @@ const canAddSegment = computed((): boolean => {
   return props.trimDuration > 0 && !store.isProcessing
 })
 
+const canPreview = computed((): boolean => {
+  return props.trimDuration > 0 && !store.isProcessing
+})
+
 // ---- 操作 ----
 
 async function selectOutputPath(): Promise<void> {
@@ -87,6 +93,12 @@ async function startSpeedChange(): Promise<void> {
 function onAddSegment(): void {
   addSegment(props.trimStartSec, props.trimStartSec + props.trimDuration, speedFactor.value)
   emit('added')
+}
+
+/** 预览当前选中区间的变速效果（再次点击则停止） */
+function onPreviewCurrent(): void {
+  if (isPreviewing.value) { stopSpeedPreview(); return }
+  startSpeedPreview(props.trimStartSec, props.trimDuration, speedFactor.value)
 }
 
 async function onBatchStart(): Promise<void> {
@@ -167,6 +179,15 @@ async function onBatchStart(): Promise<void> {
         单段变速
       </button>
       <button
+        @click="onPreviewCurrent"
+        :disabled="!canPreview"
+        class="px-3 py-2 rounded-xl text-sm font-medium transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed border border-accent-purple/40 text-accent-purple hover:bg-accent-purple/10"
+      >
+        <Square v-if="isPreviewing" :size="14" class="inline mr-1 -mt-0.5" />
+        <Play v-else :size="14" class="inline mr-1 -mt-0.5" />
+        {{ isPreviewing ? '停止预览' : '预览变速' }}
+      </button>
+      <button
         @click="onAddSegment"
         :disabled="!canAddSegment"
         class="px-4 py-2 rounded-xl text-sm font-medium transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed border border-accent-blue/40 text-accent-blue hover:bg-accent-blue/10"
@@ -177,6 +198,9 @@ async function onBatchStart(): Promise<void> {
       </button>
       <span class="text-xs text-text-muted">单段变速输出为片段，非完整视频</span>
     </div>
+
+    <!-- 预览状态提示 -->
+    <p v-if="isPreviewing" class="text-xs text-accent-purple">{{ previewLabel }}</p>
 
     <!-- ========== 批量区 ========== -->
     <div v-if="speedSegments.length > 0" class="space-y-2">
@@ -197,6 +221,13 @@ async function onBatchStart(): Promise<void> {
         >
           <option v-for="p in [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]" :key="p" :value="p">{{ p }}x</option>
         </select>
+        <button
+          @click="startSpeedPreview(seg.startSec, seg.duration, seg.speed)"
+          class="p-1 rounded hover:bg-accent-blue/10 text-text-muted hover:text-accent-blue transition-colors"
+          title="试听此段变速效果"
+        >
+          <Play :size="13" />
+        </button>
         <button
           @click="removeSegment(seg.id)"
           class="p-1 rounded hover:bg-danger/10 text-text-muted hover:text-danger transition-colors"

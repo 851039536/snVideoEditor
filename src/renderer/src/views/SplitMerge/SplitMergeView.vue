@@ -14,6 +14,7 @@ import { useProgressStore } from '@/stores/progress'
 import { useVideoPlayer } from '@/composables/useVideoPlayer'
 import { useTrimTimeline } from '@/composables/useTrimTimeline'
 import { useSpeedBatch, speedSegments } from '@/composables/useSpeedBatch'
+import { useSpeedPreview, registerSpeedPreviewController, unregisterSpeedPreviewController, checkSpeedPreviewStop } from '@/composables/useSpeedPreview'
 import { secondsToHMS, secondsToTimecode } from '@/utils/time'
 import { formatSize, getFileName, toFileUrl, todayDateStr } from '@/utils/format'
 import { clamp, swapArrayElements } from '@/utils/math'
@@ -21,6 +22,7 @@ import type { VideoMeta, ClipItem } from '@/types/file'
 
 const store = useProgressStore()
 const { clearSegments } = useSpeedBatch()
+const { isPreviewing: isSpeedPreviewing, stopSpeedPreview } = useSpeedPreview()
 
 // ---- 模式 ----
 const mode = ref<'split' | 'merge' | 'speed'>('split')
@@ -37,6 +39,8 @@ const files = ref<string[]>([])
 const videoMeta = ref<VideoMeta | null>(null)
 const { videoPlayer, isPlaying, currentTime, togglePlay, onVideoPlay, onVideoStop, onTimeUpdate, onVideoError, onVideoLoaded, seekVideoPlayer } = useVideoPlayer({
   onTimeUpdate: (t, vp) => {
+    // 变速预览中跳过 trim 自动停止逻辑
+    if (checkSpeedPreviewStop(t)) { return }
     // 到达裁切终点时自动停止
     if (t >= trimEndSec.value) {
       vp.pause()
@@ -204,6 +208,7 @@ function removeFile(index: number): void {
 }
 
 async function replaceVideo(newPath: string): Promise<void> {
+  stopSpeedPreview()
   releaseVideoResource()
   // 清理旧的片段临时文件
   for (const c of clips.value) {
@@ -268,6 +273,7 @@ function moveFile(index: number, direction: -1 | 1): void {
 watch(mode, (newMode) => {
   errorMsg.value = ''
   if (newMode !== 'speed') {
+    stopSpeedPreview()
     clearSegments()
   }
   if (newMode === 'split' || newMode === 'speed') {
@@ -287,6 +293,12 @@ watch(mode, (newMode) => {
 })
 
 // ---- 播放器控制 ----
+
+/** 预览中点击播放/暂停时先停止预览，避免 playbackRate 残留 */
+function onTogglePlay(): void {
+  if (isSpeedPreviewing.value) { stopSpeedPreview(); return }
+  togglePlay()
+}
 
 function seekToStart(): void {
   seekVideoPlayer(trimStartSec.value)
@@ -487,6 +499,11 @@ async function validateOutput(): Promise<boolean> {
 // ---- 生命周期 ----
 
 onMounted(() => {
+  // 注册变速预览控制器，提供 videoPlayer 引用
+  registerSpeedPreviewController({
+    getVideoPlayer: () => videoPlayer.value,
+    setCurrentTime: (t: number) => { currentTime.value = t }
+  })
   window.electronAPI.onProgress((info) => {
     store.update(info)
   })
@@ -497,6 +514,8 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('pointermove', onGlobalPointerMove)
   document.removeEventListener('pointerup', onGlobalPointerUp)
+  // 注销变速预览控制器（内部先停止预览恢复 playbackRate）
+  unregisterSpeedPreviewController()
   // 卸载时若操作仍在运行，先取消主进程 ffmpeg，避免锁超时自动释放后新操作并发覆盖
   if (store.isProcessing) {
     window.electronAPI.cancelOperation().catch(() => {})
@@ -592,7 +611,7 @@ onUnmounted(() => {
                 <SkipBack :size="16" class="text-text-secondary" />
               </button>
               <button
-                @click="togglePlay"
+                @click="onTogglePlay"
                 class="player-btn p-2 rounded-full bg-accent-blue"
               >
                 <Pause v-if="isPlaying" :size="16" class="text-white" />
