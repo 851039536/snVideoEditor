@@ -74,10 +74,18 @@ export function useSpeedBatch(): {
     const thisRunId = ++runId
     progressStore.start('speed')
     try {
+      // 映射为纯对象数组，避免 Vue reactive proxy 无法被 Electron IPC 序列化
+      const segmentsPayload = speedSegments.value.map((s) => ({
+        id: s.id,
+        startSec: s.startSec,
+        endSec: s.endSec,
+        duration: s.duration,
+        speed: s.speed
+      }))
       const result = await window.electronAPI.batchSpeedMerge({
         input,
         output: outputDir,
-        segments: speedSegments.value,
+        segments: segmentsPayload,
         sourceDuration,
         sourceCodec
       })
