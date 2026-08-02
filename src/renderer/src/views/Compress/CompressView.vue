@@ -70,13 +70,16 @@ function closeDetail(): void {
   detailEntry.value = null;
 }
 
-/** 计算体积变化百分比文案：压缩为负显示 -N%，膨胀显示 +N% */
+/** 计算体积变化百分比文案：压缩为负显示 -N%，膨胀显示 +N%，体积未变显示 ±0% */
 function sizeChangeText(item: CompressResultItem): { text: string; grew: boolean } {
   if (item.originalSize <= 0) {
-    return { text: '-0%', grew: false };
+    return { text: '--', grew: false };
   }
   const pct = Math.round((1 - item.compressedSize / item.originalSize) * 100);
-  if (pct >= 0) {
+  if (pct === 0) {
+    return { text: '±0%', grew: false };
+  }
+  if (pct > 0) {
     return { text: `-${pct}%`, grew: false };
   }
   return { text: `+${Math.abs(pct)}%`, grew: true };
@@ -119,11 +122,15 @@ async function selectQuickDir(type: 'desktop' | 'downloads' | 'source'): Promise
     dir = sourceDir.value;
   } else {
     loadingPath.value = type;
-    if (!commonPaths.value[type]) {
-      await fetchCommonPaths();
+    try {
+      if (!commonPaths.value[type]) {
+        await fetchCommonPaths();
+      }
+      dir = commonPaths.value[type];
+    } finally {
+      // 无论成功与否都复位 loading 态，避免异常时按钮卡死
+      loadingPath.value = '';
     }
-    dir = commonPaths.value[type];
-    loadingPath.value = '';
   }
 
   if (!dir) {

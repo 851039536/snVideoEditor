@@ -1,10 +1,11 @@
 <!-- 压缩参数配置面板：分辨率/码率/CRF/编码器/预设选择 -->
 <script setup lang="ts">
+import { computed } from 'vue';
 import InfoTooltip from '@/components/InfoTooltip.vue';
 import type { CompressPreset } from '@/stores/settings';
 
 // params 为父组件共享的 reactive 对象，本组件直接双向修改属有意设计
-defineProps<{
+const props = defineProps<{
   params: CompressPreset;
   crfMax: number;
   crfActive: boolean;
@@ -14,6 +15,24 @@ defineProps<{
   hasNvidiaEncoders: boolean;
   hasQsvEncoders: boolean;
 }>();
+
+// CRF 刻度：H.264 系锚点语义，按当前 crfMax 等比映射（VP9 范围 0-63 时自动换算，避免误导）
+const crfTicks = computed<{ value: number; label: string }[]>(() => {
+  const anchors = [
+    { value: 0, label: '真无损' },
+    { value: 18, label: '视觉无损' },
+    { value: 23, label: '默认' },
+    { value: 28, label: '标清' },
+    { value: 51, label: '最差' }
+  ];
+  if (props.crfMax === 51) {
+    return anchors;
+  }
+  return anchors.map((tick) => ({
+    value: tick.value === 0 ? 0 : Math.round((tick.value / 51) * props.crfMax),
+    label: tick.label
+  }));
+});
 </script>
 
 <template>
@@ -80,11 +99,7 @@ defineProps<{
         class="w-full mt-2 slider-base slider"
       />
       <div class="flex justify-between text-xs text-text-muted mt-1">
-        <span>0 真无损</span>
-        <span>18 视觉无损</span>
-        <span>23 默认</span>
-        <span>28 标清</span>
-        <span>{{ crfMax }} 最差</span>
+        <span v-for="tick in crfTicks" :key="tick.label">{{ tick.value }} {{ tick.label }}</span>
       </div>
     </div>
 

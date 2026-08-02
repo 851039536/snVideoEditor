@@ -14,6 +14,14 @@ const RESOLUTION_BITRATE: Record<string, string> = {
   '640:360': '200k'
 }
 
+// CRF 每提高 6，x264 码率约减半：用指数模型做连续预估，替代离散查找表避免相邻档位同值
+function estimateRatio(crf: number): number {
+  if (crf <= 18) {
+    return 0.7
+  }
+  return Math.max(0.02, 0.7 * Math.pow(2, -(crf - 18) / 6))
+}
+
 export function useCompressPreset(): {
   params: CompressPreset
   hasNvidiaEncoders: ComputedRef<boolean>
@@ -129,8 +137,7 @@ export function useCompressPreset(): {
     if (params.crfValue < 18) {
       return '≥ 原文件'
     }
-    const ratios: Record<number, number> = { 18: 0.7, 23: 0.4, 28: 0.2, 32: 0.12 }
-    const ratio = ratios[params.crfValue] || 0.4
+    const ratio = estimateRatio(params.crfValue)
     // H.265/HEVC/VP9 ~30% more efficient than H.264
     const codecFactor =
       params.codec.includes('265') || params.codec.includes('hevc') || isVp9.value ? 0.7 : 1.0
