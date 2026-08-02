@@ -13,14 +13,14 @@ import SpeedPanel from './SpeedPanel.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useVideoPlayer } from '@/composables/useVideoPlayer'
 import { useTrimTimeline } from '@/composables/useTrimTimeline'
-import { secondsToHMS } from '@/utils/time'
+import { secondsToHMS, secondsToTimecode } from '@/utils/time'
 import { formatSize, getFileName, toFileUrl, todayDateStr } from '@/utils/format'
-import { clamp } from '@/utils/math'
+import { clamp, swapArrayElements } from '@/utils/math'
 import type { VideoMeta, ClipItem } from '@/types/file'
 
 const store = useProgressStore()
 
-// ---- Mode ----
+// ---- 模式 ----
 const mode = ref<'split' | 'merge' | 'speed'>('split')
 const modeTabs: Array<{ key: 'split' | 'merge' | 'speed'; label: string }> = [
   { key: 'split', label: '裁剪' },
@@ -28,14 +28,14 @@ const modeTabs: Array<{ key: 'split' | 'merge' | 'speed'; label: string }> = [
   { key: 'speed', label: '变速' }
 ]
 
-// ---- Files ----
+// ---- 文件列表 ----
 const files = ref<string[]>([])
 
-// ---- Video metadata & player ----
+// ---- 视频元数据与播放器 ----
 const videoMeta = ref<VideoMeta | null>(null)
 const { videoPlayer, isPlaying, currentTime, togglePlay, onVideoPlay, onVideoStop, onTimeUpdate, onVideoError, onVideoLoaded, seekVideoPlayer } = useVideoPlayer({
   onTimeUpdate: (t, vp) => {
-    // Auto-stop at end trim point
+    // 到达裁切终点时自动停止
     if (t >= trimEndSec.value) {
       vp.pause()
       vp.currentTime = trimEndSec.value
@@ -54,11 +54,11 @@ const { videoPlayer, isPlaying, currentTime, togglePlay, onVideoPlay, onVideoSto
 })
 const duration = ref(0)
 
-// Trim times in seconds (normalized 0..duration)
+// 裁切时间（秒，归一化到 0..duration）
 const trimStartSec = ref(0)
 const trimEndSec = ref(30)
 
-// ---- Trim Timeline composable ----
+// ---- 时间轴 composable ----
 const {
   timelineRef,
   startHour, startMin, startSec, endHour, endMin, endSec,
@@ -85,25 +85,25 @@ const playheadInSelectionPercent = computed((): number => {
   return ((playheadPercent.value - startPercent.value) / range) * 100
 })
 
-// ---- Step forward/backward ----
+// ---- 步进 ----
 const stepSeconds = ref(2)
 
-// ---- Output ----
+// ---- 输出 ----
 const outputName = ref('')
 const outputDir = ref('')
 const errorMsg = ref('')
 
-// ---- Replace video (split mode) ----
+// ---- 替换视频（裁剪模式） ----
 const isDraggingReplace = ref(false)
 const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp']
 
-// ---- Clip list ----
+// ---- 片段列表 ----
 const clips = ref<ClipItem[]>([])
 const cuttingInProgress = ref(false)
 let clipIdCounter = 0
 let loadRequestId = 0
 
-// ---- Computed ----
+// ---- 计算属性 ----
 
 const videoSrc = computed((): string => {
   if (files.value.length === 0) { return '' }
@@ -118,7 +118,7 @@ const canMerge = computed((): boolean => {
   return selectedClipCount.value + files.value.length >= 2
 })
 
-// ---- Helpers ----
+// ---- 辅助函数 ----
 
 /** 显式释放 video 元素资源（文件句柄 + 解码线程），避免 file:/// 延迟释放导致线程残留占用 */
 function releaseVideoResource(): void {
@@ -141,16 +141,7 @@ function resetVideoState(): void {
   errorMsg.value = ''
 }
 
-function swapArrayElements<T>(arr: T[], index: number, direction: -1 | 1): boolean {
-  const newIndex = index + direction
-  if (newIndex < 0 || newIndex >= arr.length) { return false }
-  const temp = arr[index]
-  arr[index] = arr[newIndex]
-  arr[newIndex] = temp
-  return true
-}
-
-// ---- File operations ----
+// ---- 文件操作 ----
 
 async function addFiles(newFiles: string[]): Promise<void> {
   for (const f of newFiles) {
@@ -158,7 +149,7 @@ async function addFiles(newFiles: string[]): Promise<void> {
       files.value.push(f)
     }
   }
-  if (mode.value === 'split' && files.value.length > 0) {
+  if ((mode.value === 'split' || mode.value === 'speed') && files.value.length > 0) {
     await loadVideoMeta(files.value[0])
   }
   if (outputName.value === '') {
@@ -170,9 +161,9 @@ async function loadVideoMeta(filePath: string): Promise<void> {
   const thisRequestId = ++loadRequestId
   try {
     const meta = await window.electronAPI.getVideoMeta(filePath)
-    // Guard: discard stale metadata if a newer request was made
+    // 守卫：有更新的请求时丢弃过期元数据
     if (thisRequestId !== loadRequestId) { return }
-    // Guard: discard stale metadata if file has changed while loading
+    // 守卫：加载期间文件已变更则丢弃过期元数据
     if (files.value.length === 0 || files.value[0] !== filePath) {
       return
     }
@@ -201,17 +192,17 @@ function removeFile(index: number): void {
 
 async function replaceVideo(newPath: string): Promise<void> {
   releaseVideoResource()
-  // Clean up old clip temp files
+  // 清理旧的片段临时文件
   for (const c of clips.value) {
     window.electronAPI.deleteFile(c.outputFile).catch(() => {})
   }
   clips.value = []
   resetVideoState()
-  // Replace file
+  // 替换文件
   files.value = [newPath]
-  // Reset output name
+  // 重置输出名称
   outputName.value = getFileName(newPath).replace(/\.[^.]+$/, '') + '_output'
-  // Load new meta
+  // 加载新元数据
   await loadVideoMeta(newPath)
 }
 
@@ -233,7 +224,7 @@ function onReplaceDragOver(event: DragEvent): void {
 }
 
 function onReplaceDragLeave(event: DragEvent): void {
-  // Only set false if relatedTarget is not inside the container
+  // 仅当 relatedTarget 不在容器内时才置 false，避免拖拽经过子元素时遮罩闪烁
   const container = event.currentTarget as HTMLElement
   if (!event.relatedTarget || !container.contains(event.relatedTarget as HTMLElement)) {
     isDraggingReplace.value = false
@@ -262,6 +253,7 @@ function moveFile(index: number, direction: -1 | 1): void {
 }
 
 watch(mode, (newMode) => {
+  errorMsg.value = ''
   if (newMode === 'split' || newMode === 'speed') {
     if (files.value.length > 1) {
       files.value = [files.value[0]]
@@ -278,7 +270,7 @@ watch(mode, (newMode) => {
   }
 })
 
-// ---- Video player controls ----
+// ---- 播放器控制 ----
 
 function seekToStart(): void {
   seekVideoPlayer(trimStartSec.value)
@@ -298,7 +290,7 @@ function stepForward(): void {
   seekVideoPlayer(t)
 }
 
-// Snap start/end handle to current video position
+// 将前后手柄定位到当前播放位置
 function snapStartHere(): void {
   trimStartSec.value = clamp(currentTime.value, 0, trimEndSec.value - 0.1)
 }
@@ -307,7 +299,7 @@ function snapEndHere(): void {
   trimEndSec.value = clamp(currentTime.value, trimStartSec.value + 0.1, duration.value)
 }
 
-// ---- Clip list management ----
+// ---- 片段列表管理 ----
 
 async function cutToClipList(): Promise<void> {
   if (files.value.length === 0) {
@@ -334,8 +326,8 @@ async function cutToClipList(): Promise<void> {
     const success = await window.electronAPI.splitVideo({
       input: files.value[0],
       output: outputFile,
-      startTime: secondsToHMS(trimStartSec.value),
-      duration: trimDurationStr.value
+      startTime: secondsToTimecode(trimStartSec.value),
+      duration: secondsToTimecode(trimDuration.value)
     })
 
     if (success) {
@@ -390,7 +382,7 @@ function moveClip(index: number, direction: -1 | 1): void {
   swapArrayElements(clips.value, index, direction)
 }
 
-// ---- Output & Process ----
+// ---- 输出与处理 ----
 
 function getMergeOutputName(): string {
   const dateStr = todayDateStr()
@@ -416,7 +408,7 @@ async function startProcess(): Promise<void> {
   errorMsg.value = ''
   if (!await validateOutput()) { return }
 
-  // Collect selected clip output files + external files
+  // 收集选中的片段输出文件与外部文件
   const selectedClipFiles = clips.value
     .filter((c) => c.selected)
     .map((c) => c.outputFile)
@@ -435,7 +427,7 @@ async function startProcess(): Promise<void> {
       output: outputDir.value
     })
     if (result) {
-      // Clean up selected clip temp files after successful merge
+      // 合并成功后清理选中的片段临时文件
       const deleteResults = await Promise.allSettled(
         clips.value.filter((c) => c.selected).map((c) => window.electronAPI.deleteFile(c.outputFile))
       )
@@ -443,7 +435,7 @@ async function startProcess(): Promise<void> {
       if (failedCount > 0) {
         console.warn(`合并后清理临时文件失败: ${failedCount} 个`)
       }
-      // Remove merged clips from list to avoid stale references
+      // 从列表移除已合并的片段，避免残留引用
       clips.value = clips.value.filter((c) => !c.selected)
       store.finish()
     } else {
@@ -466,7 +458,7 @@ async function validateOutput(): Promise<boolean> {
   return true
 }
 
-// ---- Lifecycle ----
+// ---- 生命周期 ----
 
 onMounted(() => {
   window.electronAPI.onProgress((info) => {
@@ -479,22 +471,26 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('pointermove', onGlobalPointerMove)
   document.removeEventListener('pointerup', onGlobalPointerUp)
+  // 卸载时若操作仍在运行，先取消主进程 ffmpeg，避免锁超时自动释放后新操作并发覆盖
+  if (store.isProcessing) {
+    window.electronAPI.cancelOperation().catch(() => {})
+  }
   releaseVideoResource()
-  // Clean up temporary clip files
+  // 清理临时片段文件
   for (const c of clips.value) {
     window.electronAPI.deleteFile(c.outputFile).catch(() => {})
   }
   if (window.electronAPI) {
     window.electronAPI.removeProgressListener()
   }
-  // Stop progress store timer to prevent memory leak
+  // 停止进度 store 计时器，防止内存泄漏
   store.reset()
 })
 </script>
 
 <template>
   <div class="page-container">
-    <!-- Header -->
+    <!-- 页头 -->
     <header class="mb-4">
       <div class="flex items-center gap-3 mb-1">
         <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center">
@@ -504,7 +500,7 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <!-- Mode Tabs -->
+    <!-- 模式切换 -->
     <div class="flex gap-1 mb-4 p-1 rounded-lg bg-bg-tertiary w-fit">
       <button
         v-for="tab in modeTabs"
@@ -517,21 +513,21 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- ========== SPLIT / SPEED MODE ========== -->
+    <!-- ========== 裁剪 / 变速模式 ========== -->
     <div v-if="mode !== 'merge'" class="space-y-3">
-      <!-- No file => drop zone -->
+      <!-- 无文件时展示拖放区 -->
       <FileDropZone v-if="files.length === 0" @files-selected="addFiles" />
 
-      <!-- Has file => full editor -->
+      <!-- 有文件时展示完整编辑器 -->
       <template v-else>
-        <!-- Video Player -->
+        <!-- 视频播放器 -->
         <div
           class="video-player-container glass-card relative"
           @drop.prevent="onReplaceDrop"
           @dragover.prevent="onReplaceDragOver"
           @dragleave="onReplaceDragLeave"
         >
-          <!-- Replace overlay when dragging -->
+          <!-- 拖拽时的替换遮罩 -->
           <div
             v-if="isDraggingReplace"
             class="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-gradient-to-r from-accent-blue/20 to-accent-purple/20 animate-pulse-glow pointer-events-none"
@@ -559,7 +555,7 @@ onUnmounted(() => {
             <Video :size="40" class="text-text-muted opacity-30" />
           </div>
 
-          <!-- Player Controls -->
+          <!-- 播放控制 -->
           <div class="flex items-center justify-between px-4 py-2.5 bg-bg-secondary/80">
             <div class="flex items-center gap-2">
               <button
@@ -587,7 +583,7 @@ onUnmounted(() => {
                 {{ secondsToHMS(currentTime) }} / {{ secondsToHMS(duration) }}
               </span>
             </div>
-            <!-- File info -->
+            <!-- 文件信息 -->
             <div class="flex items-center gap-3 text-xs text-text-muted">
               <span v-if="videoMeta">{{ videoMeta.width }}×{{ videoMeta.height }}</span>
               <span v-if="videoMeta">{{ formatSize(videoMeta.size) }}</span>
@@ -610,7 +606,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Timeline Bar -->
+        <!-- 时间轴 -->
         <div class="glass-card" style="overflow: visible;">
           <div class="flex items-center justify-between mb-3 gap-2">
             <div class="flex items-center gap-2 flex-wrap">
@@ -623,7 +619,7 @@ onUnmounted(() => {
                 />
                 <span class="text-xs text-text-secondary">拖动时暂停</span>
               </label>
-              <!-- Step forward/backward -->
+              <!-- 步进前进/后退 -->
               <div class="flex items-center gap-1">
                 <button
                   @click="stepBackward"
@@ -649,7 +645,7 @@ onUnmounted(() => {
                 >
                   <SkipForward :size="14" />
                 </button>
-                <!-- Locate to handles -->
+                <!-- 手柄定位 -->
                 <span class="w-px h-4 bg-border mx-0.5" />
                 <button
                   @click="snapStartHere"
@@ -667,7 +663,7 @@ onUnmounted(() => {
                   <ChevronsRight :size="14" />
                 </button>
               </div>
-              <!-- Fine-tuning time inputs -->
+              <!-- 微调时间输入 -->
               <span class="w-px h-4 bg-border mx-0.5" />
               <div class="flex items-center gap-1">
                 <span class="text-xs text-text-muted">开始</span>
@@ -691,32 +687,32 @@ onUnmounted(() => {
             </span>
           </div>
 
-          <!-- The timeline -->
+          <!-- 时间轴轨道 -->
           <div
             ref="timelineRef"
             class="timeline-track"
             @pointerdown="startScrub"
           >
-            <!-- Left dimmed area -->
+            <!-- 左侧变暗区 -->
             <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
 
-            <!-- Selected area (flex item, no left offset needed) -->
+            <!-- 选中区域（flex 子项，无需左侧偏移） -->
             <div
               class="timeline-selected"
               :style="{ width: (endPercent - startPercent) + '%' }"
             >
-              <!-- Playhead (positioned relative to selected area) -->
+              <!-- 播放头（相对选中区域定位） -->
               <div
                 class="timeline-playhead"
                 :style="{ left: playheadInSelectionPercent + '%' }"
               />
-              <!-- Start handle -->
+              <!-- 前手柄 -->
               <div
                 class="trim-handle trim-handle-start"
                 @pointerdown="startHandleDrag('start', $event)"
                 @wheel.prevent="onHandleWheel('start', $event)"
               />
-              <!-- End handle -->
+              <!-- 后手柄 -->
               <div
                 class="trim-handle trim-handle-end"
                 @pointerdown="startHandleDrag('end', $event)"
@@ -724,11 +720,11 @@ onUnmounted(() => {
               />
             </div>
 
-            <!-- Right dimmed area -->
+            <!-- 右侧变暗区 -->
             <div class="timeline-dimmed-r" :style="{ width: (100 - endPercent) + '%' }" />
           </div>
 
-          <!-- Time markers -->
+          <!-- 时间标记 -->
           <div class="flex justify-between mt-1.5 px-1">
             <span class="text-xs font-mono text-accent-blue">{{ secondsToHMS(trimStartSec) }}</span>
             <span class="text-xs font-mono text-text-muted">{{ secondsToHMS(duration) }}</span>
@@ -738,7 +734,7 @@ onUnmounted(() => {
         </div>
 
 
-        <!-- Cut-to-list action (split mode only) -->
+        <!-- 裁切到列表操作（仅裁剪模式） -->
         <div v-if="mode === 'split'" class="flex items-center gap-3">
           <button
             @click="cutToClipList"
@@ -761,7 +757,7 @@ onUnmounted(() => {
           </span>
         </div>
 
-        <!-- Clips List (split mode only) -->
+        <!-- 片段列表（仅裁剪模式） -->
         <ClipList
           v-if="mode === 'split' && clips.length > 0"
           :clips="clips"
@@ -769,7 +765,7 @@ onUnmounted(() => {
           @remove="removeClip"
         />
 
-        <!-- Speed Panel (speed mode only) -->
+        <!-- 变速面板（仅变速模式） -->
         <SpeedPanel
           v-if="mode === 'speed'"
           :input-file="files[0]"
@@ -778,19 +774,19 @@ onUnmounted(() => {
           @error="errorMsg = $event"
         />
 
-        <!-- Error -->
+        <!-- 错误提示 -->
         <div v-if="errorMsg" class="alert-danger">
           <p>{{ errorMsg }}</p>
         </div>
 
-        <!-- Progress (split mode only; speed mode has its own in SpeedPanel) -->
+        <!-- 进度面板（仅裁剪模式；变速模式在 SpeedPanel 内自带） -->
         <ProgressPanel v-if="mode === 'split'" />
       </template>
     </div>
 
-    <!-- ========== MERGE MODE ========== -->
+    <!-- ========== 合并模式 ========== -->
     <div v-else class="space-y-3">
-      <!-- Clips list (from split) -->
+      <!-- 片段列表（来自裁剪） -->
       <ClipList
         v-if="clips.length > 0"
         :clips="clips"
@@ -804,7 +800,7 @@ onUnmounted(() => {
         暂无片段，请先在裁剪模式下添加
       </p>
 
-      <!-- External files -->
+      <!-- 外部文件 -->
       <FileDropZone @files-selected="addFiles" />
 
       <div v-if="files.length > 0" class="glass-card space-y-2 max-h-48 overflow-y-auto">
@@ -840,7 +836,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Output settings -->
+      <!-- 输出设置 -->
       <div class="glass-card">
         <h3 class="text-sm font-semibold text-text-primary mb-2">输出设置</h3>
         <div class="flex items-center gap-3">
@@ -857,7 +853,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Summary -->
+      <!-- 合并摘要 -->
       <div v-if="selectedClipCount > 0 || files.length > 0" class="glass-card">
         <p class="text-sm text-text-secondary">
           将合并

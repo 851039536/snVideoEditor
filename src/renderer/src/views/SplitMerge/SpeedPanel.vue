@@ -1,6 +1,6 @@
 <!-- 变速操作面板：速度选择、输出设置与执行 -->
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Folder, Zap } from 'lucide-vue-next'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import { useProgressStore } from '@/stores/progress'
@@ -21,6 +21,11 @@ const store = useProgressStore()
 // ---- 速度状态 ----
 const speedFactor = ref(1.0)
 const outputDir = ref('')
+
+// 替换源文件后重置输出路径，避免输出指向旧文件目录
+watch(() => props.inputFile, () => {
+  outputDir.value = ''
+})
 
 const SPEED_PRESETS = [0.25, 0.5, 0.75, 1.25, 1.5, 2.0, 3.0, 4.0]
 

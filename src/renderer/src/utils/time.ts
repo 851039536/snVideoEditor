@@ -8,6 +8,16 @@ export function secondsToHMS(totalSec: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
+/** 将秒数转换为 HH:MM:SS.mmm 时间码（ffmpeg -ss/-t 原生支持，保留毫秒精度，避免裁切边界丢精度） */
+export function secondsToTimecode(totalSec: number): string {
+  const totalMs = Math.round(totalSec * 1000)
+  const h = Math.floor(totalMs / 3600000)
+  const m = Math.floor((totalMs % 3600000) / 60000)
+  const s = Math.floor((totalMs % 60000) / 1000)
+  const ms = totalMs % 1000
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`
+}
+
 /** 将 HH:MM:SS 三段字符串转换为总秒数 */
 export function hmsToSeconds(h: string, m: string, s: string): number {
   return parseInt(h, 10) * 3600 + parseInt(m, 10) * 60 + parseInt(s, 10)

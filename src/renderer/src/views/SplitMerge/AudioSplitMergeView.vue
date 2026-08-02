@@ -11,9 +11,9 @@ import ClipList from './ClipList.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
 import { useTrimTimeline } from '@/composables/useTrimTimeline'
-import { secondsToHMS } from '@/utils/time'
+import { secondsToHMS, secondsToTimecode } from '@/utils/time'
 import { formatSize, getFileName, toFileUrl, todayDateStr } from '@/utils/format'
-import { clamp } from '@/utils/math'
+import { clamp, swapArrayElements } from '@/utils/math'
 import type { ClipItem } from '@/types/file'
 import type { AudioMeta } from '../../../../preload/index'
 
@@ -28,7 +28,7 @@ const AUDIO_EXTENSIONS = ['.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a', '.wma
 
 // ---- 音频元数据与播放器 ----
 const audioMeta = ref<AudioMeta | null>(null)
-const { audioPlayer, isPlaying, currentTime, onAudioPlay, onAudioStop, onTimeUpdate, onAudioError, onAudioLoaded, seekAudioPlayer } = useAudioPlayer({
+const { audioPlayer, isPlaying, currentTime, togglePlay, onAudioPlay, onAudioStop, onTimeUpdate, onAudioError, onAudioLoaded, seekAudioPlayer } = useAudioPlayer({
   onTimeUpdate: (t, ap) => {
     if (t >= trimEndSec.value) {
       ap.pause()
@@ -84,6 +84,7 @@ const isDraggingReplace = ref(false)
 const clips = ref<ClipItem[]>([])
 const cuttingInProgress = ref(false)
 let clipIdCounter = 0
+let loadRequestId = 0
 
 // ---- 计算属性 ----
 const audioSrc = computed((): string => {
@@ -125,15 +126,32 @@ async function addFiles(newFiles: string[]): Promise<void> {
   }
 }
 
+/** 释放音频元素资源，避免 file:/// 延迟释放导致文件句柄占用 */
+function releaseAudioResource(): void {
+  const ap = audioPlayer.value
+  if (ap) {
+    ap.pause()
+    ap.removeAttribute('src')
+    ap.load()
+  }
+}
+
 async function loadAudioMeta(filePath: string): Promise<void> {
+  const thisRequestId = ++loadRequestId
   try {
     errorMsg.value = ''
     const meta = await window.electronAPI.getAudioMeta(filePath)
+    // 守卫：有更新的请求时丢弃过期元数据
+    if (thisRequestId !== loadRequestId) { return }
+    // 守卫：加载期间文件已变更则丢弃过期元数据
+    if (files.value.length === 0 || files.value[0] !== filePath) { return }
     audioMeta.value = meta
     duration.value = meta.duration
     trimStartSec.value = 0
     trimEndSec.value = Math.min(30, meta.duration)
   } catch (e) {
+    // 仅当前请求仍是最新时才记录错误，避免旧请求覆盖新状态
+    if (thisRequestId !== loadRequestId) { return }
     errorMsg.value = `获取音频信息失败: ${e instanceof Error ? e.message : String(e)}`
   }
 }
@@ -141,6 +159,11 @@ async function loadAudioMeta(filePath: string): Promise<void> {
 function removeFile(index: number): void {
   files.value.splice(index, 1)
   if (files.value.length === 0) {
+    releaseAudioResource()
+    // 清理所有片段临时文件，避免磁盘泄漏
+    for (const c of clips.value) {
+      window.electronAPI.deleteFile(c.outputFile).catch(() => {})
+    }
     audioMeta.value = null
     duration.value = 0
     clips.value = []
@@ -148,11 +171,7 @@ function removeFile(index: number): void {
 }
 
 function moveFile(index: number, direction: -1 | 1): void {
-  const newIndex = index + direction
-  if (newIndex < 0 || newIndex >= files.value.length) { return }
-  const temp = files.value[index]
-  files.value[index] = files.value[newIndex]
-  files.value[newIndex] = temp
+  swapArrayElements(files.value, index, direction)
 }
 
 // ---- 替换音频（拖拽） ----
@@ -162,8 +181,12 @@ function onReplaceDragOver(e: DragEvent): void {
   isDraggingReplace.value = true
 }
 
-function onReplaceDragLeave(): void {
-  isDraggingReplace.value = false
+function onReplaceDragLeave(e: DragEvent): void {
+  // 仅当 relatedTarget 不在容器内时才置 false，避免拖拽经过子元素时遮罩闪烁
+  const container = e.currentTarget as HTMLElement
+  if (!e.relatedTarget || !container.contains(e.relatedTarget as HTMLElement)) {
+    isDraggingReplace.value = false
+  }
 }
 
 async function onReplaceDrop(e: DragEvent): Promise<void> {
@@ -176,6 +199,7 @@ async function onReplaceDrop(e: DragEvent): Promise<void> {
     errorMsg.value = '请拖入音频文件'
     return
   }
+  releaseAudioResource()
   // @ts-ignore - Electron 返回 path
   const filePath = first.path || first.name
   files.value = [filePath]
@@ -221,8 +245,8 @@ async function cutToClipList(): Promise<void> {
     const success = await window.electronAPI.splitVideo({
       input: files.value[0],
       output: outputFile,
-      startTime: secondsToHMS(trimStartSec.value),
-      duration: trimDurationStr.value
+      startTime: secondsToTimecode(trimStartSec.value),
+      duration: secondsToTimecode(trimDuration.value)
     })
 
     if (success) {
@@ -269,11 +293,7 @@ function toggleClipSelection(index: number): void {
 }
 
 function moveClip(index: number, direction: -1 | 1): void {
-  const newIndex = index + direction
-  if (newIndex < 0 || newIndex >= clips.value.length) { return }
-  const temp = clips.value[index]
-  clips.value[index] = clips.value[newIndex]
-  clips.value[newIndex] = temp
+  swapArrayElements(clips.value, index, direction)
 }
 
 // ---- 输出与合并 ----
@@ -347,8 +367,14 @@ async function startProcess(): Promise<void> {
 watch(mode, (newMode) => {
   errorMsg.value = ''
   outputDir.value = ''
-  if (newMode === 'split' && files.value.length > 0 && !audioMeta.value) {
-    loadAudioMeta(files.value[0])
+  if (newMode === 'split') {
+    // 释放旧资源并重新加载元数据，确保 audioMeta 与当前文件一致
+    releaseAudioResource()
+    if (files.value.length > 0) {
+      loadAudioMeta(files.value[0])
+    }
+  } else if (newMode === 'merge') {
+    releaseAudioResource()
   }
 })
 
@@ -365,13 +391,12 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('pointermove', onGlobalPointerMove)
   document.removeEventListener('pointerup', onGlobalPointerUp)
-  // 释放音频资源
-  const ap = audioPlayer.value
-  if (ap) {
-    ap.pause()
-    ap.removeAttribute('src')
-    ap.load()
+  // 卸载时若操作仍在运行，先取消主进程 ffmpeg，避免锁超时自动释放后新操作并发覆盖
+  if (store.isProcessing) {
+    window.electronAPI.cancelOperation().catch(() => {})
   }
+  // 释放音频资源
+  releaseAudioResource()
   // 清理临时片段
   for (const c of clips.value) {
     window.electronAPI.deleteFile(c.outputFile).catch(() => {})
@@ -472,7 +497,7 @@ onUnmounted(() => {
               <SkipBack :size="18" class="text-text-secondary" />
             </button>
             <button
-              @click="() => { const ap = audioPlayer; if (ap) { ap.paused ? ap.play() : ap.pause() } }"
+              @click="togglePlay"
               class="p-3 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 hover:opacity-90 transition-opacity"
             >
               <Pause v-if="isPlaying" :size="20" class="text-white" />
