@@ -10,7 +10,7 @@ import type { FileEntry } from '@/types/file'
 const RESOLUTION_BITRATE: Record<string, string> = {
   '1920:1080': '4000k',
   '1280:720': '2500k',
-  '854:480': '320k',
+  '854:480': '350k',
   '640:360': '200k'
 }
 

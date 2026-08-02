@@ -79,7 +79,11 @@ const crfTicks = computed<{ value: number; label: string }[]>(() => {
         <option value="4000k">4 Mbps</option>
         <option value="2500k">2.5 Mbps</option>
         <option value="500k">500 Kbps</option>
-        <option value="320k">320 Kbps</option>
+        <option value="380k">380 Kbps</option>
+        <option value="370k">370 Kbps</option>
+        <option value="360k">360 Kbps</option>
+        <option value="350k">350 Kbps</option>
+        <option value="340k">340 Kbps</option>
         <option value="200k">200 Kbps</option>
       </select>
     </div>
