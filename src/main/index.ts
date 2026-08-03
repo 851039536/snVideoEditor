@@ -560,8 +560,11 @@ function registerDownloadHandlers(): void {
     const result = await dialog.showMessageBox(win, {
       type: 'question',
       buttons: ['取消', '确认'],
-      defaultId: 1,
+      // 默认焦点放在「取消」上（安全默认），避免回车/空格误触发「确认」
+      defaultId: 0,
       cancelId: 0,
+      // 禁用 Windows 命令链接样式，保证按钮按传入顺序并排显示，防止布局错位误点
+      noLink: true,
       title: title || '提示',
       message
     });
