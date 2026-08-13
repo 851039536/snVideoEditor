@@ -318,6 +318,24 @@ function stepForward(): void {
   seekVideoPlayer(t)
 }
 
+/** 键盘左右方向键触发步进前进/后退（跳过输入类元素聚焦场景，避免误操作） */
+function onKeydown(e: KeyboardEvent): void {
+  const target = e.target as HTMLElement | null
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+    return
+  }
+  if (!videoPlayer.value) {
+    return
+  }
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    stepBackward()
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    stepForward()
+  }
+}
+
 // 将前后手柄定位到当前播放位置
 function snapStartHere(): void {
   trimStartSec.value = clamp(currentTime.value, 0, trimEndSec.value - 0.1)
@@ -509,11 +527,13 @@ onMounted(() => {
   })
   document.addEventListener('pointermove', onGlobalPointerMove)
   document.addEventListener('pointerup', onGlobalPointerUp)
+  document.addEventListener('keydown', onKeydown)
 })
 
 onUnmounted(() => {
   document.removeEventListener('pointermove', onGlobalPointerMove)
   document.removeEventListener('pointerup', onGlobalPointerUp)
+  document.removeEventListener('keydown', onKeydown)
   // 注销变速预览控制器（内部先停止预览恢复 playbackRate）
   unregisterSpeedPreviewController()
   // 卸载时若操作仍在运行，先取消主进程 ffmpeg，避免锁超时自动释放后新操作并发覆盖
