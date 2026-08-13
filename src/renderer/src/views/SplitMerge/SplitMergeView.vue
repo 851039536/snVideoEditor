@@ -104,6 +104,8 @@ const speedSegmentOverlays = computed((): { id: string; leftPercent: number; wid
 
 // ---- 步进 ----
 const stepSeconds = ref(10)
+// 快捷键模式：开启后 A/D 定位手柄、空格/回车触发裁剪
+const keyboardShortcutsEnabled = ref(false)
 
 // ---- 输出 ----
 const outputName = ref('')
@@ -333,6 +335,26 @@ function onKeydown(e: KeyboardEvent): void {
   } else if (e.key === 'ArrowRight') {
     e.preventDefault()
     stepForward()
+  }
+  // 快捷键模式：A/D 将手柄定位到当前播放位置，空格/回车触发裁剪
+  if (keyboardShortcutsEnabled.value) {
+    const key = e.key.toLowerCase()
+    if (key === 'a') {
+      e.preventDefault()
+      snapStartHere()
+    } else if (key === 'd') {
+      e.preventDefault()
+      snapEndHere()
+    } else if (key === 's') {
+      e.preventDefault()
+      onTogglePlay()
+    } else if (e.key === ' ' || e.key === 'Enter') {
+      if (!(trimDuration.value > 0 && !cuttingInProgress.value)) {
+        return
+      }
+      e.preventDefault()
+      cutToClipList()
+    }
   }
 }
 
@@ -685,6 +707,17 @@ onUnmounted(() => {
                   class="w-3 h-3 accent-blue-500 cursor-pointer"
                 />
                 <span class="text-xs text-text-secondary">拖动时暂停</span>
+              </label>
+              <label
+                class="flex items-center gap-1 cursor-pointer select-none"
+                title="开启后按 A/D 将前/后手柄定位到当前播放位置，按 S 播放/暂停，按空格或回车触发裁剪"
+              >
+                <input
+                  type="checkbox"
+                  v-model="keyboardShortcutsEnabled"
+                  class="w-3 h-3 accent-blue-500 cursor-pointer"
+                />
+                <span class="text-xs text-text-secondary">快捷键模式</span>
               </label>
               <!-- 步进前进/后退 -->
               <div class="flex items-center gap-1">
