@@ -103,7 +103,7 @@ const speedSegmentOverlays = computed((): { id: string; leftPercent: number; wid
 })
 
 // ---- 步进 ----
-const stepSeconds = ref(2)
+const stepSeconds = ref(10)
 
 // ---- 输出 ----
 const outputName = ref('')
@@ -392,6 +392,8 @@ async function cutToClipList(): Promise<void> {
       trimStartSec.value = Math.min(clipEnd, Math.max(0, duration.value - 0.1))
       trimEndSec.value = duration.value
       seekVideoPlayer(trimStartSec.value)
+      // 自动播放预览刚裁剪的片段（play 被自动播放策略拒绝时忽略）
+      videoPlayer.value?.play().catch(() => {})
     } else {
       // 裁剪取消：清理可能已部分写入的临时片段文件
       window.electronAPI.deleteFile(outputFile).catch(() => {})
@@ -702,6 +704,8 @@ onUnmounted(() => {
                   <option :value="2">2s</option>
                   <option :value="5">5s</option>
                   <option :value="10">10s</option>
+                  <option :value="15">15s</option>
+                  <option :value="20">20s</option>
                 </select>
                 <button
                   @click="stepForward"
