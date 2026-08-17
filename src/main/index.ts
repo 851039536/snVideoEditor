@@ -690,6 +690,10 @@ function registerWindowHandlers(): void {
 
 // ---- App Lifecycle ----
 
+// 禁用 GPU 着色器磁盘缓存：企业环境 AV/云同步常锁定 GPUCache 目录，
+// 导致启动时 "Unable to move the cache (0x5)" 报错，禁用后不再写磁盘缓存
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.sn.video-editor');
 
