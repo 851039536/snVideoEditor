@@ -3,6 +3,8 @@ import { reactive, ref } from 'vue';
 import type { InjectionKey, Ref } from 'vue';
 import { sanitizeFileName, todayDateStr } from '@/utils/format';
 import { buildCookieHeader } from '@/utils/cookies';
+import { buildOriginHeaders } from '@/utils/url';
+import { confirmIfDownloadDuplicate } from '@/utils/download';
 import type { WebPageEntry, WebPageParseState } from '@/views/Download/types';
 
 /** 与 DownloadView 保持一致的默认 UA */
@@ -94,13 +96,7 @@ export function useWebPageParse(): UseWebPageParseReturn {
   /** 按条目自身的页面上下文构建请求头（不依赖视图全局 headers，避免多路径互相污染） */
   function buildHeadersForLink(state: WebPageParseState, linkUrl: string): Record<string, string> {
     const headers: Record<string, string> = { 'User-Agent': DEFAULT_UA };
-    try {
-      const parsed = new URL(state.pageUrl);
-      headers['Referer'] = `${parsed.protocol}//${parsed.hostname}/`;
-      headers['Origin'] = `${parsed.protocol}//${parsed.hostname}`;
-    } catch {
-      /* ignore */
-    }
+    Object.assign(headers, buildOriginHeaders(state.pageUrl));
     const cookieStr = buildCookieHeader(linkUrl, state.cookies);
     if (cookieStr) {
       headers['Cookie'] = cookieStr;
@@ -128,16 +124,10 @@ export function useWebPageParse(): UseWebPageParseReturn {
           : `${baseName}_${dateStr}.mp4`;
         try {
           // 下载历史查重：重复时弹确认框，拒绝则跳过该条
-          const dup = await window.electronAPI.checkDownloadDuplicate(fileName);
-          if (dup) {
-            const confirmed = await window.electronAPI.confirmDialog(
-              `文件名 "${fileName}" 已下载过（上次: ${new Date(dup.completedAt).toLocaleString()}），是否重复下载？`,
-              '重复下载确认'
-            );
-            if (!confirmed) {
-              result.skipped++;
-              continue;
-            }
+          const confirmed = await confirmIfDownloadDuplicate(fileName);
+          if (!confirmed) {
+            result.skipped++;
+            continue;
           }
           await window.electronAPI.enqueueDownload({
             url: link.url,

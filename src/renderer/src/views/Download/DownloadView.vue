@@ -19,9 +19,10 @@ import ProgressPanel from '@/components/ProgressPanel.vue';
 import DownloadQueue from '@/views/Download/DownloadQueue.vue';
 import WebPagePanel from '@/views/Download/WebPagePanel.vue';
 import { useProgressStore } from '@/stores/progress';
-import { todayDateStr, sanitizeFileName } from '@/utils/format';
+import { todayDateStr, sanitizeFileName, getDirName } from '@/utils/format';
 import { buildCookieHeader } from '@/utils/cookies';
-import { isValidUrl } from '@/utils/url';
+import { isValidUrl, buildOriginHeaders } from '@/utils/url';
+import { confirmIfDownloadDuplicate } from '@/utils/download';
 import type { QualityVariant, RawCookie, QueueStatus } from '@/types/file';
 
 const progressStore = useProgressStore();
@@ -56,7 +57,6 @@ function syncCookiesForUrl(url: string): void {
 
 const variants = ref<QualityVariant[]>([]);
 const selectedVariantIndex = ref(-1); // -1 = use original URL (direct download)
-const isFetchingVariants = ref(false);
 const showQualitySelector = ref(false);
 let fetchVariantsVersion = 0; // 防止竞态条件：每次新请求递增，旧请求结果被丢弃
 
@@ -101,7 +101,6 @@ async function fetchQualityVariants(): Promise<void> {
   }
 
   const version = ++fetchVariantsVersion;
-  isFetchingVariants.value = true;
   try {
     const result = await window.electronAPI.fetchM3u8Variants(url, { ...headers });
     // 竞态保护：如果 URL 已变化（新版本号已递增），丢弃过时结果
@@ -123,10 +122,6 @@ async function fetchQualityVariants(): Promise<void> {
     variants.value = [];
     selectedVariantIndex.value = -1;
     showQualitySelector.value = false;
-  } finally {
-    if (version === fetchVariantsVersion) {
-      isFetchingVariants.value = false;
-    }
   }
 }
 
@@ -152,7 +147,7 @@ async function openHistoryFolder(): Promise<void> {
   if (!historyJsonPath.value) {
     return;
   }
-  const dir = historyJsonPath.value.replace(/[/\\][^/\\]+$/, '');
+  const dir = getDirName(historyJsonPath.value);
   await window.electronAPI.openFolder(dir);
 }
 
@@ -324,13 +319,7 @@ async function fetchM3u8FromPage(): Promise<void> {
       // Store raw cookies for later domain-filtered use
       rawCookies.value = result.cookies || [];
       // Auto-fill Referer/Origin from page URL
-      try {
-        const parsed = new URL(pageUrl);
-        headers['Referer'] = `${parsed.protocol}//${parsed.hostname}/`;
-        headers['Origin'] = `${parsed.protocol}//${parsed.hostname}`;
-      } catch {
-        /* ignore */
-      }
+      Object.assign(headers, buildOriginHeaders(pageUrl));
       // Don't auto-fill Cookie yet — wait for user to select a specific m3u8 URL
     }
   } catch (e) {
@@ -362,13 +351,7 @@ function handleUseLink(payload: {
   fetchedTitle.value = payload.pageTitle;
   fetchedUrls.value = [payload.url]; // 使 m3u8Url watch 不清空 fetchedTitle
   // Referer/Origin 取自该链接的来源页面（与 fetchM3u8FromPage 一致）
-  try {
-    const parsed = new URL(payload.pageUrl);
-    headers['Referer'] = `${parsed.protocol}//${parsed.hostname}/`;
-    headers['Origin'] = `${parsed.protocol}//${parsed.hostname}`;
-  } catch {
-    /* ignore */
-  }
+  Object.assign(headers, buildOriginHeaders(payload.pageUrl));
   fileNameEdited.value = false;
   m3u8Url.value = payload.url; // 触发既有 watch：Cookie 同步 + 清晰度探测 + 自动文件名
 }
@@ -404,16 +387,10 @@ async function enqueueDownload(): Promise<void> {
   isEnqueueing.value = true;
   try {
     // Check for duplicate filename in download history
-    const dup = await window.electronAPI.checkDownloadDuplicate(fileName.value);
-    if (dup) {
-      const confirmed = await window.electronAPI.confirmDialog(
-        `文件名 "${fileName.value}" 已下载过（上次: ${new Date(dup.completedAt).toLocaleString()}），是否重复下载？`,
-        '重复下载确认'
-      );
-      if (!confirmed) {
-        hintMsg.value = '已取消重复下载';
-        return;
-      }
+    const confirmed = await confirmIfDownloadDuplicate(fileName.value);
+    if (!confirmed) {
+      hintMsg.value = '已取消重复下载';
+      return;
     }
 
     await window.electronAPI.enqueueDownload({

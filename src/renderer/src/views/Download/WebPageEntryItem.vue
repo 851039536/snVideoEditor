@@ -1,6 +1,6 @@
 <!-- 网页路径条目卡片：编辑、复制、解析、链接勾选入队与状态切换确认 -->
 <script setup lang="ts">
-import { inject, ref } from 'vue';
+import { computed, inject, onUnmounted, ref } from 'vue';
 import { Check, Copy, Download, Link, Pencil, Search, Trash2, X } from 'lucide-vue-next';
 import { truncateUrl } from '@/utils/format';
 import { isValidUrl } from '@/utils/url';
@@ -117,6 +117,13 @@ async function copyUrl(): Promise<void> {
   }
 }
 
+// 组件卸载时清理复制反馈定时器，避免泄漏
+onUnmounted(() => {
+  if (copiedTimer) {
+    clearTimeout(copiedTimer);
+  }
+});
+
 // ─── 解析 ────────────────────────────────────────────────────────────────────
 
 /** 是否已手动关闭解析结果面板 */
@@ -142,22 +149,22 @@ async function removePath(): Promise<void> {
 // ─── 勾选与入队 ──────────────────────────────────────────────────────────────
 
 /** 已勾选链接数 */
-function selectedCount(): number {
+const selectedCount = computed((): number => {
   const state = parseStates[props.entry.id];
   if (!state) {
     return 0;
   }
   return state.links.filter((l) => l.selected).length;
-}
+});
 
 /** 是否已全选 */
-function isAllSelected(): boolean {
+const isAllSelected = computed((): boolean => {
   const state = parseStates[props.entry.id];
   if (!state || state.links.length === 0) {
     return false;
   }
   return state.links.every((l) => l.selected);
-}
+});
 
 /** 单条链接「使用」：交由父组件回填主输入框并接管页面上下文 */
 function useLink(linkUrl: string): void {
@@ -307,7 +314,7 @@ async function enqueueEntry(): Promise<void> {
         <label class="text-xs text-text-secondary ml-auto flex items-center gap-1 cursor-pointer flex-shrink-0">
           <input
             type="checkbox"
-            :checked="isAllSelected()"
+            :checked="isAllSelected"
             @change="toggleAll(entry.id, ($event.target as HTMLInputElement).checked)"
           />
           全选
@@ -348,12 +355,12 @@ async function enqueueEntry(): Promise<void> {
       <div class="mt-2 flex items-center gap-2">
         <button
           @click="enqueueEntry"
-          :disabled="selectedCount() === 0 || !outputDir || enqueueingId !== ''"
+          :disabled="selectedCount === 0 || !outputDir || enqueueingId !== ''"
           class="btn-secondary !px-3 !py-1.5 text-xs flex items-center gap-1.5"
         >
           <Download :size="12" />
           <span v-if="enqueueingId === entry.id">入队中...</span>
-          <span v-else>加入下载队列 (已选 {{ selectedCount() }})</span>
+          <span v-else>加入下载队列 (已选 {{ selectedCount }})</span>
         </button>
         <span v-if="!outputDir" class="text-xs text-warning">请先在右侧选择输出目录</span>
         <span v-else-if="enqueueHint" class="text-xs text-success">{{ enqueueHint }}</span>

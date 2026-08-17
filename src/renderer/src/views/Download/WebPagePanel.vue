@@ -3,6 +3,7 @@
 import { computed, onMounted, provide, ref } from 'vue';
 import { FolderInput, FolderOpen, Plus, Save } from 'lucide-vue-next';
 import { useWebPathsStore } from '@/stores/webPaths';
+import { getDirName } from '@/utils/format';
 import { isValidUrl } from '@/utils/url';
 import { useWebPageParse, webPageParseKey } from '@/views/Download/useWebPageParse';
 import WebPageEntryItem from '@/views/Download/WebPageEntryItem.vue';
@@ -71,7 +72,7 @@ async function restorePaths(): Promise<void> {
 /** 打开 JSON 文件所在文件夹，方便直接查看编辑 */
 async function openPathsFolder(): Promise<void> {
   const filePath = pathsFilePath.value || (await window.electronAPI.getWebPagePathsFile());
-  const dir = filePath.replace(/[/\\][^/\\]+$/, '');
+  const dir = getDirName(filePath);
   await window.electronAPI.openFolder(dir);
 }
 
