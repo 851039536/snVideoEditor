@@ -29,13 +29,9 @@ const { isPreviewing, previewLabel, startSpeedPreview, stopSpeedPreview } = useS
 const speedFactor = ref(1.0)
 const outputDir = ref('')
 
-// 替换源文件后重置输出路径，避免输出指向旧文件目录
+// 替换源文件后重置输出路径并清空待变速段，避免旧状态指向新文件
 watch(() => props.inputFile, () => {
   outputDir.value = ''
-})
-
-// 源文件切换后清空待变速段，避免旧片段的段区间指向新文件
-watch(() => props.inputFile, () => {
   clearSegments()
 })
 
@@ -46,7 +42,9 @@ watch(errorMsg, (msg) => {
   }
 })
 
-const SPEED_PRESETS = [0.25, 0.5, 0.75, 1.25, 1.5, 2.0, 3.0, 4.0]
+// 完整速度档位（预设按钮组不含 1.0x，下拉选择含 1.0x）
+const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+const SPEED_PRESETS = SPEED_OPTIONS.filter((s) => s !== 1)
 
 // 变速后输出时长预览
 const outputDurationStr = computed((): string => {
@@ -58,11 +56,8 @@ const canExecute = computed((): boolean => {
   return props.trimDuration > 0 && speedFactor.value > 0 && !store.isProcessing
 })
 
-const canAddSegment = computed((): boolean => {
-  return props.trimDuration > 0 && !store.isProcessing
-})
-
-const canPreview = computed((): boolean => {
+// 加入待变速与预览共用同一可用条件（区间有效且无进行中的操作）
+const canOperate = computed((): boolean => {
   return props.trimDuration > 0 && !store.isProcessing
 })
 
@@ -180,7 +175,7 @@ async function onBatchStart(): Promise<void> {
       </button>
       <button
         @click="onPreviewCurrent"
-        :disabled="!canPreview"
+        :disabled="!canOperate"
         class="px-3 py-2 rounded-xl text-sm font-medium transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed border border-accent-purple/40 text-accent-purple hover:bg-accent-purple/10"
       >
         <Square v-if="isPreviewing" :size="14" class="inline mr-1 -mt-0.5" />
@@ -189,7 +184,7 @@ async function onBatchStart(): Promise<void> {
       </button>
       <button
         @click="onAddSegment"
-        :disabled="!canAddSegment"
+        :disabled="!canOperate"
         class="px-4 py-2 rounded-xl text-sm font-medium transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed border border-accent-blue/40 text-accent-blue hover:bg-accent-blue/10"
         title="将当前时间轴区间加入待变速列表"
       >
@@ -219,7 +214,7 @@ async function onBatchStart(): Promise<void> {
           @change="updateSegmentSpeed(seg.id, Number(($event.target as HTMLSelectElement).value))"
           class="px-1.5 py-0.5 text-xs font-mono bg-bg-primary border border-border rounded text-text-primary outline-none cursor-pointer"
         >
-          <option v-for="p in [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]" :key="p" :value="p">{{ p }}x</option>
+          <option v-for="p in SPEED_OPTIONS" :key="p" :value="p">{{ p }}x</option>
         </select>
         <button
           @click="startSpeedPreview(seg.startSec, seg.duration, seg.speed)"

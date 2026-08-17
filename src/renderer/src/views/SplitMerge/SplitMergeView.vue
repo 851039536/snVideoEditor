@@ -15,10 +15,11 @@ import { useVideoPlayer } from '@/composables/useVideoPlayer'
 import { useTrimTimeline } from '@/composables/useTrimTimeline'
 import { useSpeedBatch, speedSegments } from '@/composables/useSpeedBatch'
 import { useSpeedPreview, registerSpeedPreviewController, unregisterSpeedPreviewController, checkSpeedPreviewStop } from '@/composables/useSpeedPreview'
-import { secondsToHMS, secondsToTimecode } from '@/utils/time'
-import { formatSize, getFileName, toFileUrl, todayDateStr } from '@/utils/format'
+import { useSplitMerge } from '@/composables/useSplitMerge'
+import { secondsToHMS } from '@/utils/time'
+import { formatSize, getFileName, toFileUrl } from '@/utils/format'
 import { clamp, swapArrayElements } from '@/utils/math'
-import type { VideoMeta, ClipItem } from '@/types/file'
+import type { VideoMeta } from '@/types/file'
 
 const store = useProgressStore()
 const { clearSegments } = useSpeedBatch()
@@ -108,7 +109,6 @@ const stepSeconds = ref(10)
 const keyboardShortcutsEnabled = ref(false)
 
 // ---- 输出 ----
-const outputName = ref('')
 const outputDir = ref('')
 const errorMsg = ref('')
 
@@ -116,10 +116,7 @@ const errorMsg = ref('')
 const isDraggingReplace = ref(false)
 const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp']
 
-// ---- 片段列表 ----
-const clips = ref<ClipItem[]>([])
-const cuttingInProgress = ref(false)
-let clipIdCounter = 0
+// ---- 元数据加载请求守卫 ----
 let loadRequestId = 0
 
 // ---- 计算属性 ----
@@ -129,12 +126,36 @@ const videoSrc = computed((): string => {
   return toFileUrl(files.value[0])
 })
 
-const selectedClipCount = computed((): number => {
-  return clips.value.filter((c) => c.selected).length
-})
-
-const canMerge = computed((): boolean => {
-  return selectedClipCount.value + files.value.length >= 2
+// ---- 片段列表（视频/音频共享 composable） ----
+const {
+  clips,
+  cuttingInProgress,
+  selectedClipCount,
+  canMerge,
+  cutToClipList,
+  removeClip,
+  toggleClipSelection,
+  moveClip,
+  cleanupClipFiles,
+  selectOutputPath,
+  startProcess
+} = useSplitMerge({
+  files,
+  outputDir,
+  errorMsg,
+  duration,
+  trimStartSec,
+  trimEndSec,
+  trimDuration,
+  seekTo: seekVideoPlayer,
+  pausePlayer: () => videoPlayer.value?.pause(),
+  mediaNoun: '视频',
+  clipIdPrefix: 'clip_',
+  mergeFallbackPrefix: 'SN_',
+  getOutputExt: () => '.mp4',
+  getSaveExt: () => 'mp4',
+  outputDirPrompt: '请选择输出目录',
+  onAfterCut: () => { videoPlayer.value?.play().catch(() => {}) }
 })
 
 // ---- 辅助函数 ----
@@ -170,9 +191,6 @@ async function addFiles(newFiles: string[]): Promise<void> {
   }
   if ((mode.value === 'split' || mode.value === 'speed') && files.value.length > 0) {
     await loadVideoMeta(files.value[0])
-  }
-  if (outputName.value === '') {
-    outputName.value = getFileName(newFiles[0]).replace(/\.[^.]+$/, '') + '_output'
   }
 }
 
@@ -213,15 +231,11 @@ async function replaceVideo(newPath: string): Promise<void> {
   stopSpeedPreview()
   releaseVideoResource()
   // 清理旧的片段临时文件
-  for (const c of clips.value) {
-    window.electronAPI.deleteFile(c.outputFile).catch(() => {})
-  }
+  cleanupClipFiles()
   clips.value = []
   resetVideoState()
   // 替换文件
   files.value = [newPath]
-  // 重置输出名称
-  outputName.value = getFileName(newPath).replace(/\.[^.]+$/, '') + '_output'
   // 加载新元数据
   await loadVideoMeta(newPath)
 }
@@ -288,7 +302,6 @@ watch(mode, (newMode) => {
   } else if (newMode === 'merge') {
     releaseVideoResource()
     resetVideoState()
-    outputName.value = ''
     outputDir.value = ''
     files.value = []
   }
@@ -367,91 +380,6 @@ function snapEndHere(): void {
   trimEndSec.value = clamp(currentTime.value, trimStartSec.value + 0.1, duration.value)
 }
 
-// ---- 片段列表管理 ----
-
-async function cutToClipList(): Promise<void> {
-  if (files.value.length === 0) {
-    errorMsg.value = '请先添加视频文件'
-    return
-  }
-  if (trimDuration.value <= 0) {
-    errorMsg.value = '请选择有效的片段范围'
-    return
-  }
-
-  errorMsg.value = ''
-  cuttingInProgress.value = true
-  // 暂停视频播放器，避免裁剪期间及完成后 video 持续解码占用渲染线程
-  videoPlayer.value?.pause()
-
-  let outputFile = ''
-  try {
-    const tempDir = await window.electronAPI.getTempDir()
-    clipIdCounter++
-    const clipId = `clip_${Date.now()}_${clipIdCounter}`
-    outputFile = `${tempDir}/${clipId}.mp4`
-
-    const success = await window.electronAPI.splitVideo({
-      input: files.value[0],
-      output: outputFile,
-      startTime: secondsToTimecode(trimStartSec.value),
-      duration: secondsToTimecode(trimDuration.value)
-    })
-
-    if (success) {
-      clips.value.push({
-        id: clipId,
-        sourceFile: files.value[0],
-        sourceFileName: getFileName(files.value[0]),
-        startSec: trimStartSec.value,
-        endSec: trimEndSec.value,
-        duration: trimDuration.value,
-        outputFile,
-        selected: true
-      })
-      // 前手柄重置到本次裁剪结束位置，后手柄重置到视频末尾，便于连续裁剪后续片段
-      const clipEnd = trimEndSec.value
-      trimStartSec.value = Math.min(clipEnd, Math.max(0, duration.value - 0.1))
-      trimEndSec.value = duration.value
-      seekVideoPlayer(trimStartSec.value)
-      // 自动播放预览刚裁剪的片段（play 被自动播放策略拒绝时忽略）
-      videoPlayer.value?.play().catch(() => {})
-    } else {
-      // 裁剪取消：清理可能已部分写入的临时片段文件
-      window.electronAPI.deleteFile(outputFile).catch(() => {})
-    }
-  } catch (e) {
-    errorMsg.value = `裁切失败: ${e instanceof Error ? e.message : String(e)}`
-    // 裁剪失败：清理临时片段文件（outputFile 可能为空，如 getTempDir 抛错）
-    if (outputFile) {
-      window.electronAPI.deleteFile(outputFile).catch(() => {})
-    }
-  } finally {
-    cuttingInProgress.value = false
-  }
-}
-
-function removeClip(index: number): void {
-  const clip = clips.value[index]
-  if (clip) {
-    window.electronAPI.deleteFile(clip.outputFile).catch(() => {
-      console.warn('删除临时片段文件失败:', clip.outputFile)
-    })
-  }
-  clips.value.splice(index, 1)
-}
-
-function toggleClipSelection(index: number): void {
-  const clip = clips.value[index]
-  if (clip) {
-    clip.selected = !clip.selected
-  }
-}
-
-function moveClip(index: number, direction: -1 | 1): void {
-  swapArrayElements(clips.value, index, direction)
-}
-
 /** 变速段添加后推进时间轴手柄到段尾，便于连续添加后续片段 */
 function onSpeedSegmentAdded(): void {
   const segEnd = trimStartSec.value + trimDuration.value
@@ -460,82 +388,6 @@ function onSpeedSegmentAdded(): void {
     trimEndSec.value = duration.value
     seekVideoPlayer(segEnd)
   }
-}
-
-// ---- 输出与处理 ----
-
-function getMergeOutputName(): string {
-  const dateStr = todayDateStr()
-
-  // 优先使用裁剪片段对应的原视频名称
-  if (clips.value.length > 0) {
-    const baseName = clips.value[0].sourceFileName.replace(/\.[^.]+$/, '')
-    return `${baseName}_${dateStr}.mp4`
-  }
-
-  return `SN_${dateStr}.mp4`
-}
-
-async function selectOutputPath(): Promise<void> {
-  const fn = mode.value === 'split' ? `${outputName.value}.mp4` : getMergeOutputName()
-  const dir = await window.electronAPI.selectSavePath(fn, 'mp4')
-  if (dir) {
-    outputDir.value = dir
-  }
-}
-
-async function startProcess(): Promise<void> {
-  errorMsg.value = ''
-  if (!await validateOutput()) { return }
-
-  // 收集选中的片段输出文件与外部文件
-  const selectedClipFiles = clips.value
-    .filter((c) => c.selected)
-    .map((c) => c.outputFile)
-  const allInputs = [...selectedClipFiles, ...files.value]
-
-  if (allInputs.length < 2) {
-    errorMsg.value = '至少需要 2 个文件才能合并'
-    return
-  }
-
-  store.start('merge')
-
-  try {
-    const result = await window.electronAPI.mergeVideos({
-      inputs: allInputs,
-      output: outputDir.value
-    })
-    if (result) {
-      // 合并成功后清理选中的片段临时文件
-      const deleteResults = await Promise.allSettled(
-        clips.value.filter((c) => c.selected).map((c) => window.electronAPI.deleteFile(c.outputFile))
-      )
-      const failedCount = deleteResults.filter((r) => r.status === 'rejected').length
-      if (failedCount > 0) {
-        console.warn(`合并后清理临时文件失败: ${failedCount} 个`)
-      }
-      // 从列表移除已合并的片段，避免残留引用
-      clips.value = clips.value.filter((c) => !c.selected)
-      store.finish()
-    } else {
-      store.reset()
-    }
-  } catch (e) {
-    errorMsg.value = e instanceof Error ? e.message : String(e)
-    store.reset()
-  }
-}
-
-async function validateOutput(): Promise<boolean> {
-  if (!outputDir.value) {
-    await selectOutputPath()
-    if (!outputDir.value) {
-      errorMsg.value = '请选择输出目录'
-      return false
-    }
-  }
-  return true
 }
 
 // ---- 生命周期 ----
@@ -566,9 +418,7 @@ onUnmounted(() => {
   }
   releaseVideoResource()
   // 清理临时片段文件
-  for (const c of clips.value) {
-    window.electronAPI.deleteFile(c.outputFile).catch(() => {})
-  }
+  cleanupClipFiles()
   if (window.electronAPI) {
     window.electronAPI.removeProgressListener()
   }
@@ -1020,7 +870,7 @@ onUnmounted(() => {
 /* ---- Timeline SplitMerge theme ---- */
 .timeline-track {
   height: 48px;
-  border-radius: 10px;
+  border-radius: var(--radius-md, 8px);
 }
 
 .timeline-selected {
@@ -1063,7 +913,7 @@ onUnmounted(() => {
   color: var(--color-text-primary);
   background: rgba(0, 0, 0, 0.4);
   padding: 0 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm, 4px);
   white-space: nowrap;
 }
 

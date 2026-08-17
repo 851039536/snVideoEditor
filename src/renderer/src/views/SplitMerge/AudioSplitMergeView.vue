@@ -11,10 +11,10 @@ import ClipList from './ClipList.vue'
 import { useProgressStore } from '@/stores/progress'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
 import { useTrimTimeline } from '@/composables/useTrimTimeline'
-import { secondsToHMS, secondsToTimecode } from '@/utils/time'
-import { formatSize, getFileName, toFileUrl, todayDateStr } from '@/utils/format'
+import { useSplitMerge } from '@/composables/useSplitMerge'
+import { secondsToHMS } from '@/utils/time'
+import { formatSize, getFileName, toFileUrl } from '@/utils/format'
 import { clamp, swapArrayElements } from '@/utils/math'
-import type { ClipItem } from '@/types/file'
 import type { AudioMeta } from '../../../../preload/index'
 
 const store = useProgressStore()
@@ -80,10 +80,7 @@ const errorMsg = ref('')
 // ---- 替换拖拽 ----
 const isDraggingReplace = ref(false)
 
-// ---- 片段列表 ----
-const clips = ref<ClipItem[]>([])
-const cuttingInProgress = ref(false)
-let clipIdCounter = 0
+// ---- 元数据加载请求守卫 ----
 let loadRequestId = 0
 
 // ---- 计算属性 ----
@@ -92,19 +89,42 @@ const audioSrc = computed((): string => {
   return toFileUrl(files.value[0])
 })
 
-const selectedClipCount = computed((): number => {
-  return clips.value.filter((c) => c.selected).length
-})
-
-const canMerge = computed((): boolean => {
-  return selectedClipCount.value + files.value.length >= 2
-})
-
 /** 获取源文件扩展名（用于输出文件） */
 const sourceExt = computed((): string => {
   if (files.value.length === 0) { return '.mp3' }
   const ext = files.value[0].slice(files.value[0].lastIndexOf('.'))
   return ext || '.mp3'
+})
+
+// ---- 片段列表（视频/音频共享 composable） ----
+const {
+  clips,
+  cuttingInProgress,
+  selectedClipCount,
+  canMerge,
+  cutToClipList,
+  removeClip,
+  toggleClipSelection,
+  moveClip,
+  cleanupClipFiles,
+  selectOutputPath,
+  startProcess
+} = useSplitMerge({
+  files,
+  outputDir,
+  errorMsg,
+  duration,
+  trimStartSec,
+  trimEndSec,
+  trimDuration,
+  seekTo: seekAudioPlayer,
+  pausePlayer: () => audioPlayer.value?.pause(),
+  mediaNoun: '音频',
+  clipIdPrefix: 'audio_clip_',
+  mergeFallbackPrefix: 'SN_audio_',
+  getOutputExt: () => sourceExt.value,
+  getSaveExt: () => sourceExt.value.replace('.', ''),
+  outputDirPrompt: '请选择输出路径'
 })
 
 // ---- 文件选择 ----
@@ -161,9 +181,7 @@ function removeFile(index: number): void {
   if (files.value.length === 0) {
     releaseAudioResource()
     // 清理所有片段临时文件，避免磁盘泄漏
-    for (const c of clips.value) {
-      window.electronAPI.deleteFile(c.outputFile).catch(() => {})
-    }
+    cleanupClipFiles()
     audioMeta.value = null
     duration.value = 0
     clips.value = []
@@ -219,149 +237,6 @@ function stepBackward(): void {
   seekAudioPlayer(t)
 }
 
-// ---- 片段列表管理 ----
-
-async function cutToClipList(): Promise<void> {
-  if (files.value.length === 0) {
-    errorMsg.value = '请先添加音频文件'
-    return
-  }
-  if (trimDuration.value <= 0) {
-    errorMsg.value = '请选择有效的片段范围'
-    return
-  }
-
-  errorMsg.value = ''
-  cuttingInProgress.value = true
-  audioPlayer.value?.pause()
-
-  let outputFile = ''
-  try {
-    const tempDir = await window.electronAPI.getTempDir()
-    clipIdCounter++
-    const clipId = `audio_clip_${Date.now()}_${clipIdCounter}`
-    outputFile = `${tempDir}/${clipId}${sourceExt.value}`
-
-    const success = await window.electronAPI.splitVideo({
-      input: files.value[0],
-      output: outputFile,
-      startTime: secondsToTimecode(trimStartSec.value),
-      duration: secondsToTimecode(trimDuration.value)
-    })
-
-    if (success) {
-      clips.value.push({
-        id: clipId,
-        sourceFile: files.value[0],
-        sourceFileName: getFileName(files.value[0]),
-        startSec: trimStartSec.value,
-        endSec: trimEndSec.value,
-        duration: trimDuration.value,
-        outputFile,
-        selected: true
-      })
-      const clipEnd = trimEndSec.value
-      trimStartSec.value = Math.min(clipEnd, Math.max(0, duration.value - 0.1))
-      trimEndSec.value = duration.value
-      seekAudioPlayer(trimStartSec.value)
-    } else {
-      window.electronAPI.deleteFile(outputFile).catch(() => {})
-    }
-  } catch (e) {
-    errorMsg.value = `裁切失败: ${e instanceof Error ? e.message : String(e)}`
-    if (outputFile) {
-      window.electronAPI.deleteFile(outputFile).catch(() => {})
-    }
-  } finally {
-    cuttingInProgress.value = false
-  }
-}
-
-function removeClip(index: number): void {
-  const clip = clips.value[index]
-  if (clip) {
-    window.electronAPI.deleteFile(clip.outputFile).catch(() => {})
-  }
-  clips.value.splice(index, 1)
-}
-
-function toggleClipSelection(index: number): void {
-  const clip = clips.value[index]
-  if (clip) {
-    clip.selected = !clip.selected
-  }
-}
-
-function moveClip(index: number, direction: -1 | 1): void {
-  swapArrayElements(clips.value, index, direction)
-}
-
-// ---- 输出与合并 ----
-
-function getMergeOutputName(): string {
-  const dateStr = todayDateStr()
-  if (clips.value.length > 0) {
-    const baseName = clips.value[0].sourceFileName.replace(/\.[^.]+$/, '')
-    return `${baseName}_${dateStr}${sourceExt.value}`
-  }
-  return `SN_audio_${dateStr}${sourceExt.value}`
-}
-
-async function selectOutputPath(): Promise<void> {
-  const ext = sourceExt.value.replace('.', '')
-  const fn = mode.value === 'split' ? `audio_output${sourceExt.value}` : getMergeOutputName()
-  const dir = await window.electronAPI.selectSavePath(fn, ext)
-  if (dir) {
-    outputDir.value = dir
-  }
-}
-
-async function startProcess(): Promise<void> {
-  errorMsg.value = ''
-  if (!outputDir.value) {
-    await selectOutputPath()
-    if (!outputDir.value) {
-      errorMsg.value = '请选择输出路径'
-      return
-    }
-  }
-
-  const selectedClipFiles = clips.value
-    .filter((c) => c.selected)
-    .map((c) => c.outputFile)
-  const allInputs = [...selectedClipFiles, ...files.value]
-
-  if (allInputs.length < 2) {
-    errorMsg.value = '至少需要 2 个文件才能合并'
-    return
-  }
-
-  store.start('merge')
-
-  try {
-    const result = await window.electronAPI.mergeVideos({
-      inputs: allInputs,
-      output: outputDir.value
-    })
-    if (result) {
-      const deleteResults = await Promise.allSettled(
-        clips.value.filter((c) => c.selected).map((c) => window.electronAPI.deleteFile(c.outputFile))
-      )
-      const failedCount = deleteResults.filter((r) => r.status === 'rejected').length
-      if (failedCount > 0) {
-        console.warn(`合并后清理临时文件失败: ${failedCount} 个`)
-      }
-      clips.value = clips.value.filter((c) => !c.selected)
-      store.finish()
-    } else {
-      store.reset()
-    }
-  } catch (e) {
-    errorMsg.value = e instanceof Error ? e.message : String(e)
-    store.reset()
-  }
-}
-
 // ---- 模式切换 ----
 
 watch(mode, (newMode) => {
@@ -398,9 +273,7 @@ onUnmounted(() => {
   // 释放音频资源
   releaseAudioResource()
   // 清理临时片段
-  for (const c of clips.value) {
-    window.electronAPI.deleteFile(c.outputFile).catch(() => {})
-  }
+  cleanupClipFiles()
   if (window.electronAPI) {
     window.electronAPI.removeProgressListener()
   }
@@ -699,7 +572,7 @@ onUnmounted(() => {
 
 .timeline-track {
   height: 40px;
-  border-radius: 10px;
+  border-radius: var(--radius-md, 8px);
 }
 
 .timeline-selected {
@@ -714,17 +587,6 @@ onUnmounted(() => {
 
 .trim-handle {
   background: var(--color-accent-light);
-}
-
-.time-input {
-  width: 2rem;
-  text-align: center;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  padding: 2px 4px;
-  color: var(--color-text-primary);
-  font-family: monospace;
 }
 
 @media (max-width: 768px) {

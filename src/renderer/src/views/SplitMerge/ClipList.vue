@@ -1,3 +1,4 @@
+<!-- 分割片段列表：勾选、排序与移除操作展示 -->
 <script setup lang="ts">
 import { X, ArrowUp, ArrowDown } from 'lucide-vue-next'
 import { secondsToHMS } from '@/utils/time'
