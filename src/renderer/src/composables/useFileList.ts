@@ -36,7 +36,10 @@ export function useFileList(defaultSuffix?: string, externalFiles?: Ref<FileEntr
 
   async function getMeta(entry: FileEntry): Promise<void> {
     try {
-      entry.meta = await window.electronAPI.getVideoMeta(entry.path)
+      const meta = await window.electronAPI.getVideoMeta(entry.path)
+      // 必须经由响应式代理赋值，直接改原始对象不会触发 watch/模板更新
+      const target = files.value.find((f) => f.path === entry.path)
+      if (target) { target.meta = meta }
     } catch (e) {
       console.error('Failed to get meta:', e)
     }
