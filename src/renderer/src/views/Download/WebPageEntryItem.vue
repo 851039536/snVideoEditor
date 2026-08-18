@@ -20,8 +20,8 @@ const emit = defineEmits<{
   'use-link': [payload: { url: string; pageUrl: string; pageTitle: string; cookies: RawCookie[] }];
 }>();
 
-// 注入父级共享的解析状态：useWebPageParse 每次调用新建状态（非单例），
-// 必须由 WebPagePanel 通过 provide 提供同一实例，解析结果才能被本组件读取
+// 注入父级（DownloadView）共享的解析状态：useWebPageParse 每次调用新建状态（非单例），
+// 由 DownloadView 创建并 provide 同一实例，解析结果才能被本组件读取
 const parse = inject(webPageParseKey);
 if (!parse) {
   throw new Error('WebPageEntryItem 必须在 WebPagePanel 内使用');
@@ -141,7 +141,12 @@ function closeParse(): void {
 
 // ─── 删除 ────────────────────────────────────────────────────────────────────
 
+/** 删除路径：二次确认防误删（与状态切换的确认策略保持一致） */
 async function removePath(): Promise<void> {
+  const confirmed = await window.electronAPI.confirmDialog('删除该网页路径？删除后不可恢复。', '删除确认');
+  if (!confirmed) {
+    return;
+  }
   await webPathsStore.remove(props.entry.id);
   clearState(props.entry.id);
 }

@@ -1,11 +1,10 @@
 <!-- 网页路径管理面板：路径增改删、解析、链接勾选入队与备份还原 -->
 <script setup lang="ts">
-import { computed, onMounted, provide, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { FolderInput, FolderOpen, Plus, Save } from 'lucide-vue-next';
 import { useWebPathsStore } from '@/stores/webPaths';
 import { getDirName } from '@/utils/format';
 import { isValidUrl } from '@/utils/url';
-import { useWebPageParse, webPageParseKey } from '@/views/Download/useWebPageParse';
 import WebPageEntryItem from '@/views/Download/WebPageEntryItem.vue';
 import type { WebPageEntry } from '@/views/Download/types';
 import type { RawCookie } from '@/types/file';
@@ -20,11 +19,8 @@ const emit = defineEmits<{
 }>();
 
 const webPathsStore = useWebPathsStore();
-
-// 解析状态由父级持有并共享：useWebPageParse 每次调用新建状态（非单例），
-// 子组件通过 inject(webPageParseKey) 复用同一实例，解析结果才能在各卡片间正确读写
-const parse = useWebPageParse();
-provide(webPageParseKey, parse);
+// 解析状态由父级 DownloadView 持有并 provide（与「从网页提取」共用互斥锁），
+// 子组件 WebPageEntryItem 通过 inject(webPageParseKey) 读取同一实例
 
 // ─── 数量实时统计 & 分组 ──────────────────────────────────────────────────────
 

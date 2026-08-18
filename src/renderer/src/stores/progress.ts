@@ -17,8 +17,6 @@ export const useProgressStore = defineStore('progress', () => {
 
   // ─── Download queue state ──────────────────────────────────────────────────
   const queueItems = ref<QueueItem[]>([]);
-  const queueActiveIds = ref<string[]>([]);
-  const queueIsProcessing = ref(false);
   const queueConcurrency = ref(2);
 
   function updateQueueItems(items: QueueItem[]): void {
@@ -30,10 +28,6 @@ export const useProgressStore = defineStore('progress', () => {
     if (item) {
       item.progress = data;
     }
-  }
-
-  function queueHasPending(): boolean {
-    return queueItems.value.some((i) => i.status === 'pending');
   }
 
   // ─── Timer ─────────────────────────────────────────────────────────────────
@@ -135,11 +129,8 @@ export const useProgressStore = defineStore('progress', () => {
     cancel,
     // Queue
     queueItems,
-    queueActiveIds,
-    queueIsProcessing,
     queueConcurrency,
     updateQueueItems,
-    updateQueueItemProgress,
-    queueHasPending
+    updateQueueItemProgress
   };
 });

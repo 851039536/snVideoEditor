@@ -54,6 +54,9 @@ interface SegmentInfo {
 /** 最大并发下载数 */
 const MAX_CONCURRENT = 6
 
+/** 瞬时速率滑动窗口时长（毫秒），只统计最近窗口内完成的分片 */
+const SPEED_WINDOW_MS = 5000
+
 // ─── 工具函数 ────────────────────────────────────────────────────────────────
 
 /** 解析 m3u8 播放列表，返回绝对路径的 TS 分片地址及时长 */
@@ -117,13 +120,13 @@ async function chromiumFetch(
   return { body: Buffer.from(arrayBuffer), status: resp.status }
 }
 
-/** 将 bytes/sec 格式化为可读速度字符串 */
+/** 将 bytes/sec 格式化为可读速度字符串（字节口径 MB/s，与常见下载工具一致） */
 function formatSpeed(bytesPerSec: number): string {
   if (bytesPerSec <= 0) { return '' }
-  const mbps = (bytesPerSec * 8) / 1_000_000
-  if (mbps >= 1000) { return `${(mbps / 1000).toFixed(1)} Gbps` }
-  if (mbps >= 1) { return `${mbps.toFixed(1)} Mbps` }
-  return `${(mbps * 1000).toFixed(0)} Kbps`
+  if (bytesPerSec >= 1024 ** 3) { return `${(bytesPerSec / 1024 ** 3).toFixed(2)} GB/s` }
+  if (bytesPerSec >= 1024 ** 2) { return `${(bytesPerSec / 1024 ** 2).toFixed(1)} MB/s` }
+  if (bytesPerSec >= 1024) { return `${(bytesPerSec / 1024).toFixed(0)} KB/s` }
+  return `${bytesPerSec.toFixed(0)} B/s`
 }
 
 // ─── 主流程：Chromium 下载分片 → ffmpeg 本地转码 ─────────────────────────────
@@ -183,9 +186,11 @@ export async function downloadViaChromium(
 
     const total = segments.length
     let completed = 0
-    let totalDownloadedBytes = 0  // 累计字节（用于精确 ETA）
-    const downloadStartTime = Date.now()
+    let downloadedCount = 0 // 本次会话实际新下载的分片数（不含缓存命中，避免稀释均值）
+    let totalDownloadedBytes = 0  // 累计字节（用于剩余体积估算）
     let lastReportTime = Date.now()
+    // 滑动窗口采样：最近 SPEED_WINDOW_MS 内完成的分片字节数，用于瞬时速率
+    const speedSamples: { time: number; bytes: number }[] = []
 
     // 下载单个分片（3 次重试，线性退避）
     const downloadSegmentWithRetry = async (seg: SegmentInfo): Promise<void> => {
@@ -199,6 +204,8 @@ export async function downloadViaChromium(
           await fs.promises.writeFile(tmpPath, resp.body)
           await fs.promises.rename(tmpPath, seg.localPath)
           totalDownloadedBytes += resp.body.length
+          speedSamples.push({ time: Date.now(), bytes: resp.body.length })
+          downloadedCount++
           return // 成功
         } catch (e) {
           if (isAborted()) { return }
@@ -246,22 +253,29 @@ export async function downloadViaChromium(
         // 上报进度（分片下载占 10%–85%）
         const now = Date.now()
         if (now - lastReportTime > 300 && opts.onProgress) {
-          const elapsedMs = now - downloadStartTime
           const segPercent = Math.round((completed / total) * 75) + 10
-          // 使用累计平均值计算速度/ETA
-          const avgBytesPerSec = elapsedMs > 0
-            ? (totalDownloadedBytes / elapsedMs) * 1000
-            : 0
-          const avgSegmentBytes = completed > 0
-            ? totalDownloadedBytes / completed
+          // 瞬时速率：只统计最近 SPEED_WINDOW_MS 内完成的分片，
+          // 窗口时长取「现在 - 最旧样本」，下限 1s 避免单样本突发虚高
+          while (speedSamples.length > 0 && now - speedSamples[0].time > SPEED_WINDOW_MS) {
+            speedSamples.shift()
+          }
+          const windowBytes = speedSamples.reduce((sum, s) => sum + s.bytes, 0)
+          const windowSec = Math.max(
+            (now - (speedSamples.length > 0 ? speedSamples[0].time : now)) / 1000,
+            1
+          )
+          const rateBytesPerSec = windowBytes / windowSec
+          // 平均分片体积只用实际下载的分片计算（续传时缓存命中不计入）
+          const avgSegmentBytes = downloadedCount > 0
+            ? totalDownloadedBytes / downloadedCount
             : 0
           const remaining = total - completed
-          const etaSec = avgBytesPerSec > 0
-            ? Math.round((remaining * avgSegmentBytes) / avgBytesPerSec)
+          const etaSec = rateBytesPerSec > 0
+            ? Math.round((remaining * avgSegmentBytes) / rateBytesPerSec)
             : 0
           opts.onProgress({
             percent: Math.min(segPercent, 99),
-            speed: formatSpeed(avgBytesPerSec),
+            speed: formatSpeed(rateBytesPerSec),
             eta: etaSec > 0
               ? `${Math.floor(etaSec / 60)}:${String(etaSec % 60).padStart(2, '0')}`
               : '',

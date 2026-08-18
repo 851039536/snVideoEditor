@@ -1,6 +1,6 @@
 <!-- 视频下载页面：m3u8 解析、网页提取、清晰度选择与下载队列管理 -->
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, watch, provide } from 'vue';
 import {
   Globe,
   Download,
@@ -19,11 +19,15 @@ import ProgressPanel from '@/components/ProgressPanel.vue';
 import DownloadQueue from '@/views/Download/DownloadQueue.vue';
 import WebPagePanel from '@/views/Download/WebPagePanel.vue';
 import { useProgressStore } from '@/stores/progress';
-import { todayDateStr, sanitizeFileName, getDirName } from '@/utils/format';
+import { getDirName } from '@/utils/format';
 import { buildCookieHeader } from '@/utils/cookies';
-import { isValidUrl, buildOriginHeaders } from '@/utils/url';
+import { isValidUrl, buildOriginHeaders, DEFAULT_UA } from '@/utils/url';
 import { confirmIfDownloadDuplicate } from '@/utils/download';
-import type { QualityVariant, RawCookie, QueueStatus } from '@/types/file';
+import { useWebPageParse, webPageParseKey } from '@/views/Download/useWebPageParse';
+import { useQualityVariants } from '@/views/Download/useQualityVariants';
+import { useOutputTarget } from '@/views/Download/useOutputTarget';
+import { useDownloadQueueSync } from '@/views/Download/useDownloadQueueSync';
+import type { RawCookie } from '@/types/file';
 
 const progressStore = useProgressStore();
 
@@ -53,94 +57,38 @@ function syncCookiesForUrl(url: string): void {
   }
 }
 
-// ─── Quality (m3u8 variants) ─────────────────────────────────────────────────
-
-const variants = ref<QualityVariant[]>([]);
-const selectedVariantIndex = ref(-1); // -1 = use original URL (direct download)
-const showQualitySelector = ref(false);
-let fetchVariantsVersion = 0; // 防止竞态条件：每次新请求递增，旧请求结果被丢弃
-
-/** The actual URL to download — could be a variant URL or the original */
-const effectiveUrl = computed((): string => {
-  if (variants.value.length > 0 && selectedVariantIndex.value >= 0) {
-    return variants.value[selectedVariantIndex.value].url;
-  }
-  return m3u8Url.value.trim();
-});
-
-/** Auto-select 480p variant */
-function autoSelect480p(variantList: QualityVariant[]): void {
-  if (variantList.length === 0) {
-    selectedVariantIndex.value = -1;
-    return;
-  }
-  // Exact 480p match
-  const idx480 = variantList.findIndex((v) => v.height === 480);
-  if (idx480 >= 0) {
-    selectedVariantIndex.value = idx480;
-    return;
-  }
-  // Closest to 480p (prefer slightly lower)
-  let bestIdx = 0;
-  let bestDiff = Math.abs(variantList[0].height - 480);
-  for (let i = 1; i < variantList.length; i++) {
-    const diff = Math.abs(variantList[i].height - 480);
-    if (diff < bestDiff || (diff === bestDiff && variantList[i].height < variantList[bestIdx].height)) {
-      bestIdx = i;
-      bestDiff = diff;
-    }
-  }
-  selectedVariantIndex.value = bestIdx;
-}
-
-/** Fetch quality variants for the current m3u8 URL */
-async function fetchQualityVariants(): Promise<void> {
-  const url = m3u8Url.value.trim();
-  if (!isValidUrl(url)) {
-    return;
-  }
-
-  const version = ++fetchVariantsVersion;
-  try {
-    const result = await window.electronAPI.fetchM3u8Variants(url, { ...headers });
-    // 竞态保护：如果 URL 已变化（新版本号已递增），丢弃过时结果
-    if (version !== fetchVariantsVersion) {
-      return;
-    }
-    variants.value = result;
-    if (result.length > 0) {
-      autoSelect480p(result);
-      showQualitySelector.value = true;
-    } else {
-      selectedVariantIndex.value = -1;
-      showQualitySelector.value = false;
-    }
-  } catch {
-    if (version !== fetchVariantsVersion) {
-      return;
-    }
-    variants.value = [];
-    selectedVariantIndex.value = -1;
-    showQualitySelector.value = false;
-  }
-}
-
 // ─── Headers (auto-managed, not shown in UI) ──────────────────────────────────
 
 const headers = reactive<Record<string, string>>({
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+  'User-Agent': DEFAULT_UA
 });
+
+// ─── Quality (m3u8 variants) ─────────────────────────────────────────────────
+
+const {
+  variants,
+  selectedVariantIndex,
+  showQualitySelector,
+  variantsLoading,
+  effectiveUrl,
+  fetchQualityVariants,
+  resetVariants
+} = useQualityVariants(m3u8Url, headers);
 
 // ─── Output ──────────────────────────────────────────────────────────────────
 
-const commonPaths = ref<{ desktop: string; downloads: string }>({ desktop: '', downloads: '' });
-const outputDir = ref('');
-const fileName = ref('');
-// True once the user manually edits the filename, to avoid the URL watcher
-// overwriting their input on subsequent URL changes.
-const fileNameEdited = ref(false);
-const loadingPath = ref('');
+const {
+  outputDir,
+  fileName,
+  fileNameEdited,
+  loadingPath,
+  autoFileName,
+  outputPath,
+  fetchCommonPaths,
+  selectQuickDir,
+  selectCustomDir
+} = useOutputTarget(m3u8Url, fetchedTitle);
+
 const historyJsonPath = ref('');
 
 async function openHistoryFolder(): Promise<void> {
@@ -151,62 +99,43 @@ async function openHistoryFolder(): Promise<void> {
   await window.electronAPI.openFolder(dir);
 }
 
-async function fetchCommonPaths(): Promise<void> {
-  try {
-    commonPaths.value = await window.electronAPI.getCommonPaths();
-  } catch (_e) {
-    /* leave defaults */
+/** 快速选目录包装：无法获取系统路径时给出错误提示 */
+async function handleSelectQuickDir(type: 'desktop' | 'downloads'): Promise<void> {
+  const ok = await selectQuickDir(type);
+  if (!ok) {
+    errorMsg.value = '无法获取系统路径，请使用自定义目录';
   }
 }
 
-async function selectQuickDir(type: 'desktop' | 'downloads'): Promise<void> {
-  loadingPath.value = type;
-  try {
-    if (!commonPaths.value[type]) {
-      await fetchCommonPaths();
-    }
-    const dir = commonPaths.value[type];
-    if (dir) {
-      outputDir.value = dir;
-    } else {
-      errorMsg.value = '无法获取系统路径，请使用自定义目录';
-    }
-  } finally {
-    loadingPath.value = '';
-  }
-}
+// ─── Download queue sync（监听器绑定组件生命周期） ─────────────────────────────
 
-async function selectCustomDir(): Promise<void> {
-  const dir = await window.electronAPI.selectDirectory();
-  if (dir) {
-    outputDir.value = dir;
-  }
-}
+const {
+  setConcurrency,
+  cancelAllDownloads,
+  retryQueueItem,
+  removeQueueItem,
+  cancelQueueItem,
+  pauseQueueItem,
+  resumeQueueItem,
+  clearQueueTerminal
+} = useDownloadQueueSync();
 
-const autoFileName = computed((): string => {
-  const ts = todayDateStr();
-  // Priority 1: use page title if available (from "从网页提取")
-  if (fetchedTitle.value) {
-    const safe = sanitizeFileName(fetchedTitle.value);
-    return `${safe || 'video'}_${ts}.mp4`;
-  }
-  // Priority 2: derive from URL path
-  try {
-    const urlPath = new URL(m3u8Url.value).pathname;
-    const segments = urlPath.split('/').filter(Boolean);
-    const last = segments[segments.length - 1] || 'video';
-    const name = last.replace(/\.(m3u8|ts|mp4|mkv|webm|avi)$/i, '');
-    return `${name}_${ts}.mp4`;
-  } catch {
-    return `download_${ts}.mp4`;
-  }
-});
+// ─── 网页路径解析共享实例（与「从网页提取」共用互斥锁） ─────────────────────────
+
+const parse = useWebPageParse();
+provide(webPageParseKey, parse);
+const { isBusy: parseBusy, setManualFetching } = parse;
+
+// ─── URL watcher：自动文件名 / Cookie 同步 / 清晰度探测 ──────────────────────────
 
 // 清晰度探测防抖定时器
 let variantFetchTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Auto-detect quality + auto-fill filename when m3u8 URL changes
 watch(m3u8Url, (url) => {
+  // 用户修正输入时清除旧的错误/提示，避免陈旧信息悬挂
+  errorMsg.value = '';
+  hintMsg.value = '';
   // 手动输入的新地址与提取结果无关时，清除旧页面标题，避免污染自动文件名
   if (url && !fetchedUrls.value.includes(url)) {
     fetchedTitle.value = '';
@@ -221,22 +150,13 @@ watch(m3u8Url, (url) => {
     if (variantFetchTimer) { clearTimeout(variantFetchTimer); }
     variantFetchTimer = setTimeout(() => { fetchQualityVariants(); }, 400);
   } else {
-    showQualitySelector.value = false;
-    variants.value = [];
-    selectedVariantIndex.value = -1;
+    resetVariants();
   }
 });
 
 // Keep Cookie header in sync when effective URL changes (e.g. quality variant selection)
 watch(effectiveUrl, (url) => {
   syncCookiesForUrl(url);
-});
-
-const outputPath = computed((): string => {
-  if (!outputDir.value || !fileName.value) {
-    return '';
-  }
-  return outputDir.value.replace(/\\/g, '/') + '/' + fileName.value;
 });
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -255,11 +175,6 @@ const hasActiveQueue = computed((): boolean => {
 const downloadingCount = computed((): number => {
   return progressStore.queueItems.filter((i) => i.status === 'downloading' || i.status === 'merging').length;
 });
-
-function setConcurrency(n: number): void {
-  progressStore.queueConcurrency = n;
-  window.electronAPI.setDownloadConcurrency(n);
-}
 
 const isInputUrlValid = computed(() => isValidUrl(m3u8Url.value));
 
@@ -306,6 +221,8 @@ async function fetchM3u8FromPage(): Promise<void> {
   }
 
   isFetching.value = true;
+  // 与网页路径面板的「解析」共用互斥锁，避免 page-fetcher 全局拦截器并发串扰
+  setManualFetching(true);
   try {
     const result = await window.electronAPI.fetchPageM3u8(pageUrl);
     fetchedTitle.value = result.pageTitle;
@@ -327,6 +244,7 @@ async function fetchM3u8FromPage(): Promise<void> {
     showFetchedUrls.value = false;
   } finally {
     isFetching.value = false;
+    setManualFetching(false);
   }
 }
 
@@ -356,7 +274,7 @@ function handleUseLink(payload: {
   m3u8Url.value = payload.url; // 触发既有 watch：Cookie 同步 + 清晰度探测 + 自动文件名
 }
 
-// ─── Download Queue ──────────────────────────────────────────────────────────
+// ─── Download enqueue ────────────────────────────────────────────────────────
 
 const justEnqueued = ref(false);
 let justEnqueuedTimer: ReturnType<typeof setTimeout> | null = null;
@@ -413,51 +331,6 @@ async function enqueueDownload(): Promise<void> {
   }
 }
 
-async function cancelAllDownloads(): Promise<void> {
-  await window.electronAPI.cancelDownloadQueue();
-}
-
-async function handleQueueRetry(id: string): Promise<void> {
-  await window.electronAPI.retryQueueItem(id);
-}
-
-async function handleQueueRemove(id: string): Promise<void> {
-  await window.electronAPI.removeQueueItem(id);
-}
-
-async function handleQueueCancel(id: string): Promise<void> {
-  const ok = await window.electronAPI.cancelQueueItem(id);
-  if (!ok) {
-    // 点击与 IPC 之间项已转为终态，重新同步状态
-    try {
-      const status = await window.electronAPI.getQueueStatus();
-      applyQueueStatus(status);
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-async function handleQueuePause(id: string): Promise<void> {
-  await window.electronAPI.pauseQueueItem(id);
-}
-
-async function handleQueueResume(id: string): Promise<void> {
-  await window.electronAPI.resumeQueueItem(id);
-}
-
-async function handleClearTerminal(): Promise<void> {
-  await window.electronAPI.clearQueueTerminal();
-}
-
-/** 将后端队列状态同步到 progressStore */
-function applyQueueStatus(status: QueueStatus): void {
-  progressStore.updateQueueItems(status.items);
-  progressStore.queueActiveIds = status.activeIds;
-  progressStore.queueIsProcessing = status.isProcessing;
-  progressStore.queueConcurrency = status.concurrency;
-}
-
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -469,29 +342,6 @@ onMounted(async () => {
   } catch {
     /* ignore */
   }
-
-  // Register listeners BEFORE the initial status fetch so no backend update
-  // arriving during the await gap is lost.
-  window.electronAPI.onQueueUpdate((status) => {
-    applyQueueStatus(status);
-  });
-
-  // Listen to download progress for the active queue item
-  window.electronAPI.onQueueProgress((data) => {
-    progressStore.updateQueueItemProgress(data.queueId, {
-      percent: data.percent,
-      speed: data.speed,
-      eta: data.eta
-    });
-  });
-
-  // 拉取初始队列状态（导航前可能已有任务）
-  try {
-    const status = await window.electronAPI.getQueueStatus();
-    applyQueueStatus(status);
-  } catch {
-    /* backend may not be ready yet */
-  }
 });
 
 onUnmounted(() => {
@@ -501,7 +351,6 @@ onUnmounted(() => {
   if (variantFetchTimer) {
     clearTimeout(variantFetchTimer);
   }
-  window.electronAPI?.removeQueueListeners();
 });
 </script>
 
@@ -539,7 +388,7 @@ onUnmounted(() => {
             </div>
             <button
               @click="fetchM3u8FromPage"
-              :disabled="!isInputUrlValid || isFetching"
+              :disabled="!isInputUrlValid || isFetching || parseBusy"
               class="btn-secondary !px-3 !py-2 text-sm flex items-center gap-1.5 flex-shrink-0"
             >
               <Search v-if="!isFetching" :size="14" />
@@ -550,6 +399,7 @@ onUnmounted(() => {
           <p class="text-xs text-text-muted mt-2">
             支持标准 HLS / m3u8 流媒体地址。对于视频网站，可输入网页地址后点击"从网页提取"自动获取真实链接。
           </p>
+          <p v-if="variantsLoading" class="text-xs text-accent-blue mt-1.5">正在检测清晰度...</p>
 
           <!-- Fetched URLs -->
           <div
@@ -627,14 +477,14 @@ onUnmounted(() => {
           <h3 class="text-sm font-semibold text-text-primary mb-3">输出设置</h3>
           <div class="flex gap-2 flex-wrap mb-3">
             <button
-              @click="selectQuickDir('desktop')"
+              @click="handleSelectQuickDir('desktop')"
               class="btn-secondary !px-3 !py-1.5 text-xs"
               :disabled="loadingPath === 'desktop'"
             >
               <Monitor :size="14" /> {{ loadingPath === 'desktop' ? '加载中...' : '桌面' }}
             </button>
             <button
-              @click="selectQuickDir('downloads')"
+              @click="handleSelectQuickDir('downloads')"
               class="btn-secondary !px-3 !py-1.5 text-xs"
               :disabled="loadingPath === 'downloads'"
             >
@@ -747,12 +597,12 @@ onUnmounted(() => {
 
         <!-- Download Queue -->
         <DownloadQueue
-          @retry="handleQueueRetry"
-          @remove="handleQueueRemove"
-          @cancel="handleQueueCancel"
-          @pause="handleQueuePause"
-          @resume="handleQueueResume"
-          @clear-terminal="handleClearTerminal"
+          @retry="retryQueueItem"
+          @remove="removeQueueItem"
+          @cancel="cancelQueueItem"
+          @pause="pauseQueueItem"
+          @resume="resumeQueueItem"
+          @clear-terminal="clearQueueTerminal"
         />
 
         <!-- Progress (for non-queue operations) -->

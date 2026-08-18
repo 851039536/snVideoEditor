@@ -1,3 +1,4 @@
+// 下载队列管理：并发调度、暂停/恢复/取消/重试与磁盘持久化
 import { app } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -11,6 +12,9 @@ const MAX_QUEUE_SIZE = 100
 
 /** Debounce delay (ms) for saveToDisk to avoid excessive writes on progress updates. */
 const SAVE_DEBOUNCE_MS = 1000
+
+/** 同一队列项两次进度推送的最小间隔（毫秒），用于降低 IPC 频率 */
+const PROGRESS_THROTTLE_MS = 250
 
 export interface QueueItem {
   id: string
@@ -56,6 +60,8 @@ export class DownloadQueueManager {
   private progressCb: QueueProgressCallback | null = null
   private statusCb: QueueStatusCallback | null = null
   private saveTimer: ReturnType<typeof setTimeout> | null = null
+  /** 各队列项上次进度推送的时间与百分比，用于 IPC 节流 */
+  private lastProgressPush = new Map<string, { time: number; percent: number }>()
 
   static getInstance(): DownloadQueueManager {
     if (!instance) {
@@ -249,7 +255,9 @@ export class DownloadQueueManager {
 
   getStatus(): QueueStatus {
     return {
-      items: [...this.items],
+      // 剔除 headers（可能内嵌大体积 Cookie）：渲染层不使用，
+      // 持久化也直接读 this.items 原数据，不受影响
+      items: this.items.map(({ headers: _headers, ...rest }) => rest),
       isProcessing: this.isProcessing,
       activeIds: [...this.activeIds],
       concurrency: this.concurrency
@@ -367,8 +375,23 @@ export class DownloadQueueManager {
 
   private notifyProgress(
     itemId: string,
-    data: { percent: number; speed: string; eta: string }
+    data: { percent: number; speed: string; eta: string },
+    force = false
   ): void {
+    // 按队列项节流：距上次推送不足 PROGRESS_THROTTLE_MS 且整百分数未变化时跳过；
+    // force=true（终态推送）始终绕过节流，保证 100%/终态必达
+    if (!force) {
+      const now = Date.now()
+      const last = this.lastProgressPush.get(itemId)
+      if (
+        last &&
+        now - last.time < PROGRESS_THROTTLE_MS &&
+        Math.floor(data.percent) === Math.floor(last.percent)
+      ) {
+        return
+      }
+      this.lastProgressPush.set(itemId, { time: now, percent: data.percent })
+    }
     if (this.progressCb) {
       this.progressCb(itemId, data)
     }
@@ -474,7 +497,8 @@ export class DownloadQueueManager {
         this.activeIds.delete(item.id)
         this.activeProcs.delete(item.id)
         this.activeAbortControllers.delete(item.id)
-        this.notifyProgress(item.id, item.progress)
+        this.lastProgressPush.delete(item.id)
+        this.notifyProgress(item.id, item.progress, true)
         this.notifyStatus()
 
         // Release slot: try to dispatch next pending item

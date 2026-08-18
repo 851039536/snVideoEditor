@@ -1,15 +1,14 @@
 // 网页路径解析与勾选入队逻辑
-import { reactive, ref } from 'vue';
-import type { InjectionKey, Ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
+import type { ComputedRef, InjectionKey, Ref } from 'vue';
 import { sanitizeFileName, todayDateStr } from '@/utils/format';
 import { buildCookieHeader } from '@/utils/cookies';
-import { buildOriginHeaders } from '@/utils/url';
-import { confirmIfDownloadDuplicate } from '@/utils/download';
+import { buildOriginHeaders, DEFAULT_UA } from '@/utils/url';
+import { confirmDownloadDuplicatesBatch } from '@/utils/download';
 import type { WebPageEntry, WebPageParseState } from '@/views/Download/types';
 
-/** 与 DownloadView 保持一致的默认 UA */
-const DEFAULT_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+/** 手动提取（「从网页提取」）占用互斥锁时的哨兵 id */
+const MANUAL_FETCH_ID = '__manual__';
 
 /** 批量入队结果统计 */
 export interface EnqueueResult {
@@ -22,7 +21,10 @@ export interface UseWebPageParseReturn {
   parseStates: Record<string, WebPageParseState>;
   parsingId: Ref<string>;
   enqueueingId: Ref<string>;
-  getState: (entryId: string) => WebPageParseState | undefined;
+  /** 是否有解析/手动提取正在进行（互斥锁被占用） */
+  isBusy: ComputedRef<boolean>;
+  /** 手动提取（「从网页提取」）占用/释放同一互斥锁，防止与解析并发串扰 */
+  setManualFetching: (busy: boolean) => void;
   parseEntry: (entry: WebPageEntry) => Promise<void>;
   toggleLink: (entryId: string, linkIndex: number) => void;
   toggleAll: (entryId: string, selected: boolean) => void;
@@ -46,9 +48,18 @@ export function useWebPageParse(): UseWebPageParseReturn {
   const parsingId = ref('');
   // 批量入队幂等保护：防止快速双击重复入队
   const enqueueingId = ref('');
+  /** 是否有解析或手动提取进行中（与解析共用同一互斥锁） */
+  const isBusy = computed((): boolean => parsingId.value !== '');
 
-  function getState(entryId: string): WebPageParseState | undefined {
-    return parseStates[entryId];
+  /** 手动提取（「从网页提取」）占用/释放互斥锁；占用时解析按钮同步被禁用 */
+  function setManualFetching(busy: boolean): void {
+    if (busy) {
+      if (!parsingId.value) {
+        parsingId.value = MANUAL_FETCH_ID;
+      }
+    } else if (parsingId.value === MANUAL_FETCH_ID) {
+      parsingId.value = '';
+    }
   }
 
   /** 解析单条网页路径，提取页面中的 m3u8 链接 */
@@ -104,6 +115,11 @@ export function useWebPageParse(): UseWebPageParseReturn {
     return headers;
   }
 
+  /** 按序号生成下载文件名：多链接时追加序号避免同页重名 */
+  function buildFileName(baseName: string, index: number, total: number, dateStr: string): string {
+    return total > 1 ? `${baseName}_${index + 1}_${dateStr}.mp4` : `${baseName}_${dateStr}.mp4`;
+  }
+
   /** 将勾选的链接逐条加入下载队列，返回成功/失败/跳过数 */
   async function enqueueSelected(entry: WebPageEntry, outputDir: string): Promise<EnqueueResult> {
     const result: EnqueueResult = { ok: 0, fail: 0, skipped: 0 };
@@ -116,19 +132,18 @@ export function useWebPageParse(): UseWebPageParseReturn {
       const selectedLinks = state.links.filter((l) => l.selected);
       const baseName = sanitizeFileName(state.pageTitle) || 'video';
       const dateStr = todayDateStr();
+      // 先为全部勾选链接生成文件名并批量查重，命中重复时仅弹一次汇总确认，
+      // 用户选择「取消」时返回重复项集合，对应链接直接跳过
+      const fileNames = selectedLinks.map((_l, i) => buildFileName(baseName, i, selectedLinks.length, dateStr));
+      const duplicates = await confirmDownloadDuplicatesBatch(fileNames);
       for (let i = 0; i < selectedLinks.length; i++) {
         const link = selectedLinks[i];
-        // 多链接时追加序号，避免同页多个链接互相重名
-        const fileName = selectedLinks.length > 1
-          ? `${baseName}_${i + 1}_${dateStr}.mp4`
-          : `${baseName}_${dateStr}.mp4`;
+        const fileName = fileNames[i];
+        if (duplicates.has(fileName)) {
+          result.skipped++;
+          continue;
+        }
         try {
-          // 下载历史查重：重复时弹确认框，拒绝则跳过该条
-          const confirmed = await confirmIfDownloadDuplicate(fileName);
-          if (!confirmed) {
-            result.skipped++;
-            continue;
-          }
           await window.electronAPI.enqueueDownload({
             url: link.url,
             output: outputDir.replace(/\\/g, '/') + '/' + fileName,
@@ -162,7 +177,8 @@ export function useWebPageParse(): UseWebPageParseReturn {
     parseStates,
     parsingId,
     enqueueingId,
-    getState,
+    isBusy,
+    setManualFetching,
     parseEntry,
     toggleLink,
     toggleAll,
