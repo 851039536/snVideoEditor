@@ -26,6 +26,21 @@ export function useDownloadQueueSync() {
     await window.electronAPI.retryQueueItem(id);
   }
 
+  /** 一键重新入队所有失败项 */
+  async function retryAllFailed(): Promise<void> {
+    await window.electronAPI.retryAllFailed();
+  }
+
+  /** 用系统默认播放器打开已完成的文件 */
+  function openFileItem(filePath: string): void {
+    window.electronAPI.openFile(filePath);
+  }
+
+  /** 在资源管理器中显示并选中文件 */
+  function revealItemInFolder(filePath: string): void {
+    window.electronAPI.revealItem(filePath);
+  }
+
   async function removeQueueItem(id: string): Promise<void> {
     await window.electronAPI.removeQueueItem(id);
   }
@@ -89,6 +104,9 @@ export function useDownloadQueueSync() {
     setConcurrency,
     cancelAllDownloads,
     retryQueueItem,
+    retryAllFailed,
+    openFileItem,
+    revealItemInFolder,
     removeQueueItem,
     cancelQueueItem,
     pauseQueueItem,

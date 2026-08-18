@@ -3,7 +3,7 @@
 import { computed } from 'vue'
 import { useProgressStore } from '@/stores/progress'
 import {
-  Download, Check, X, AlertTriangle, Clock, Trash2, RotateCcw, ListOrdered, ListChecks, Eraser, Pause, Play
+  Download, Check, X, AlertTriangle, Clock, Trash2, RotateCcw, ListOrdered, ListChecks, Eraser, Pause, Play, FolderOpen
 } from 'lucide-vue-next'
 import { truncateUrl } from '@/utils/format'
 
@@ -11,11 +11,14 @@ const store = useProgressStore()
 
 const emit = defineEmits<{
   retry: [id: string]
+  retryAll: []
   remove: [id: string]
   cancel: [id: string]
   pause: [id: string]
   resume: [id: string]
   clearTerminal: []
+  openFile: [path: string]
+  revealItem: [path: string]
 }>()
 
 const STATUS_CONFIG = {
@@ -84,6 +87,14 @@ const allSettled = computed((): boolean =>
         </div>
       </div>
       <div class="flex items-center gap-2">
+        <button
+          v-if="statusCounts.failed > 0"
+          @click="emit('retryAll')"
+          class="btn-secondary !px-2 !py-1 text-xs flex items-center gap-1"
+          title="重新入队所有失败项"
+        >
+          <RotateCcw :size="12" /> 重试全部失败
+        </button>
         <button
           v-if="hasTerminalItems"
           @click="emit('clearTerminal')"
@@ -172,6 +183,23 @@ const allSettled = computed((): boolean =>
 
           <!-- Actions -->
           <div class="flex items-center gap-1 flex-shrink-0">
+            <!-- 已完成项：打开文件 / 在文件夹中显示 -->
+            <button
+              v-if="item.status === 'completed' && item.output"
+              @click="emit('openFile', item.output)"
+              class="p-1.5 rounded-md hover:bg-accent-blue/20 text-text-muted hover:text-accent-blue transition-colors"
+              title="用默认播放器打开"
+            >
+              <Play :size="13" />
+            </button>
+            <button
+              v-if="item.status === 'completed' && item.output"
+              @click="emit('revealItem', item.output)"
+              class="p-1.5 rounded-md hover:bg-accent-blue/20 text-text-muted hover:text-accent-blue transition-colors"
+              title="在文件夹中显示"
+            >
+              <FolderOpen :size="13" />
+            </button>
             <button
               v-if="item.status === 'downloading'"
               @click="emit('pause', item.id)"

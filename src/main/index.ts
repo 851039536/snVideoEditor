@@ -460,6 +460,11 @@ function registerDownloadHandlers(): void {
     return queueManager.retryItem(id);
   });
 
+  // Retry all failed items at once
+  ipcMain.handle('download:retryAllFailed', async () => {
+    return queueManager.retryAllFailed();
+  });
+
   // Get current queue status
   ipcMain.handle('download:getStatus', async () => {
     return queueManager.getStatus();
@@ -581,6 +586,28 @@ function registerAppHandlers(): void {
   ipcMain.handle('app:openFolder', async (_event, folderPath: string) => {
     const { shell } = await import('electron');
     return shell.openPath(folderPath);
+  });
+
+  // 用系统默认程序打开文件（如视频播放器）
+  ipcMain.handle('app:openFile', async (_event, filePath: string) => {
+    const { shell } = await import('electron');
+    return shell.openPath(filePath);
+  });
+
+  // 在资源管理器中显示并选中文件
+  ipcMain.handle('app:revealItem', async (_event, filePath: string) => {
+    const { shell } = await import('electron');
+    shell.showItemInFolder(filePath);
+  });
+
+  // 查询目标路径所在磁盘的剩余空间（字节），失败返回 null
+  ipcMain.handle('app:getDiskFree', async (_event, targetPath: string) => {
+    try {
+      const stat = await fs.promises.statfs(targetPath);
+      return stat.bavail * stat.bsize;
+    } catch {
+      return null;
+    }
   });
 
   ipcMain.handle('app:getCommonPaths', () => {

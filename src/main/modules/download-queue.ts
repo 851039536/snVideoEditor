@@ -176,6 +176,25 @@ export class DownloadQueueManager {
     return true
   }
 
+  /** Retry all failed items at once. Returns the number of items requeued. */
+  retryAllFailed(): number {
+    let count = 0
+    for (const item of this.items) {
+      if (item.status === 'failed') {
+        item.status = 'pending'
+        item.progress = { percent: 0, speed: '', eta: '' }
+        item.error = undefined
+        item.pausedAtPercent = undefined
+        count++
+      }
+    }
+    if (count > 0) {
+      this.notifyStatus()
+      this.scheduleTasks()
+    }
+    return count
+  }
+
   cancelAll(): void {
     // Abort all active download controllers first
     for (const ac of this.activeAbortControllers.values()) {
@@ -286,7 +305,7 @@ export class DownloadQueueManager {
   /** Immediately save queue state to disk (call on app quit). */
   doSaveToDisk(): void {
     try {
-      const data = JSON.stringify({ items: this.items })
+      const data = JSON.stringify({ items: this.items, concurrency: this.concurrency })
       fs.writeFileSync(this.getQueueFilePath(), data, 'utf-8')
     } catch {
       // Silently ignore write failures
@@ -299,8 +318,13 @@ export class DownloadQueueManager {
       const filePath = this.getQueueFilePath()
       if (!fs.existsSync(filePath)) { return }
       const data = fs.readFileSync(filePath, 'utf-8')
-      const parsed = JSON.parse(data) as { items: QueueItem[] }
+      const parsed = JSON.parse(data) as { items: QueueItem[]; concurrency?: number }
       if (!parsed.items || !Array.isArray(parsed.items)) { return }
+
+      // 恢复上次设置的并发数（钳位 1-8，缺失时保持默认）
+      if (typeof parsed.concurrency === 'number') {
+        this.concurrency = Math.max(1, Math.min(8, Math.round(parsed.concurrency)))
+      }
 
       // Restore items: downloading/merging → pending (needs re-scheduling), others keep state
       for (const item of parsed.items) {

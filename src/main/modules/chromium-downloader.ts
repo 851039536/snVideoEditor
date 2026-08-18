@@ -401,8 +401,10 @@ async function convertLocalM3u8(
         const percent = Math.min(88 + Math.round((segmentPercent * 11) / 100), 99)
         opts.onProgress({
           percent,
-          speed: parsed.speed,
-          eta: parsed.time,
+          // 转码阶段 ffmpeg 的 speed 是倍速（如 1.5x）而非下载速率，
+          // 直接展示会误导，统一改为阶段文案
+          speed: '转码中...',
+          eta: '',
           phase: 'merge'
         })
       }

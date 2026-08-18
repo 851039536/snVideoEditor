@@ -75,6 +75,9 @@ export interface ElectronAPI {
   // App info
   getTempDir: () => Promise<string>;
   openFolder: (folderPath: string) => Promise<string>;
+  openFile: (filePath: string) => Promise<string>;
+  revealItem: (filePath: string) => Promise<void>;
+  getDiskFree: (targetPath: string) => Promise<number | null>;
   getCommonPaths: () => Promise<{ desktop: string; downloads: string }>;
 
   // File operations
@@ -313,6 +316,8 @@ export interface ElectronAPI {
   clearQueueTerminal: () => Promise<number>;
 
   retryQueueItem: (id: string) => Promise<boolean>;
+
+  retryAllFailed: () => Promise<number>;
 
   getQueueStatus: () => Promise<QueueStatusDTO>;
 

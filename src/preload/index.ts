@@ -64,6 +64,12 @@ const electronAPI = {
 
   openFolder: (folderPath: string): Promise<string> => ipcRenderer.invoke('app:openFolder', folderPath),
 
+  openFile: (filePath: string): Promise<string> => ipcRenderer.invoke('app:openFile', filePath),
+
+  revealItem: (filePath: string): Promise<void> => ipcRenderer.invoke('app:revealItem', filePath),
+
+  getDiskFree: (targetPath: string): Promise<number | null> => ipcRenderer.invoke('app:getDiskFree', targetPath),
+
   getCommonPaths: (): Promise<{ desktop: string; downloads: string }> => ipcRenderer.invoke('app:getCommonPaths'),
 
   // File operations
@@ -360,6 +366,8 @@ const electronAPI = {
   clearQueueTerminal: (): Promise<number> => ipcRenderer.invoke('download:clearTerminal'),
 
   retryQueueItem: (id: string): Promise<boolean> => ipcRenderer.invoke('download:retryQueueItem', id),
+
+  retryAllFailed: (): Promise<number> => ipcRenderer.invoke('download:retryAllFailed'),
 
   getQueueStatus: (): Promise<QueueStatusDTO> => ipcRenderer.invoke('download:getStatus'),
 

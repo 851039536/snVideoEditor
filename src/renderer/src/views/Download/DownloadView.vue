@@ -19,7 +19,8 @@ import ProgressPanel from '@/components/ProgressPanel.vue';
 import DownloadQueue from '@/views/Download/DownloadQueue.vue';
 import WebPagePanel from '@/views/Download/WebPagePanel.vue';
 import { useProgressStore } from '@/stores/progress';
-import { getDirName } from '@/utils/format';
+import { useSettingsStore } from '@/stores/settings';
+import { getDirName, formatSize, todayDateStr } from '@/utils/format';
 import { buildCookieHeader } from '@/utils/cookies';
 import { isValidUrl, buildOriginHeaders, DEFAULT_UA } from '@/utils/url';
 import { confirmIfDownloadDuplicate } from '@/utils/download';
@@ -30,6 +31,7 @@ import { useDownloadQueueSync } from '@/views/Download/useDownloadQueueSync';
 import type { RawCookie } from '@/types/file';
 
 const progressStore = useProgressStore();
+const settingsStore = useSettingsStore();
 
 // ─── URL input ───────────────────────────────────────────────────────────────
 
@@ -120,6 +122,9 @@ const {
   setConcurrency,
   cancelAllDownloads,
   retryQueueItem,
+  retryAllFailed,
+  openFileItem,
+  revealItemInFolder,
   removeQueueItem,
   cancelQueueItem,
   pauseQueueItem,
@@ -132,6 +137,23 @@ const {
 const parse = useWebPageParse();
 provide(webPageParseKey, parse);
 const { isBusy: parseBusy, setManualFetching } = parse;
+
+// ─── 磁盘剩余空间提示 ────────────────────────────────────────────────────────
+
+const diskFreeBytes = ref<number | null>(null);
+
+// 选定目录后查询所在磁盘剩余空间，不足 1GB 时以警告色展示
+watch(outputDir, async (dir): Promise<void> => {
+  diskFreeBytes.value = null;
+  if (!dir) {
+    return;
+  }
+  try {
+    diskFreeBytes.value = await window.electronAPI.getDiskFree(dir);
+  } catch {
+    /* 查询失败时静默，不展示 */
+  }
+});
 
 // ─── URL watcher：自动文件名 / Cookie 同步 / 清晰度探测 ──────────────────────────
 
@@ -318,12 +340,14 @@ async function enqueueDownload(): Promise<void> {
       return;
     }
 
+    const enqueuedName = fileName.value;
     await window.electronAPI.enqueueDownload({
       url,
       output: outputPath.value,
       headers: { ...headers },
-      fileName: fileName.value
+      fileName: enqueuedName
     });
+    prepareNextFileName(enqueuedName);
     justEnqueued.value = true;
     if (justEnqueuedTimer) {
       clearTimeout(justEnqueuedTimer);
@@ -338,10 +362,40 @@ async function enqueueDownload(): Promise<void> {
   }
 }
 
+/** 入队成功后备好下一个文件名：同基础名递增序号，避免与队列中已有文件重名 */
+function prepareNextFileName(enqueuedName: string): void {
+  const ts = todayDateStr();
+  // 自动文件名必以「_日期.mp4」结尾，去掉后缀得到基础名（保留标题中的数字，如 EP_12）
+  const autoBase = autoFileName.value.slice(0, -`_${ts}.mp4`.length);
+  let base: string;
+  if (enqueuedName === autoFileName.value || enqueuedName.startsWith(`${autoBase}_`)) {
+    // 自动命名族（含之前自动追加的序号名）：从标题/URL 推导的基础名出发
+    base = autoBase;
+  } else {
+    // 用户手动改过名：从入队名剥离末尾的序号与日期后缀
+    base = enqueuedName.replace(/(?:_\d+)?_\d{8}\.mp4$/, '');
+  }
+  if (!base) {
+    return;
+  }
+  const used = new Set(progressStore.queueItems.map((i) => i.fileName));
+  used.add(enqueuedName);
+  let n = 2;
+  while (used.has(`${base}_${n}_${ts}.mp4`)) {
+    n++;
+  }
+  fileName.value = `${base}_${n}_${ts}.mp4`;
+}
+
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 onMounted(async () => {
   fetchCommonPaths();
+
+  // 恢复上次使用的输出目录（localStorage 持久化）
+  if (!outputDir.value && settingsStore.outputDirectory) {
+    outputDir.value = settingsStore.outputDirectory;
+  }
 
   // Fetch download history JSON path
   try {
@@ -349,6 +403,11 @@ onMounted(async () => {
   } catch {
     /* ignore */
   }
+});
+
+// 选定目录后同步持久化，下次进入页面自动恢复
+watch(outputDir, (dir): void => {
+  settingsStore.setOutputDirectory(dir);
 });
 
 onUnmounted(() => {
@@ -513,7 +572,14 @@ onUnmounted(() => {
               <ExternalLink :size="10" /> 打开
             </button>
           </div>
-          <p v-else class="text-xs text-text-muted mb-3">请选择保存目录</p>
+          <p
+            v-if="outputDir && diskFreeBytes !== null"
+            class="text-[10px] mb-3"
+            :class="diskFreeBytes < 1024 * 1024 * 1024 ? 'text-danger' : 'text-text-muted'"
+          >
+            磁盘剩余空间: {{ formatSize(diskFreeBytes) }}{{ diskFreeBytes < 1024 * 1024 * 1024 ? '（空间不足，请更换目录）' : '' }}
+          </p>
+          <p v-if="!outputDir" class="text-xs text-text-muted mb-3">请选择保存目录</p>
 
           <div>
             <label class="text-xs text-text-secondary mb-1 block">文件名</label>
@@ -614,11 +680,14 @@ onUnmounted(() => {
         <!-- Download Queue -->
         <DownloadQueue
           @retry="retryQueueItem"
+          @retry-all="retryAllFailed"
           @remove="removeQueueItem"
           @cancel="cancelQueueItem"
           @pause="pauseQueueItem"
           @resume="resumeQueueItem"
           @clear-terminal="clearQueueTerminal"
+          @open-file="openFileItem"
+          @reveal-item="revealItemInFolder"
         />
 
         <!-- Progress (for non-queue operations) -->
