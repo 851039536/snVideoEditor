@@ -107,6 +107,13 @@ async function handleSelectQuickDir(type: 'desktop' | 'downloads'): Promise<void
   }
 }
 
+/** 打开当前保存目录 */
+async function openOutputDir(): Promise<void> {
+  if (outputDir.value) {
+    await window.electronAPI.openFolder(outputDir.value);
+  }
+}
+
 // ─── Download queue sync（监听器绑定组件生命周期） ─────────────────────────────
 
 const {
@@ -494,9 +501,18 @@ onUnmounted(() => {
               <Folder :size="14" /> 自定义
             </button>
           </div>
-          <p v-if="outputDir" class="text-xs text-accent-light mb-3 truncate flex items-center gap-1">
-            <FolderOpen :size="12" /> {{ outputDir }}
-          </p>
+          <div v-if="outputDir" class="flex items-center gap-1.5 mb-3 min-w-0">
+            <p class="text-xs text-accent-light truncate flex items-center gap-1 flex-1 min-w-0">
+              <FolderOpen :size="12" class="flex-shrink-0" /> {{ outputDir }}
+            </p>
+            <button
+              @click="openOutputDir"
+              class="btn-secondary !px-2 !py-0.5 text-xs flex items-center gap-1 flex-shrink-0"
+              title="打开保存目录"
+            >
+              <ExternalLink :size="10" /> 打开
+            </button>
+          </div>
           <p v-else class="text-xs text-text-muted mb-3">请选择保存目录</p>
 
           <div>
