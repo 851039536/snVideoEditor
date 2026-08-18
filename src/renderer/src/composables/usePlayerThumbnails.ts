@@ -10,6 +10,8 @@ export function usePlayerThumbnails(deps: {
   currentFile: Ref<PlayerEntry | null>;
   tempDir: Ref<string>;
 }) {
+  // 会话级缓存条目上限，超出时淘汰最早生成的条目，避免长会话内存增长
+  const THUMBNAIL_CACHE_MAX = 20;
   const thumbnailGenerating = ref(false);
   const thumbnailData = ref<ThumbnailData | null>(null);
   // Session-level cache: video path -> sprite/vtt, avoids regenerating on re-select
@@ -77,6 +79,14 @@ export function usePlayerThumbnails(deps: {
         const data: ThumbnailData = { spriteUrl: result.spriteUrl, vttUrl: result.vttUrl };
         thumbnailData.value = data;
         thumbnailCache.set(cf.path, data);
+        // Map 保持插入顺序，超限时淘汰最早插入的条目
+        while (thumbnailCache.size > THUMBNAIL_CACHE_MAX) {
+          const oldest = thumbnailCache.keys().next().value;
+          if (oldest === undefined) {
+            break;
+          }
+          thumbnailCache.delete(oldest);
+        }
       }
     } catch (_e) {
       // Silently skip — thumbnail generation is best-effort

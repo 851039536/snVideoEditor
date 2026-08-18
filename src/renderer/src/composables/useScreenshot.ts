@@ -100,6 +100,8 @@ export function useScreenshot(deps: {
     capturing.value = true;
     captureProgress.value = { current: 0, total };
 
+    // 循环内仅收集成功的时间点，结束后统一编号并一次性渲染，避免逐帧重建 marker DOM（O(n²)）
+    const capturedTimes: number[] = [];
     for (let i = 0; i < total; i++) {
       captureProgress.value.current = i + 1;
       const timeSec = i * batchInterval.value;
@@ -108,11 +110,24 @@ export function useScreenshot(deps: {
       try {
         const ok = await doCapture(timeSec, output);
         if (ok) {
-          addMarker(timeSec);
+          capturedTimes.push(timeSec);
         }
       } catch {
         // continue to next
       }
+    }
+
+    for (const timeSec of capturedTimes) {
+      const rounded = Math.round(timeSec);
+      if (deps.screenshotMarkers.value.some((m) => Math.abs(m.time - rounded) < 1)) {
+        continue;
+      }
+      const label = `截图 ${deps.screenshotMarkers.value.length + 1}`;
+      deps.screenshotMarkers.value.push({ time: rounded, label });
+    }
+    if (capturedTimes.length > 0) {
+      renderMarkers();
+      deps.saveToStore();
     }
 
     capturing.value = false;
@@ -225,20 +240,14 @@ export function useScreenshot(deps: {
     capturing,
     captureProgress,
     screenshotMode,
-    // Helpers
-    getScreenshotInputPath,
-    getScreenshotBasePath,
     // Actions
     openScreenshotModal,
     closeScreenshotModal,
     captureCurrentFrame,
     captureByTime,
     batchCapture,
-    doSingleCapture,
     // Markers
-    addMarker,
     addCurrentMarker,
-    removeMarkerByIndex,
     clearAllMarkers,
     renderMarkers
   };

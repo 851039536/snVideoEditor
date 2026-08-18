@@ -1,43 +1,22 @@
-<!-- 视频播放器页面：播放列表、Plyr 播放、解密播放、缩略图与截图 -->
+<!-- 视频播放器页面：播放列表、解密播放调度、持久化与生命周期接线 -->
 <script setup lang="ts">
-import { ref, shallowRef, computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, watch } from 'vue';
-import {
-  Play,
-  Lock,
-  LockKeyholeOpen,
-  FileVideo,
-  FolderOpen,
-  Trash2,
-  Camera,
-  X,
-  Eye,
-  EyeOff,
-  Gauge,
-  Bookmark,
-  SkipBack,
-  SkipForward,
-  StepBack,
-  StepForward,
-  Repeat,
-  Repeat1,
-  Shuffle,
-  PictureInPicture
-} from 'lucide-vue-next';
-// @ts-ignore - Plyr ESM default export
-import Plyr from 'plyr';
-import 'plyr/dist/plyr.css';
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, watch } from 'vue';
+import { Play, Lock, LockKeyholeOpen, FileVideo, FolderOpen, Trash2, Camera, X } from 'lucide-vue-next';
 import { formatSize, getFileName, toFileUrl } from '@/utils/format';
 import { secondsToHMS } from '@/utils/time';
 import type { VideoMeta } from '@/types/file';
 import { DEFAULT_ENCRYPT_KEY } from '@/config/crypto';
-import type { PlayerEntry, ScreenshotMarker, PlayMode } from './types';
+import type { PlayerEntry, ScreenshotMarker } from './types';
 import { resolvePlayablePath } from './types';
 import { useSettingsStore } from '@/stores/settings';
 import { useScreenshot } from '@/composables/useScreenshot';
 import { usePlayerThumbnails } from '@/composables/usePlayerThumbnails';
 import { usePlayerDecrypt } from '@/composables/usePlayerDecrypt';
+import { usePlyrPlayer } from '@/composables/usePlyrPlayer';
+import { usePlaybackQueue } from '@/composables/usePlaybackQueue';
 import { pLimit } from '@/utils/concurrency';
 import PlaylistPanel from './PlaylistPanel.vue';
+import PlayerToolbar from './PlayerToolbar.vue';
 import PasswordModal from './PasswordModal.vue';
 import ScreenshotModal from './ScreenshotModal.vue';
 
@@ -52,19 +31,10 @@ const currentIndex = ref(-1);
 const videoPlayer = ref<HTMLVideoElement | null>(null);
 const isPlaying = ref(false);
 const playerKey = ref(0);
-/** 响应式当前播放时间（供截图弹窗显示，由 timeupdate 驱动） */
-const reactiveCurrentTime = ref(0);
-
-// Plyr instance (shallowRef so it can be passed into composables)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const player = shallowRef<any>(null);
-// Path of the file the current player instance is actually playing (persistence key)
-const currentPlayingPath = ref('');
 
 // Temp dir — resolved once on mount, awaited before any decrypt
 const tempDir = ref('');
-let tempDirReady: Promise<void>;
-tempDirReady = (async (): Promise<void> => {
+const tempDirReady = (async (): Promise<void> => {
   try {
     tempDir.value = await window.electronAPI.getTempDir();
   } catch (_e) {
@@ -77,95 +47,6 @@ const errorMsg = ref('');
 
 // ---- Markers (screenshot positions on progress bar, shared with useScreenshot) ----
 const screenshotMarkers = ref<ScreenshotMarker[]>([]);
-
-// ---- Toolbar controls ----
-const showControlsOverlay = ref(false); // force-show controls bar
-const autoHideControls = ref(true); // auto-hide toggle
-const currentSpeed = ref(1); // synced with Plyr speed
-const speedOptions = [0.5, 0.75, 1, 1.25, 1.5, 2];
-
-function setSpeed(speed: number): void {
-  if (!player.value) {
-    return;
-  }
-  currentSpeed.value = speed;
-  player.value.speed = speed;
-}
-
-function toggleControlsOverlay(): void {
-  if (!player.value) {
-    return;
-  }
-  showControlsOverlay.value = !showControlsOverlay.value;
-  player.value.toggleControls(showControlsOverlay.value);
-}
-
-function toggleAutoHide(): void {
-  autoHideControls.value = !autoHideControls.value;
-}
-
-// ---- Play mode (sequential / repeat-all / repeat-one / shuffle) ----
-const playMode = ref<PlayMode>('sequential');
-const PLAY_MODES: PlayMode[] = ['sequential', 'repeat-all', 'repeat-one', 'shuffle'];
-
-function cyclePlayMode(): void {
-  const idx = PLAY_MODES.indexOf(playMode.value);
-  playMode.value = PLAY_MODES[(idx + 1) % PLAY_MODES.length];
-}
-
-const playModeLabel = computed((): string => {
-  switch (playMode.value) {
-    case 'repeat-all':
-      return '列表循环';
-    case 'repeat-one':
-      return '单曲循环';
-    case 'shuffle':
-      return '随机播放';
-    default:
-      return '顺序播放';
-  }
-});
-
-const playModeIcon = computed((): typeof Repeat => {
-  switch (playMode.value) {
-    case 'repeat-one':
-      return Repeat1;
-    case 'shuffle':
-      return Shuffle;
-    default:
-      return Repeat;
-  }
-});
-
-// ---- A-B loop ----
-const loopStart = ref<number | null>(null);
-const loopEnd = ref<number | null>(null);
-
-function setLoopA(): void {
-  if (!player.value) {
-    return;
-  }
-  const start = player.value.currentTime || 0;
-  loopStart.value = start;
-  if (loopEnd.value !== null && loopEnd.value <= start) {
-    loopEnd.value = null;
-  }
-}
-
-function setLoopB(): void {
-  if (!player.value) {
-    return;
-  }
-  const t = player.value.currentTime || 0;
-  if (loopStart.value !== null && t > loopStart.value) {
-    loopEnd.value = t;
-  }
-}
-
-function clearLoop(): void {
-  loopStart.value = null;
-  loopEnd.value = null;
-}
 
 // Persisted settings store
 const settingsStore = useSettingsStore();
@@ -208,57 +89,70 @@ const currentResolution = computed((): string => {
   return `${meta.width}×${meta.height}`;
 });
 
-const hasNext = computed((): boolean => {
-  return currentIndex.value < files.value.length - 1;
-});
-
-const hasPrev = computed((): boolean => {
-  return currentIndex.value > 0;
-});
-
-const canNext = computed((): boolean => {
-  if (playMode.value === 'repeat-all' || playMode.value === 'shuffle') {
-    return files.value.length > 1;
-  }
-  return hasNext.value;
-});
-
-const canPrev = computed((): boolean => {
-  if (playMode.value === 'repeat-all' || playMode.value === 'shuffle') {
-    return files.value.length > 1;
-  }
-  return hasPrev.value;
-});
-
 // ---- Thumbnails (composable) ----
 const { thumbnailData, generateThumbnailsIfNeeded, cancelThumbnailGeneration } = usePlayerThumbnails({
   currentFile,
   tempDir
 });
 
-// ---- Encrypted playback (composable) ----
+// ---- Playback queue (composable) ----
 const {
-  showPasswordModal,
-  decryptingFile,
-  autoDecrypt,
-  tempCount,
-  decryptAndPlay,
-  openPasswordModal,
-  confirmDecrypt,
-  cancelDecrypt,
-  cleanupTemp,
-  cleanupAllTemps
-} = usePlayerDecrypt({
+  playMode,
+  playModeLabel,
+  playModeIcon,
+  canNext,
+  canPrev,
+  cyclePlayMode,
+  playNext,
+  playPrev,
+  handleEnded
+} = usePlaybackQueue({
   files,
   currentIndex,
+  playFile: (index: number): void => {
+    void playFile(index);
+  },
+  replayCurrent
+});
+
+// ---- Plyr player (composable) ----
+const {
+  player,
+  currentPlayingPath,
+  reactiveCurrentTime,
+  currentSpeed,
+  speedOptions,
+  showControlsOverlay,
+  autoHideControls,
+  loopStart,
+  loopEnd,
+  initAndPlay,
+  destroyPlayer,
+  releaseVideoSource,
+  setSpeed,
+  toggleControlsOverlay,
+  toggleAutoHide,
+  setLoopA,
+  setLoopB,
+  clearLoop
+} = usePlyrPlayer({
+  videoPlayer,
+  videoSrc,
+  currentFile,
+  thumbnailData,
+  isPlaying,
   errorMsg,
-  tempDir,
-  tempDirReady,
-  loadMeta,
-  onDecrypted: async (): Promise<void> => {
-    await nextTick();
-    initAndPlay();
-    void generateThumbnailsIfNeeded();
+  shouldTrackTime: (): boolean => showScreenshotModal.value,
+  onPause: scheduleSave,
+  onEnded: (): void => {
+    flushSave();
+    handleEnded();
+  },
+  onInit: (): void => {
+    renderMarkers();
+  },
+  getSavedTime: (): number => {
+    return settingsStore.playerData.playbackTimes[currentFile.value?.path || ''] || 0;
   }
 });
 
@@ -287,6 +181,30 @@ const {
   saveToStore,
   generateThumbnailsIfNeeded,
   thumbnailData
+});
+
+// ---- Encrypted playback (composable) ----
+const {
+  showPasswordModal,
+  decryptingFile,
+  autoDecrypt,
+  tempCount,
+  decryptAndPlay,
+  openPasswordModal,
+  confirmDecrypt,
+  cancelDecrypt,
+  cleanupTemp,
+  cleanupAllTemps
+} = usePlayerDecrypt({
+  files,
+  currentIndex,
+  errorMsg,
+  tempDir,
+  tempDirReady,
+  loadMeta,
+  onDecrypted: async (): Promise<void> => {
+    await startPlayback();
+  }
 });
 
 // ---- Persistence -----
@@ -365,14 +283,6 @@ watch(
   }
 );
 
-// Reactively toggle Plyr auto-hide when user changes the switch
-watch(autoHideControls, (val): void => {
-  if (!player.value) {
-    return;
-  }
-  player.value.toggleControls(!val);
-});
-
 // ---- File Management ----
 function addFiles(paths: string[]): void {
   const existing = new Set(files.value.map((f) => f.path));
@@ -403,9 +313,7 @@ async function removeFile(index: number): Promise<void> {
   const wasCurrent = index === currentIndex.value;
   if (wasCurrent) {
     // 移除的是正在播放的文件：先释放播放器文件句柄并终止缩略图 ffmpeg，否则文件删除会失败
-    destroyPlayer();
-    releaseVideoSource();
-    await cancelThumbnailGeneration();
+    await releasePlaybackResources();
   }
 
   if (removed.tempPath) {
@@ -450,11 +358,16 @@ async function openTempDir(): Promise<void> {
   }
 }
 
-/** 重置播放状态并清理临时文件（clearList / rescanLastFolder 共用） */
-async function resetPlayback(): Promise<void> {
+/** 释放播放器与缩略图资源：销毁 Plyr、释放 video 句柄并终止缩略图 ffmpeg（多个流程共用） */
+async function releasePlaybackResources(): Promise<void> {
   destroyPlayer();
   releaseVideoSource();
   await cancelThumbnailGeneration();
+}
+
+/** 重置播放状态并清理临时文件（clearList / rescanLastFolder 共用） */
+async function resetPlayback(): Promise<void> {
+  await releasePlaybackResources();
   currentIndex.value = -1;
   await nextTick();
   await cleanupAllTemps();
@@ -521,14 +434,20 @@ async function loadAllMeta(): Promise<void> {
 }
 
 // ---- Playback ----
+/** 等待 video 元素重建后初始化 Plyr 播放并生成缩略图（解密完成/直接播放共用） */
+async function startPlayback(): Promise<void> {
+  await nextTick();
+  initAndPlay();
+  void generateThumbnailsIfNeeded();
+}
+
 async function playFile(index: number): Promise<void> {
+  // 切换前先落盘旧文件进度：player 实例即将被销毁，pause 事件时机不可靠
+  flushSave();
   errorMsg.value = '';
   clearLoop();
-  // 切换前释放上一个 video 元素的文件句柄（playerKey 重建元素不会自动释放）
-  destroyPlayer();
-  releaseVideoSource();
-  // 终止上一个文件的缩略图生成：释放其文件句柄，同时避免新任务因 thumbnail 锁冲突失败
-  await cancelThumbnailGeneration();
+  // 释放上一个 video 元素的文件句柄（playerKey 重建元素不会自动释放），并终止上一个文件的缩略图生成
+  await releasePlaybackResources();
   playerKey.value++;
   currentIndex.value = index;
   const file = files.value[index];
@@ -538,9 +457,7 @@ async function playFile(index: number): Promise<void> {
 
   if (file.isEncrypted) {
     if (file.tempPath) {
-      await nextTick();
-      initAndPlay();
-      void generateThumbnailsIfNeeded();
+      await startPlayback();
     } else if (autoDecrypt.value) {
       await decryptAndPlay(file, DEFAULT_ENCRYPT_KEY);
     } else {
@@ -555,63 +472,16 @@ async function playFile(index: number): Promise<void> {
         return;
       }
     }
-    await nextTick();
-    initAndPlay();
-    void generateThumbnailsIfNeeded();
+    await startPlayback();
   }
 }
 
-function playNext(): void {
-  if (playMode.value === 'shuffle') {
-    const idx = pickShuffleIndex();
-    if (idx >= 0) {
-      playFile(idx);
-    }
-    return;
+/** 单曲循环：从头重播当前文件（供 usePlaybackQueue 回调） */
+function replayCurrent(): void {
+  if (player.value) {
+    player.value.currentTime = 0;
+    void player.value.play().catch((): void => {});
   }
-  if (hasNext.value) {
-    playFile(currentIndex.value + 1);
-  } else if (playMode.value === 'repeat-all' && files.value.length > 0) {
-    playFile(0);
-  }
-}
-
-function playPrev(): void {
-  if (playMode.value === 'shuffle') {
-    const idx = pickShuffleIndex();
-    if (idx >= 0) {
-      playFile(idx);
-    }
-    return;
-  }
-  if (hasPrev.value) {
-    playFile(currentIndex.value - 1);
-  } else if (playMode.value === 'repeat-all' && files.value.length > 0) {
-    playFile(files.value.length - 1);
-  }
-}
-
-function pickShuffleIndex(): number {
-  const n = files.value.length;
-  if (n <= 1) {
-    return n === 1 ? 0 : -1;
-  }
-  let idx = currentIndex.value;
-  while (idx === currentIndex.value) {
-    idx = Math.floor(Math.random() * n);
-  }
-  return idx;
-}
-
-function handleEnded(): void {
-  if (playMode.value === 'repeat-one') {
-    if (player.value) {
-      player.value.currentTime = 0;
-      void player.value.play().catch((): void => {});
-    }
-    return;
-  }
-  playNext();
 }
 
 // ---- Frame step / Picture-in-Picture ----
@@ -679,145 +549,11 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
-// ---- Plyr ----
-function destroyPlayer(): void {
-  if (player.value) {
-    // Plyr 初始化时 cloneNode 备份了带 src 的原始 video，destroy 会把该克隆插回 DOM。
-    // 克隆 preload=auto 一进 DOM 就重新打开文件句柄，且 Vue 不感知该元素，必须手动中止并移除
-    const restored = player.value.elements?.original as HTMLVideoElement | undefined;
-    try {
-      player.value.destroy();
-    } catch (_e) {
-      /* ignore */
-    }
-    player.value = null;
-    if (restored && typeof restored.load === 'function') {
-      try {
-        restored.pause();
-        restored.removeAttribute('src');
-        restored.load();
-        restored.remove();
-      } catch (_e) {
-        /* ignore */
-      }
-    }
-  }
-  isPlaying.value = false;
-}
-
-/** 显式释放 video 元素资源（文件句柄 + 解码线程），避免 file:/// 延迟释放导致文件被线程占用无法删除 */
-function releaseVideoSource(): void {
-  const el = videoPlayer.value;
-  if (!el) {
-    return;
-  }
-  try {
-    el.pause();
-    el.removeAttribute('src');
-    el.load();
-  } catch (_e) {
-    /* ignore */
-  }
-}
-
-function initAndPlay(): void {
-  const el = videoPlayer.value;
-  if (!el || !videoSrc.value) {
-    return;
-  }
-
-  destroyPlayer();
-
-  player.value = new Plyr(el, {
-    controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'settings', 'fullscreen'],
-    settings: ['speed'],
-    speed: { selected: currentSpeed.value, options: speedOptions },
-    tooltips: { controls: true, seek: true },
-    keyboard: { focused: true, global: true },
-    fullscreen: { enabled: true, fallback: true },
-    hideControls: autoHideControls.value,
-    resetOnEnd: false,
-    previewThumbnails: thumbnailData.value
-      ? { enabled: true, src: thumbnailData.value.vttUrl }
-      : { enabled: false, src: '' }
-  });
-
-  currentPlayingPath.value = currentFile.value?.path || '';
-
-  // Manually render markers (Plyr only reads them at init — we handle updates ourselves)
-  renderMarkers();
-
-  player.value.on('ratechange', (): void => {
-    if (player.value) {
-      currentSpeed.value = player.value.speed;
-    }
-  });
-
-  // 始终注册 controlshidden 监听：用户可能在运行中切换 autoHideControls
-  player.value.on('controlshidden', (): void => {
-    if (!autoHideControls.value && player.value) {
-      player.value.toggleControls(true);
-    }
-  });
-
-  player.value.on('play', (): void => {
-    isPlaying.value = true;
-  });
-
-  player.value.on('pause', (): void => {
-    isPlaying.value = false;
-    scheduleSave();
-  });
-
-  // A-B loop enforcement + 响应式时间追踪
-  player.value.on('timeupdate', (): void => {
-    reactiveCurrentTime.value = player.value?.currentTime || 0;
-    if (loopStart.value !== null && loopEnd.value !== null && player.value) {
-      if (player.value.currentTime >= loopEnd.value) {
-        player.value.currentTime = loopStart.value;
-      }
-    }
-  });
-
-  player.value.on('ended', (): void => {
-    isPlaying.value = false;
-    flushSave();
-    handleEnded();
-  });
-
-  player.value.on('error', (): void => {
-    isPlaying.value = false;
-    errorMsg.value = '视频加载失败';
-  });
-
-  // Resume per-file playback position (once, on first canplay)
-  const savedTime = settingsStore.playerData.playbackTimes[currentFile.value?.path || ''] || 0;
-  let didResume = false;
-  player.value.on('canplay', (): void => {
-    if (didResume) {
-      return;
-    }
-    didResume = true;
-    if (savedTime > 1 && player.value && player.value.currentTime < 1) {
-      player.value.currentTime = savedTime;
-    }
-  });
-
-  void player.value.play().catch((): void => {
-    /* 忽略自动播放限制 */
-  });
-}
-
-// ---- Encryption Decrypt for Playback ----
-// 解密流程与临时文件清理已迁移至 usePlayerDecrypt composable
-
 /** 清理全部解密临时文件；若正在播放解密视频，先释放句柄再删除，否则删除会静默失败 */
 async function handleCleanupTemps(): Promise<void> {
   const cf = currentFile.value;
   if (cf?.isEncrypted && cf.tempPath) {
-    destroyPlayer();
-    releaseVideoSource();
-    await cancelThumbnailGeneration();
+    await releasePlaybackResources();
   }
   await cleanupAllTemps();
 }
@@ -987,180 +723,35 @@ onUnmounted(async (): Promise<void> => {
             </div>
 
             <!-- Player Toolbar (below video) -->
-            <div
+            <PlayerToolbar
               v-if="videoSrc"
-              class="player-toolbar flex flex-wrap items-center gap-1 px-3 py-2 border-t border-bg-tertiary/60"
-            >
-              <!-- Previous -->
-              <button
-                @click="playPrev"
-                :disabled="!canPrev"
-                class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors text-text-muted hover:text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed"
-                title="上一首 (P)"
-              >
-                <SkipBack :size="13" />
-              </button>
-
-              <!-- Next -->
-              <button
-                @click="playNext"
-                :disabled="!canNext"
-                class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors text-text-muted hover:text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed"
-                title="下一首 (N)"
-              >
-                <SkipForward :size="13" />
-              </button>
-
-              <!-- Play mode -->
-              <button
-                @click="cyclePlayMode"
-                :class="
-                  playMode !== 'sequential'
-                    ? 'text-accent-blue bg-accent-blue/10'
-                    : 'text-text-muted hover:text-text-secondary'
-                "
-                class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors"
-                :title="'播放模式：' + playModeLabel + ' (L)'"
-              >
-                <component :is="playModeIcon" :size="13" />
-                <span class="hidden sm:inline">{{ playModeLabel }}</span>
-              </button>
-
-              <span class="w-px h-4 bg-bg-tertiary" />
-
-              <!-- Controls Overlay Toggle -->
-              <button
-                @click="toggleControlsOverlay"
-                :class="
-                  showControlsOverlay
-                    ? 'text-accent-blue bg-accent-blue/10'
-                    : 'text-text-muted hover:text-text-secondary'
-                "
-                class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors"
-                :title="showControlsOverlay ? '隐藏控件栏' : '显示控件栏'"
-              >
-                <Eye v-if="!showControlsOverlay" :size="13" />
-                <EyeOff v-else :size="13" />
-                <span class="hidden sm:inline">控件栏</span>
-              </button>
-
-              <span class="w-px h-4 bg-bg-tertiary" />
-
-              <!-- Add Marker -->
-              <button
-                @click="addCurrentMarker"
-                class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors text-text-muted hover:text-accent-purple hover:bg-accent-purple/10"
-                title="在当前播放位置添加标记"
-              >
-                <Bookmark :size="13" />
-                <span class="hidden sm:inline">标记</span>
-              </button>
-
-              <!-- Clear All Markers -->
-              <button
-                v-if="screenshotMarkers.length > 0"
-                @click="clearAllMarkers"
-                class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors text-text-muted hover:text-danger hover:bg-danger/10"
-                title="清除全部标记（右键单个标记可单独删除）"
-              >
-                <X :size="13" />
-                <span class="hidden sm:inline">清除 ({{ screenshotMarkers.length }})</span>
-              </button>
-
-              <span class="w-px h-4 bg-bg-tertiary" />
-
-              <!-- A-B Loop -->
-              <button
-                @click="setLoopA"
-                :class="
-                  loopStart !== null
-                    ? 'text-accent-blue bg-accent-blue/10'
-                    : 'text-text-muted hover:text-text-secondary'
-                "
-                class="px-1.5 py-1 rounded text-xs font-mono font-semibold transition-colors"
-                :title="loopStart !== null ? 'A 点：' + secondsToHMS(loopStart) : '设置循环起点 A'"
-              >
-                A
-              </button>
-              <button
-                @click="setLoopB"
-                :disabled="loopStart === null"
-                :class="
-                  loopEnd !== null ? 'text-accent-blue bg-accent-blue/10' : 'text-text-muted hover:text-text-secondary'
-                "
-                class="px-1.5 py-1 rounded text-xs font-mono font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                :title="loopEnd !== null ? 'B 点：' + secondsToHMS(loopEnd) : '设置循环终点 B'"
-              >
-                B
-              </button>
-              <button
-                v-if="loopStart !== null || loopEnd !== null"
-                @click="clearLoop"
-                class="flex items-center px-1.5 py-1 rounded text-xs font-medium transition-colors text-text-muted hover:text-danger hover:bg-danger/10"
-                title="清除 A-B 循环"
-              >
-                <X :size="13" />
-              </button>
-
-              <span class="w-px h-4 bg-bg-tertiary" />
-
-              <!-- Frame step -->
-              <button
-                @click="stepBackward"
-                class="flex items-center px-1.5 py-1 rounded text-xs font-medium transition-colors text-text-muted hover:text-text-secondary"
-                title="上一帧 (,)"
-              >
-                <StepBack :size="13" />
-              </button>
-              <button
-                @click="stepForward"
-                class="flex items-center px-1.5 py-1 rounded text-xs font-medium transition-colors text-text-muted hover:text-text-secondary"
-                title="下一帧 (.)"
-              >
-                <StepForward :size="13" />
-              </button>
-
-              <!-- Picture in Picture -->
-              <button
-                @click="togglePip"
-                class="flex items-center px-1.5 py-1 rounded text-xs font-medium transition-colors text-text-muted hover:text-text-secondary"
-                title="画中画 (I)"
-              >
-                <PictureInPicture :size="13" />
-              </button>
-
-              <span class="w-px h-4 bg-bg-tertiary ml-auto" />
-
-              <!-- Speed Quick Selector -->
-              <div class="flex items-center gap-0.5">
-                <Gauge :size="12" class="text-text-muted mr-1" />
-                <button
-                  v-for="s in speedOptions"
-                  :key="s"
-                  @click="setSpeed(s)"
-                  :class="
-                    currentSpeed === s
-                      ? 'text-accent-blue bg-accent-blue/10 border-accent-blue/30'
-                      : 'text-text-muted border-transparent hover:text-text-secondary'
-                  "
-                  class="px-1.5 py-0.5 rounded text-xs font-mono font-medium transition-all border"
-                >
-                  {{ s }}×
-                </button>
-              </div>
-
-              <span class="w-px h-4 bg-bg-tertiary" />
-
-              <!-- Auto-Hide Controls Toggle -->
-              <button
-                @click="toggleAutoHide"
-                :class="autoHideControls ? 'text-text-muted' : 'text-accent-blue bg-accent-blue/10'"
-                class="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors hover:bg-bg-tertiary/40"
-                :title="autoHideControls ? '自动隐藏控件：开' : '自动隐藏控件：关'"
-              >
-                <span>{{ autoHideControls ? '自动隐藏：开' : '自动隐藏：关' }}</span>
-              </button>
-            </div>
+              :can-prev="canPrev"
+              :can-next="canNext"
+              :play-mode="playMode"
+              :play-mode-label="playModeLabel"
+              :play-mode-icon="playModeIcon"
+              :show-controls-overlay="showControlsOverlay"
+              :auto-hide-controls="autoHideControls"
+              :loop-start="loopStart"
+              :loop-end="loopEnd"
+              :current-speed="currentSpeed"
+              :speed-options="speedOptions"
+              :marker-count="screenshotMarkers.length"
+              @prev="playPrev"
+              @next="playNext"
+              @cycle-mode="cyclePlayMode"
+              @toggle-overlay="toggleControlsOverlay"
+              @toggle-auto-hide="toggleAutoHide"
+              @add-marker="addCurrentMarker"
+              @clear-markers="clearAllMarkers"
+              @set-loop-a="setLoopA"
+              @set-loop-b="setLoopB"
+              @clear-loop="clearLoop"
+              @step-backward="stepBackward"
+              @step-forward="stepForward"
+              @toggle-pip="togglePip"
+              @set-speed="setSpeed"
+            />
           </div>
         </div>
       </div>
