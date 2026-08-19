@@ -172,6 +172,7 @@ const electronAPI = {
     startTime?: number;
     duration?: number;
     loop: number;
+    speed?: number;
   }): Promise<boolean> => ipcRenderer.invoke('video:convertToGif', opts),
 
   batchConvertToGif: (opts: {
@@ -184,6 +185,7 @@ const electronAPI = {
       startTime?: number;
       duration?: number;
       loop: number;
+      speed?: number;
     }[];
   }): Promise<{ success: number; failed: string[] }> => ipcRenderer.invoke('video:batchConvertToGif', opts),
 

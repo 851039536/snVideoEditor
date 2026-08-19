@@ -9,7 +9,7 @@ import { clamp } from '@/utils/math'
 import { getFileName, toFileUrl } from '@/utils/format'
 import type { FileEntry } from '@/types/file'
 
-const props = defineProps<{ file: FileEntry }>()
+const props = defineProps<{ file: FileEntry; speed?: number }>()
 // 空格/回车快捷键触发转换，由父视图执行
 const emit = defineEmits<{ convert: [] }>()
 
@@ -24,6 +24,13 @@ const MIN_TRIM_GAP = 0.1
 
 const videoSrc = computed((): string => toFileUrl(props.file.path))
 
+/** 将预览播放速度同步到 video 元素（新文件加载后 playbackRate 会重置，需重新应用） */
+function applyPlaybackRate(): void {
+  if (videoPlayer.value) {
+    videoPlayer.value.playbackRate = props.speed && props.speed > 0 ? props.speed : 1
+  }
+}
+
 // ---- 视频播放器 ----
 const { videoPlayer, isPlaying, currentTime, togglePlay, onVideoPlay, onVideoStop, onTimeUpdate, onVideoError, onVideoLoaded, seekVideoPlayer } = useVideoPlayer({
   onTimeUpdate: (t, vp) => {
@@ -37,6 +44,7 @@ const { videoPlayer, isPlaying, currentTime, togglePlay, onVideoPlay, onVideoSto
   onLoaded: (vp) => {
     vp.currentTime = enableTrim.value ? trimStartSec.value : 0
     currentTime.value = enableTrim.value ? trimStartSec.value : 0
+    applyPlaybackRate()
   }
 })
 
@@ -84,6 +92,11 @@ watch(() => props.file.meta, (meta) => {
 // 切换截取开关时重置播放位置
 watch(enableTrim, (enabled) => {
   seekVideoPlayer(enabled ? trimStartSec.value : 0)
+})
+
+// 速度变化时即时同步预览播放速率
+watch(() => props.speed, () => {
+  applyPlaybackRate()
 })
 
 // ---- 步进 / 手柄定位 / 快捷键（复刻 SplitMerge） ----

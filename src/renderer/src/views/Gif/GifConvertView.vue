@@ -34,6 +34,19 @@ const WIDTH_OPTIONS: WidthOption[] = [
   { label: '800px', value: '800' }
 ]
 
+// 播放速度（>1 加速，<1 减速）
+const speed = ref(1)
+const SPEED_OPTIONS = [
+  { label: '0.5x', val: 0.5 },
+  { label: '0.75x', val: 0.75 },
+  { label: '1x', val: 1 },
+  { label: '1.2x', val: 1.2 },
+  { label: '1.5x', val: 1.5 },
+  { label: '2x', val: 2 },
+  { label: '3x', val: 3 },
+  { label: '4x', val: 4 }
+] as const
+
 // 片段截取状态（时间轴交互在 GifTrimCard 内，状态所有权归本视图）
 const enableTrim = ref(false)
 const trimStartSec = ref(0)
@@ -71,7 +84,8 @@ function estimateOutputSize(entry: FileEntry): string {
     ? Math.round(w * (entry.meta.height / entry.meta.width))
     : Math.round(w * 9 / 16)
   const pixels = w * h
-  const frames = duration * fps.value
+  // 变速后输出时长 = 输入时长 / speed，帧数随之变化
+  const frames = (duration / speed.value) * fps.value
   const factor = QUALITY_SIZE_FACTORS[selectedQuality.value]
   const estBytes = frames * pixels * factor * SIZE_ESTIMATE_FACTOR
   const estMB = estBytes / (1024 * 1024)
@@ -110,7 +124,8 @@ async function startConvert(): Promise<void> {
       quality: selectedQuality.value,
       startTime,
       duration,
-      loop: loopCount.value
+      loop: loopCount.value,
+      speed: speed.value
     }))
 
     let failedCount: number
@@ -171,6 +186,7 @@ onUnmounted(() => {
           v-model:trim-start="trimStartSec"
           v-model:trim-end="trimEndSec"
           v-model:max-duration="maxDuration"
+          :speed="speed"
           @convert="startConvert"
         />
 
@@ -259,6 +275,25 @@ onUnmounted(() => {
             <span>25</span>
             <span>30</span>
           </div>
+        </div>
+
+        <!-- 播放速度 -->
+        <div class="glass-card">
+          <h3 class="section-title">播放速度</h3>
+          <div class="flex gap-2 flex-wrap">
+            <button
+              v-for="opt in SPEED_OPTIONS"
+              :key="opt.val"
+              @click="speed = opt.val"
+              class="flex-1 min-w-[64px] py-2 rounded-lg text-sm transition-all border font-mono"
+              :class="speed === opt.val
+                ? 'bg-warning/10 border-warning/50 text-text-primary'
+                : 'bg-bg-tertiary/50 border-transparent text-text-secondary'"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+          <p class="text-xs text-text-muted mt-2">预览播放与输出 GIF 均按所选速度{{ speed > 1 ? '加速' : speed < 1 ? '减速' : '正常' }}播放</p>
         </div>
 
         <!-- 宽度选择 -->

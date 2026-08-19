@@ -166,6 +166,7 @@ export interface ElectronAPI {
     startTime?: number;
     duration?: number;
     loop: number;
+    speed?: number;
   }) => Promise<boolean>;
 
   batchConvertToGif: (opts: {
@@ -178,6 +179,7 @@ export interface ElectronAPI {
       startTime?: number;
       duration?: number;
       loop: number;
+      speed?: number;
     }[];
   }) => Promise<{ success: number; failed: string[] }>;
 

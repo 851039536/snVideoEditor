@@ -272,6 +272,7 @@ function registerGifHandlers(): void {
     startTime?: number;
     duration?: number;
     loop: number;
+    speed?: number;
   }>('video:convertToGif', 'gif', 'gif', (opts, onProgress) => convertToGif({ ...opts, onProgress }));
 
   wrapOperation<{
@@ -284,6 +285,7 @@ function registerGifHandlers(): void {
       startTime?: number;
       duration?: number;
       loop: number;
+      speed?: number;
     }[];
   }>('video:batchConvertToGif', 'gif', 'gif', (opts, onProgress) => batchConvertToGif({ ...opts, onProgress }));
 }

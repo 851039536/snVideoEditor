@@ -13,6 +13,8 @@ export interface GifOptions {
   startTime?: number
   duration?: number
   loop: number
+  /** 播放速度倍率（>1 加速，<1 减速，默认 1） */
+  speed?: number
   onProgress?: ProgressCallback
 }
 
@@ -26,6 +28,7 @@ export interface BatchGifOptions {
     startTime?: number
     duration?: number
     loop: number
+    speed?: number
   }[]
   onProgress?: ProgressCallback
 }
@@ -49,6 +52,9 @@ export function convertToGif(opts: GifOptions): Promise<boolean> {
     }
     const q = qualityMap[opts.quality]
     const widthArg = opts.width > 0 ? `${opts.width}:-1` : '-1:-1'
+    // 变速倍率（GIF 无音频，仅需视频 setpts）；输出时长 = 输入时长 / speed
+    const speed = opts.speed && opts.speed > 0 ? opts.speed : 1
+    const speedFilter = speed !== 1 ? `setpts=PTS/${speed},` : ''
 
     const palettePath = path.join(path.dirname(opts.output), `_gif_palette_${Date.now()}.png`)
 
@@ -67,11 +73,11 @@ export function convertToGif(opts: GifOptions): Promise<boolean> {
       })
     }
 
-    // Pass 1: Palette generation
+    // Pass 1: Palette generation（setpts 先于 fps，保证帧采样基于变速后时间轴）
     const paletteArgs = [
       ...trimArgs,
       '-i', opts.input,
-      '-vf', `fps=${opts.fps},scale=${widthArg}:flags=lanczos,palettegen=stats_mode=${q.statsMode}`,
+      '-vf', `${speedFilter}fps=${opts.fps},scale=${widthArg}:flags=lanczos,palettegen=stats_mode=${q.statsMode}`,
       '-y',
       palettePath
     ]
@@ -104,7 +110,7 @@ export function convertToGif(opts: GifOptions): Promise<boolean> {
         ...trimArgs,
         '-i', opts.input,
         '-i', palettePath,
-        '-lavfi', `fps=${opts.fps},scale=${widthArg}:flags=lanczos [x]; [x][1:v] paletteuse=dither=${q.dither}`,
+        '-lavfi', `${speedFilter}fps=${opts.fps},scale=${widthArg}:flags=lanczos [x]; [x][1:v] paletteuse=dither=${q.dither}`,
         '-loop', String(opts.loop),
         '-y',
         opts.output
@@ -129,7 +135,8 @@ export function convertToGif(opts: GifOptions): Promise<boolean> {
         const parsed = parseProgressLine(chunk)
         if (parsed && gifMeta && opts.onProgress) {
           const current = timeToSeconds(parsed.time)
-          const total = gifMeta.duration
+          // 变速后输出时间轴总长 = 输入段时长 / speed
+          const total = gifMeta.duration / speed
           const pass2Percent = Math.min(Math.round((current / total) * 100), 99)
           const overallPercent = 30 + Math.round((pass2Percent / 100) * 65)
           opts.onProgress({
