@@ -5,7 +5,6 @@
 // Local color tokens for alpha compositing
 $_gif-warning: #D29922;         // --color-warning
 $_gif-warning-light: #F0A050;   // lighter tint for gradient start
-$_gif-playhead: #FF6B6B;        // --color-playhead
 
 /* Slider color theme (structure from global slider-base) */
 .slider {
@@ -17,24 +16,28 @@ $_gif-playhead: #FF6B6B;        // --color-playhead
   box-shadow: 0 0 8px rgba($_gif-warning-light, 0.4);
 }
 
-/* ---- Timeline 主题覆盖（结构见 _timeline.scss） ---- */
+/* ---- Timeline 主题（与 SplitMerge 裁剪时间轴完全一致） ---- */
 .timeline-track {
-  height: 40px;
+  height: 48px;
   border-radius: var(--radius-md, 8px);
 }
 
 .timeline-selected {
-  background: linear-gradient(90deg, rgba($_gif-warning-light, 0.3), rgba($_gif-warning, 0.35));
-  border-left: 2px solid var(--color-warning);
+  background: linear-gradient(90deg, rgba(91, 141, 239, 0.3), rgba(167, 139, 250, 0.35));
+  border-left: 2px solid hsl(var(--primary));
   border-right: 2px solid var(--color-accent-light);
 }
 
 .timeline-playhead {
-  outline: 1px solid rgba($_gif-playhead, 0.3);
+  outline: 1px solid rgba(255, 107, 107, 0.3);
+}
+
+.timeline-playhead.dragging {
+  transition: none;
 }
 
 .trim-handle {
-  background: var(--color-warning);
+  background: hsl(var(--primary));
 }
 
 /* Quality preset buttons */
@@ -49,6 +52,6 @@ $_gif-playhead: #FF6B6B;        // --color-playhead
   }
 
   .timeline-track {
-    height: 32px;
+    height: 40px;
   }
 }

@@ -1,7 +1,7 @@
-<!-- GIF 截取预览卡片：播放器与截取时间轴 -->
+<!-- GIF 截取预览卡片：播放器与截取时间轴（交互复刻 SplitMerge 裁剪时间轴） -->
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { Image, Clock, Play, Pause } from 'lucide-vue-next'
+import { Image, Play, Pause, SkipBack, SkipForward, ChevronsLeft, ChevronsRight } from 'lucide-vue-next'
 import { useVideoPlayer } from '@/composables/useVideoPlayer'
 import { useTrimTimeline } from '@/composables/useTrimTimeline'
 import { secondsToHMS } from '@/utils/time'
@@ -10,6 +10,8 @@ import { getFileName, toFileUrl } from '@/utils/format'
 import type { FileEntry } from '@/types/file'
 
 const props = defineProps<{ file: FileEntry }>()
+// 空格/回车快捷键触发转换，由父视图执行
+const emit = defineEmits<{ convert: [] }>()
 
 // 父组件保留截取状态所有权，供转换与体积估算使用
 const enableTrim = defineModel<boolean>('enableTrim', { default: false })
@@ -85,14 +87,76 @@ watch(enableTrim, (enabled) => {
   seekVideoPlayer(enabled ? trimStartSec.value : 0)
 })
 
+// ---- 步进 / 手柄定位 / 快捷键（复刻 SplitMerge） ----
+const stepSeconds = ref(10)
+// 快捷键模式：开启后 A/D 定位手柄、S 播放/暂停、空格或回车开始转换
+const keyboardShortcutsEnabled = ref(false)
+
+function stepBackward(): void {
+  const t = clamp(currentTime.value - stepSeconds.value, 0, maxDuration.value)
+  seekVideoPlayer(t)
+}
+
+function stepForward(): void {
+  const t = clamp(currentTime.value + stepSeconds.value, 0, maxDuration.value)
+  seekVideoPlayer(t)
+}
+
+// 将前后手柄定位到当前播放位置
+function snapStartHere(): void {
+  trimStartSec.value = clamp(currentTime.value, 0, trimEndSec.value - MIN_TRIM_GAP)
+}
+
+function snapEndHere(): void {
+  trimEndSec.value = clamp(currentTime.value, trimStartSec.value + MIN_TRIM_GAP, maxDuration.value)
+}
+
+/** 键盘左右方向键步进前进/后退（跳过输入类元素聚焦场景，避免误操作） */
+function onKeydown(e: KeyboardEvent): void {
+  const target = e.target as HTMLElement | null
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+    return
+  }
+  if (!videoPlayer.value) {
+    return
+  }
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    stepBackward()
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    stepForward()
+  }
+  // 快捷键模式：A/D 将手柄定位到当前播放位置，S 播放/暂停，空格/回车触发转换
+  if (keyboardShortcutsEnabled.value) {
+    const key = e.key.toLowerCase()
+    if (key === 'a') {
+      e.preventDefault()
+      snapStartHere()
+    } else if (key === 'd') {
+      e.preventDefault()
+      snapEndHere()
+    } else if (key === 's') {
+      e.preventDefault()
+      togglePlay()
+    } else if (e.key === ' ' || e.key === 'Enter') {
+      if (trimDuration.value <= 0) { return }
+      e.preventDefault()
+      emit('convert')
+    }
+  }
+}
+
 onMounted(() => {
   document.addEventListener('pointermove', onGlobalPointerMove)
   document.addEventListener('pointerup', onGlobalPointerUp)
+  document.addEventListener('keydown', onKeydown)
 })
 
 onUnmounted(() => {
   document.removeEventListener('pointermove', onGlobalPointerMove)
   document.removeEventListener('pointerup', onGlobalPointerUp)
+  document.removeEventListener('keydown', onKeydown)
 })
 </script>
 
@@ -137,21 +201,10 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <!-- 片段截取 — 时间轴 + 精确输入 -->
-  <div class="glass-card">
+  <!-- 片段截取 — 时间轴与工具栏 -->
+  <div class="glass-card" style="overflow: visible;">
     <div class="flex items-center justify-between mb-3">
-      <div class="flex items-center gap-2">
-        <Clock :size="16" class="text-text-secondary" />
-        <h3 class="text-sm font-semibold text-text-primary">截取片段</h3>
-        <label class="flex items-center gap-1 cursor-pointer select-none" title="开启时拖动时间轴会暂停播放；关闭时拖动时视频继续播放">
-          <input
-            type="checkbox"
-            v-model="pauseOnScrub"
-            class="w-3 h-3 accent-blue-500 cursor-pointer"
-          />
-          <span class="text-xs text-text-secondary">拖动时暂停</span>
-        </label>
-      </div>
+      <h3 class="text-sm font-semibold text-text-primary">截取片段</h3>
       <button
         @click="enableTrim = !enableTrim"
         class="text-xs px-3 py-1 rounded-md border transition-colors font-medium"
@@ -167,59 +220,125 @@ onUnmounted(() => {
       拖拽下方摇杆选取范围，点击「启用截取」按钮启用截取
     </p>
 
-    <!-- 时间轴与拖拽手柄 -->
-    <div class="mb-3">
-      <div
-        ref="timelineRef"
-        class="timeline-track"
-        @pointerdown="startScrub"
-      >
-        <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
-        <div class="timeline-selected" :style="{ width: (endPercent - startPercent) + '%' }">
-          <div class="timeline-playhead" :style="{ left: playheadInTrim + '%' }" />
-          <div
-            class="trim-handle trim-handle-start"
-            @pointerdown="startHandleDrag('start', $event)"
-            @wheel.prevent="onHandleWheel('start', $event)"
+    <!-- 工具栏：拖动暂停 / 快捷键 / 步进 / 手柄定位 / 时间输入 -->
+    <div class="flex items-center justify-between mb-3 gap-2">
+      <div class="flex items-center gap-2 flex-wrap">
+        <label class="flex items-center gap-1 cursor-pointer select-none" title="开启时拖动时间轴会暂停播放；关闭时拖动时视频继续播放">
+          <input
+            type="checkbox"
+            v-model="pauseOnScrub"
+            class="w-3 h-3 accent-blue-500 cursor-pointer"
           />
-          <div
-            class="trim-handle trim-handle-end"
-            @pointerdown="startHandleDrag('end', $event)"
-            @wheel.prevent="onHandleWheel('end', $event)"
+          <span class="text-xs text-text-secondary">拖动时暂停</span>
+        </label>
+        <label
+          class="flex items-center gap-1 cursor-pointer select-none"
+          title="开启后按 A/D 将前/后手柄定位到当前播放位置，按 S 播放/暂停，按空格或回车开始转换"
+        >
+          <input
+            type="checkbox"
+            v-model="keyboardShortcutsEnabled"
+            class="w-3 h-3 accent-blue-500 cursor-pointer"
           />
+          <span class="text-xs text-text-secondary">快捷键模式</span>
+        </label>
+        <!-- 步进前进/后退 -->
+        <div class="flex items-center gap-1">
+          <button
+            @click="stepBackward"
+            class="p-1 rounded text-text-secondary"
+            title="后退"
+          >
+            <SkipBack :size="14" />
+          </button>
+          <select
+            v-model.number="stepSeconds"
+            class="px-1 py-0.5 text-xs font-mono bg-bg-tertiary border border-border rounded text-text-primary outline-none cursor-pointer appearance-none text-center"
+            title="步进秒数"
+          >
+            <option :value="1">1s</option>
+            <option :value="2">2s</option>
+            <option :value="5">5s</option>
+            <option :value="10">10s</option>
+            <option :value="15">15s</option>
+            <option :value="20">20s</option>
+          </select>
+          <button
+            @click="stepForward"
+            class="p-1 rounded text-text-secondary"
+            title="前进"
+          >
+            <SkipForward :size="14" />
+          </button>
+          <!-- 手柄定位 -->
+          <span class="w-px h-4 bg-border mx-0.5" />
+          <button
+            @click="snapStartHere"
+            class="p-1 rounded text-accent-blue"
+            title="前手柄定位到此"
+          >
+            <ChevronsLeft :size="14" />
+          </button>
+          <span class="text-text-muted text-xs font-mono leading-none">|</span>
+          <button
+            @click="snapEndHere"
+            class="p-1 rounded text-accent-purple"
+            title="后手柄定位到此"
+          >
+            <ChevronsRight :size="14" />
+          </button>
         </div>
-        <div class="timeline-dimmed-r" :style="{ width: (100 - endPercent) + '%' }" />
+        <!-- 微调时间输入 -->
+        <span class="w-px h-4 bg-border mx-0.5" />
+        <div class="flex items-center gap-1">
+          <span class="text-xs text-text-muted">开始</span>
+          <input v-model="startHour" class="time-input" maxlength="2" />
+          <span class="text-text-muted text-xs">:</span>
+          <input v-model="startMin" class="time-input" maxlength="2" />
+          <span class="text-text-muted text-xs">:</span>
+          <input v-model="startSec" class="time-input" maxlength="2" />
+          <span class="text-text-muted text-sm">→</span>
+          <span class="text-xs text-text-muted">结束</span>
+          <input v-model="endHour" class="time-input" maxlength="2" />
+          <span class="text-text-muted text-xs">:</span>
+          <input v-model="endMin" class="time-input" maxlength="2" />
+          <span class="text-text-muted text-xs">:</span>
+          <input v-model="endSec" class="time-input" maxlength="2" />
+        </div>
       </div>
-      <div class="flex justify-between mt-1.5 px-1">
-        <span class="text-xs font-mono text-accent-blue">{{ secondsToHMS(trimStartSec) }}</span>
-        <span class="text-xs font-mono text-text-muted">{{ secondsToHMS(maxDuration) }}</span>
-        <span class="text-xs font-mono text-accent-purple">{{ secondsToHMS(trimEndSec) }}</span>
-      </div>
+      <span class="text-xs text-text-secondary shrink-0">
+        选中片段时长：
+        <span class="text-sm font-mono text-accent-blue font-semibold">{{ trimDurationStr }}</span>
+      </span>
     </div>
 
-    <!-- HH:MM:SS 精确调整 -->
-    <div class="flex items-center justify-center gap-2 flex-wrap">
-      <div class="flex items-center gap-1">
-        <span class="text-xs text-text-muted w-8">起始</span>
-        <input v-model="startHour" class="time-input" maxlength="2" />
-        <span class="text-text-muted text-xs">:</span>
-        <input v-model="startMin" class="time-input" maxlength="2" />
-        <span class="text-text-muted text-xs">:</span>
-        <input v-model="startSec" class="time-input" maxlength="2" />
+    <!-- 时间轴轨道 -->
+    <div
+      ref="timelineRef"
+      class="timeline-track"
+      @pointerdown="startScrub"
+    >
+      <div class="timeline-dimmed-l" :style="{ width: startPercent + '%' }" />
+      <div class="timeline-selected" :style="{ width: (endPercent - startPercent) + '%' }">
+        <div class="timeline-playhead" :style="{ left: playheadInTrim + '%' }" />
+        <div
+          class="trim-handle trim-handle-start"
+          @pointerdown="startHandleDrag('start', $event)"
+          @wheel.prevent="onHandleWheel('start', $event)"
+        />
+        <div
+          class="trim-handle trim-handle-end"
+          @pointerdown="startHandleDrag('end', $event)"
+          @wheel.prevent="onHandleWheel('end', $event)"
+        />
       </div>
-      <span class="text-text-muted text-sm">→</span>
-      <div class="flex items-center gap-1">
-        <span class="text-xs text-text-muted w-8">结束</span>
-        <input v-model="endHour" class="time-input" maxlength="2" />
-        <span class="text-text-muted text-xs">:</span>
-        <input v-model="endMin" class="time-input" maxlength="2" />
-        <span class="text-text-muted text-xs">:</span>
-        <input v-model="endSec" class="time-input" maxlength="2" />
-      </div>
+      <div class="timeline-dimmed-r" :style="{ width: (100 - endPercent) + '%' }" />
     </div>
-    <p class="text-center text-xs text-warning mt-2">
-      截取时长: <span class="font-mono font-semibold">{{ trimDurationStr }}</span>
-    </p>
+    <div class="flex justify-between mt-1.5 px-1">
+      <span class="text-xs font-mono text-accent-blue">{{ secondsToHMS(trimStartSec) }}</span>
+      <span class="text-xs font-mono text-text-muted">{{ secondsToHMS(maxDuration) }}</span>
+      <span class="text-xs font-mono text-accent-purple">{{ secondsToHMS(trimEndSec) }}</span>
+    </div>
   </div>
 </template>
 

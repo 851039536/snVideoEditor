@@ -81,7 +81,7 @@ function estimateOutputSize(entry: FileEntry): string {
 
 async function startConvert(): Promise<void> {
   errorMsg.value = ''
-  if (files.value.length === 0) { return }
+  if (files.value.length === 0 || progressStore.isProcessing) { return }
 
   for (const entry of files.value) {
     if (!entry.outputPath) {
@@ -171,6 +171,7 @@ onUnmounted(() => {
           v-model:trim-start="trimStartSec"
           v-model:trim-end="trimEndSec"
           v-model:max-duration="maxDuration"
+          @convert="startConvert"
         />
 
         <!-- 文件列表 -->
