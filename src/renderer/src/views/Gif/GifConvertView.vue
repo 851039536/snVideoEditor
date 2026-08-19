@@ -6,6 +6,7 @@ import FileDropZone from '@/components/FileDropZone.vue'
 import ProgressPanel from '@/components/ProgressPanel.vue'
 import GifTrimCard from './GifTrimCard.vue'
 import { useProgressStore } from '@/stores/progress'
+import { useSettingsStore } from '@/stores/settings'
 import { formatDuration } from '@/utils/time'
 import { getFileName, getDirName } from '@/utils/format'
 import { useFileList } from '@/composables/useFileList'
@@ -13,7 +14,11 @@ import type { FileEntry } from '@/types/file'
 import type { QualityPreset, WidthOption } from './types'
 
 const progressStore = useProgressStore()
+const settingsStore = useSettingsStore()
 const { files, addFiles, removeFile, selectOutputDir } = useFileList('.gif')
+
+// GIF 参数（质量/帧率/分辨率/循环/速度）经 settings store 持久化
+const gif = settingsStore.gifSettings
 
 // 质量预设
 const QUALITY_PRESETS: QualityPreset[] = [
@@ -21,11 +26,7 @@ const QUALITY_PRESETS: QualityPreset[] = [
   { value: 'medium', label: '中等质量', description: '画质与大小平衡' },
   { value: 'low', label: '低质量', description: '最小文件，快速生成' }
 ]
-const selectedQuality = ref<'high' | 'medium' | 'low'>('medium')
 
-// 参数配置
-const fps = ref(10)
-const selectedWidth = ref('480')
 const WIDTH_OPTIONS: WidthOption[] = [
   { label: '原始尺寸', value: '0' },
   { label: '320px', value: '320' },
@@ -34,8 +35,6 @@ const WIDTH_OPTIONS: WidthOption[] = [
   { label: '800px', value: '800' }
 ]
 
-// 播放速度（>1 加速，<1 减速）
-const speed = ref(1)
 const SPEED_OPTIONS = [
   { label: '0.5x', val: 0.5 },
   { label: '0.75x', val: 0.75 },
@@ -63,13 +62,10 @@ const LOOP_OPTIONS = [
   { label: '5次', val: 5 }
 ] as const
 
-// 循环次数
-const loopCount = ref(0)
-
 const errorMsg = ref('')
 
 const computedWidth = computed((): number => {
-  return parseInt(selectedWidth.value)
+  return parseInt(gif.width)
 })
 
 const canStart = computed((): boolean => {
@@ -85,8 +81,8 @@ function estimateOutputSize(entry: FileEntry): string {
     : Math.round(w * 9 / 16)
   const pixels = w * h
   // 变速后输出时长 = 输入时长 / speed，帧数随之变化
-  const frames = (duration / speed.value) * fps.value
-  const factor = QUALITY_SIZE_FACTORS[selectedQuality.value]
+  const frames = (duration / gif.speed) * gif.fps
+  const factor = QUALITY_SIZE_FACTORS[gif.quality]
   const estBytes = frames * pixels * factor * SIZE_ESTIMATE_FACTOR
   const estMB = estBytes / (1024 * 1024)
   if (estMB < 0.1) { return '< 0.1 MB' }
@@ -119,13 +115,13 @@ async function startConvert(): Promise<void> {
     const batchFiles = files.value.map((f) => ({
       input: f.path,
       output: f.outputPath,
-      fps: fps.value,
+      fps: gif.fps,
       width: computedWidth.value,
-      quality: selectedQuality.value,
+      quality: gif.quality,
       startTime,
       duration,
-      loop: loopCount.value,
-      speed: speed.value
+      loop: gif.loop,
+      speed: gif.speed
     }))
 
     let failedCount: number
@@ -186,7 +182,7 @@ onUnmounted(() => {
           v-model:trim-start="trimStartSec"
           v-model:trim-end="trimEndSec"
           v-model:max-duration="maxDuration"
-          :speed="speed"
+          :speed="gif.speed"
           @convert="startConvert"
         />
 
@@ -244,9 +240,9 @@ onUnmounted(() => {
             <button
               v-for="p in QUALITY_PRESETS"
               :key="p.value"
-              @click="selectedQuality = p.value"
+              @click="gif.quality = p.value"
               class="quality-preset-btn p-3 rounded-lg text-left transition-all duration-200 border"
-              :class="selectedQuality === p.value
+              :class="gif.quality === p.value
                 ? 'bg-warning/10 border-warning/50'
                 : 'bg-bg-tertiary/50 border-transparent'"
             >
@@ -258,9 +254,9 @@ onUnmounted(() => {
 
         <!-- 帧率滑块 -->
         <div class="glass-card">
-          <h3 class="section-title">帧率: {{ fps }} FPS</h3>
+          <h3 class="section-title">帧率: {{ gif.fps }} FPS</h3>
           <input
-            v-model.number="fps"
+            v-model.number="gif.fps"
             type="range"
             min="5"
             max="30"
@@ -284,22 +280,22 @@ onUnmounted(() => {
             <button
               v-for="opt in SPEED_OPTIONS"
               :key="opt.val"
-              @click="speed = opt.val"
+              @click="gif.speed = opt.val"
               class="flex-1 min-w-[64px] py-2 rounded-lg text-sm transition-all border font-mono"
-              :class="speed === opt.val
+              :class="gif.speed === opt.val
                 ? 'bg-warning/10 border-warning/50 text-text-primary'
                 : 'bg-bg-tertiary/50 border-transparent text-text-secondary'"
             >
               {{ opt.label }}
             </button>
           </div>
-          <p class="text-xs text-text-muted mt-2">预览播放与输出 GIF 均按所选速度{{ speed > 1 ? '加速' : speed < 1 ? '减速' : '正常' }}播放</p>
+          <p class="text-xs text-text-muted mt-2">预览播放与输出 GIF 均按所选速度{{ gif.speed > 1 ? '加速' : gif.speed < 1 ? '减速' : '正常' }}播放</p>
         </div>
 
         <!-- 宽度选择 -->
         <div class="glass-card">
           <h3 class="section-title">输出分辨率</h3>
-          <select v-model="selectedWidth" class="select-input w-full">
+          <select v-model="gif.width" class="select-input w-full">
             <option
               v-for="opt in WIDTH_OPTIONS"
               :key="opt.value"
@@ -317,9 +313,9 @@ onUnmounted(() => {
             <button
               v-for="opt in LOOP_OPTIONS"
               :key="opt.val"
-              @click="loopCount = opt.val"
+              @click="gif.loop = opt.val"
               class="flex-1 py-2 rounded-lg text-sm transition-all border"
-              :class="loopCount === opt.val
+              :class="gif.loop === opt.val
                 ? 'bg-warning/10 border-warning/50 text-text-primary'
                 : 'bg-bg-tertiary/50 border-transparent text-text-secondary'"
             >

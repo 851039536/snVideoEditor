@@ -1,4 +1,4 @@
-// 应用设置 store：主题、压缩预设、播放器数据、输出目录、侧栏状态的 localStorage 持久化
+// 应用设置 store：主题、压缩预设、GIF 参数、播放器数据、输出目录、侧栏状态的 localStorage 持久化
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import type { PersistedPlayerData } from '@/views/Player/types'
@@ -6,6 +6,7 @@ import { DEFAULT_PLAYER_DATA } from '@/views/Player/types'
 
 const THEME_KEY = 'snve-theme'
 const COMPRESS_PRESET_KEY = 'snve-compress-preset'
+const GIF_SETTINGS_KEY = 'snve-gif-settings'
 const PLAYER_DATA_KEY = 'snve-player-data'
 const OUTPUT_DIR_KEY = 'snve-output-dir'
 const SIDEBAR_COLLAPSED_KEY = 'snve-sidebar-collapsed'
@@ -30,6 +31,22 @@ const DEFAULT_COMPRESS_PRESET: CompressPreset = {
   preset: 'fast',
   nvencPreset: 'p4',
   twoPass: false
+}
+
+export interface GifSettings {
+  quality: 'high' | 'medium' | 'low'
+  fps: number
+  width: string
+  loop: number
+  speed: number
+}
+
+const DEFAULT_GIF_SETTINGS: GifSettings = {
+  quality: 'medium',
+  fps: 10,
+  width: '480',
+  loop: 0,
+  speed: 1
 }
 
 function loadTheme(): 'dark' | 'light' {
@@ -62,6 +79,30 @@ function loadPlayerData(): PersistedPlayerData {
   return { ...DEFAULT_PLAYER_DATA }
 }
 
+function loadGifSettings(): GifSettings {
+  try {
+    const saved = localStorage.getItem(GIF_SETTINGS_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      const merged: GifSettings = { ...DEFAULT_GIF_SETTINGS, ...parsed }
+      // 字段合法性校验，避免脏数据破坏页面
+      if (merged.quality !== 'high' && merged.quality !== 'medium' && merged.quality !== 'low') {
+        merged.quality = 'medium'
+      }
+      if (typeof merged.fps !== 'number' || !Number.isFinite(merged.fps)) {
+        merged.fps = 10
+      } else {
+        merged.fps = Math.min(Math.max(Math.round(merged.fps), 5), 30)
+      }
+      if (typeof merged.width !== 'string') { merged.width = '480' }
+      if (typeof merged.loop !== 'number' || merged.loop < 0) { merged.loop = 0 }
+      if (typeof merged.speed !== 'number' || merged.speed <= 0) { merged.speed = 1 }
+      return merged
+    }
+  } catch { /* ignore */ }
+  return { ...DEFAULT_GIF_SETTINGS }
+}
+
 function loadOutputDir(): string {
   try {
     return localStorage.getItem(OUTPUT_DIR_KEY) || ''
@@ -84,6 +125,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const outputDirectory = ref<string>(loadOutputDir())
   const theme = ref<'dark' | 'light'>(loadTheme())
   const compressPreset = ref<CompressPreset>(loadCompressPreset())
+  const gifSettings = ref<GifSettings>(loadGifSettings())
   const playerData = ref<PersistedPlayerData>(loadPlayerData())
   const sidebarCollapsed = ref<boolean>(loadSidebarCollapsed())
 
@@ -123,6 +165,11 @@ export const useSettingsStore = defineStore('settings', () => {
     try { localStorage.setItem(COMPRESS_PRESET_KEY, JSON.stringify(val)) } catch { /* ignore */ }
   }, { deep: true })
 
+  // 持久化 GIF 参数
+  watch(gifSettings, (val) => {
+    try { localStorage.setItem(GIF_SETTINGS_KEY, JSON.stringify(val)) } catch { /* ignore */ }
+  }, { deep: true })
+
   // 持久化播放器数据
   watch(playerData, (val) => {
     try { localStorage.setItem(PLAYER_DATA_KEY, JSON.stringify(val)) } catch { /* ignore */ }
@@ -137,6 +184,7 @@ export const useSettingsStore = defineStore('settings', () => {
     outputDirectory,
     theme,
     compressPreset,
+    gifSettings,
     playerData,
     sidebarCollapsed,
     setOutputDirectory,
