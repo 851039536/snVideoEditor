@@ -19,8 +19,7 @@ const trimStartSec = defineModel<number>('trimStart', { default: 0 })
 const trimEndSec = defineModel<number>('trimEnd', { default: 0 })
 const maxDuration = defineModel<number>('maxDuration', { default: 0 })
 
-// 默认截取时长（秒）
-const DEFAULT_TRIM_DURATION = 5
+// 默认手柄展开到全长，与 SplitMerge 裁剪时间轴一致
 const MIN_TRIM_GAP = 0.1
 
 const videoSrc = computed((): string => toFileUrl(props.file.path))
@@ -69,17 +68,17 @@ const playheadInTrim = computed((): number => {
   return clamp(((currentTime.value / maxDuration.value) * 100 - startPercent.value) / range * 100, 0, 100)
 })
 
-// 首个文件元数据加载后自动设置截取终点
+// 文件元数据加载后重置手柄为全长（与 SplitMerge 加载视频行为一致）
 watch(() => props.file.meta, (meta) => {
   if (!meta || meta.duration <= 0) {
     maxDuration.value = 0
     return
   }
   maxDuration.value = meta.duration
-  // 仅在用户未手动设置时自动调整终点
-  if (trimDuration.value <= 0 || trimEndSec.value > meta.duration) {
-    trimEndSec.value = Math.min(DEFAULT_TRIM_DURATION, meta.duration)
-  }
+  trimStartSec.value = 0
+  trimEndSec.value = meta.duration
+  currentTime.value = 0
+  seekVideoPlayer(0)
 }, { immediate: true })
 
 // 切换截取开关时重置播放位置

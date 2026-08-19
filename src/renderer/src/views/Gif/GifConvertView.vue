@@ -37,7 +37,7 @@ const WIDTH_OPTIONS: WidthOption[] = [
 // 片段截取状态（时间轴交互在 GifTrimCard 内，状态所有权归本视图）
 const enableTrim = ref(false)
 const trimStartSec = ref(0)
-const trimEndSec = ref(5)             // 默认截取时长（秒）
+const trimEndSec = ref(0)             // 元数据加载后展开到全长
 const maxDuration = ref(0)
 
 const FALLBACK_WIDTH = 640            // 元数据缺失时的回退宽度
